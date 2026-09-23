@@ -3,8 +3,11 @@ import type {
   SimulationInput,
   SimulationResult,
   SimulationBreakdown,
+  RevenueShareConfig,
+  CourseCommissionInputs,
+  ClassCommissionMode,
 } from '../types/compensation';
-import { calcTotalBaseSalary, getCommissionRate } from './salary';
+import { calcTotalBaseSalary, getCommissionRate, getClassCommission } from './salary';
 
 const isStoreManager = (p: PositionConfig) => p.title.includes('店长');
 const isManager = (p: PositionConfig) => p.title.includes('经理');
@@ -31,9 +34,64 @@ function findManagerSource(
   );
 }
 
+function findCoursePosition(
+  keyword: string,
+  positions: PositionConfig[]
+): PositionConfig | undefined {
+  return positions.find(
+    (p) =>
+      p.title.includes(keyword) &&
+      !p.title.includes('经理')
+  );
+}
+
+/** 计算课程课提明细 */
+export function calcCourseBreakdown(
+  courses: CourseCommissionInputs | undefined,
+  positions: PositionConfig[]
+): SimulationResult['courseBreakdown'] {
+  if (!courses) return [];
+  return Object.values(courses).map((c) => {
+    const position = findCoursePosition(c.positionKeyword, positions);
+    const headcount = position?.headcount ?? 0;
+
+    const info: { mode: ClassCommissionMode; value: number } = position
+      ? getClassCommission(position, positions)
+      : { mode: 'percent', value: 0 };
+
+    const commission =
+      info.mode === 'percent'
+        ? c.averagePrice * c.classCount * info.value
+        : c.classCount * info.value;
+
+    return {
+      courseName: c.courseName,
+      averagePrice: c.averagePrice,
+      classCount: c.classCount,
+      headcount,
+      mode: info.mode,
+      value: info.value,
+      commission,
+    };
+  });
+}
+
+/** 课提总额 */
+export function calcTotalClassCommission(
+  courses: CourseCommissionInputs | undefined,
+  positions: PositionConfig[]
+): number {
+  return calcCourseBreakdown(courses, positions).reduce(
+    (s, c) => s + c.commission,
+    0
+  );
+}
+
 export function simulate(
   positions: PositionConfig[],
-  input: SimulationInput
+  input: SimulationInput,
+  shareConfig?: RevenueShareConfig,
+  courseCommissions?: CourseCommissionInputs
 ): SimulationResult {
   const fixedCost = input.propertyFee + input.electricityFee + input.rent;
 
@@ -44,21 +102,25 @@ export function simulate(
   );
   const fixedPositions = positions.filter((p) => !hasCommission(p));
 
-  const weightBase = shareablePositions.map((p) => ({
-    position: p,
-    base: calcTotalBaseSalary(p, positions),
-  }));
+  const totalShare = shareablePositions.reduce(
+    (s, p) => s + (shareConfig?.[p.title] || 0),
+    0
+  );
+  const totalHead = shareablePositions.reduce((s, p) => s + p.headcount, 0);
 
-  const totalWeight =
-    weightBase.reduce((s, x) => s + x.base, 0) ||
-    shareablePositions.reduce((s, p) => s + p.headcount, 0);
-
-  const weightOf = (p: PositionConfig, base: number): number => {
-    if (totalWeight === 0) return 0;
-    const totalBase = weightBase.reduce((s, x) => s + x.base, 0);
-    if (totalBase > 0) return base / totalWeight;
-    return p.headcount / totalWeight;
+  const weightOf = (p: PositionConfig): number => {
+    const raw = shareConfig?.[p.title];
+    if (raw !== undefined && totalShare > 0) {
+      return raw / totalShare;
+    }
+    return totalHead > 0 ? p.headcount / totalHead : 0;
   };
+
+  const courseBreakdown = calcCourseBreakdown(courseCommissions, positions);
+  const totalClassCommission = courseBreakdown.reduce(
+    (s, c) => s + c.commission,
+    0
+  );
 
   const profitAt = (
     R: number
@@ -69,8 +131,8 @@ export function simulate(
     breakdown: SimulationBreakdown[];
   } => {
     // 1) 分摊职位
-    const allocated = weightBase.map(({ position, base }) => {
-      const weight = weightOf(position, base);
+    const allocated = shareablePositions.map((position) => {
+      const weight = weightOf(position);
       const allocatedRevenue = R * weight;
 
       const baseSalary = calcTotalBaseSalary(
@@ -160,28 +222,43 @@ export function simulate(
       ...fixedRows,
     ] as SimulationBreakdown[];
 
-    // 总底薪 = 所有职位之和
     const totalBase = breakdown.reduce((s, x) => s + x.baseSalary, 0);
-    // 总佣金 = 所有有佣金的职位
-    const totalCommission = breakdown.reduce((s, x) => s + x.commission, 0);
+    const positionCommission = breakdown.reduce(
+      (s, x) => s + x.commission,
+      0
+    );
+    const totalCommission = positionCommission + totalClassCommission;
+
     const profit = R - totalBase - totalCommission - fixedCost;
     return { profit, totalBase, commission: totalCommission, breakdown };
   };
 
-  if (weightBase.reduce((s, x) => s + x.base, 0) + fixedCost <= 0) {
+  if (
+    positions.reduce((s, p) => s + calcTotalBaseSalary(p, positions), 0) +
+      fixedCost <=
+    0
+  ) {
     return {
       fixedCost,
       totalBaseSalary: 0,
       requiredRevenue: 0,
-      totalCommission: 0,
+      totalCommission: totalClassCommission,
+      totalClassCommission,
       breakdown: [],
+      courseBreakdown,
       feasible: true,
       iterations: 0,
     };
   }
 
   let lo = 0;
-  let hi = (weightBase.reduce((s, x) => s + x.base, 0) + fixedCost) * 100;
+  let hi =
+    (positions.reduce(
+      (s, p) => s + calcTotalBaseSalary(p, positions),
+      0
+    ) +
+      fixedCost) *
+    100;
   let iterations = 0;
   const MAX_ITER = 60;
   const EPSILON = 1;
@@ -206,7 +283,9 @@ export function simulate(
     totalBaseSalary: final.totalBase,
     requiredRevenue: hi,
     totalCommission: final.commission,
+    totalClassCommission,
     breakdown: final.breakdown,
+    courseBreakdown,
     feasible: final.profit >= -EPSILON,
     iterations,
   };

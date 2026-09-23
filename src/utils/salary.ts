@@ -5,6 +5,11 @@ function sortByThreshold<T extends { threshold: number }>(tiers: T[]): T[] {
   return [...tiers].sort((a, b) => a.threshold - b.threshold);
 }
 
+/**
+ * 找到命中的阶梯
+ * - 严格大于：业绩正好等于门槛时，命中更低一档
+ * - 初始值取第一档兜底（业绩 < 第一档门槛时也返回第一档）
+ */
 function findHitTier<T extends { threshold: number }>(
   tiers: T[],
   performance: number
@@ -13,7 +18,7 @@ function findHitTier<T extends { threshold: number }>(
   const sorted = sortByThreshold(tiers);
   let hit: T = sorted[0];
   for (const t of sorted) {
-    if (performance >= t.threshold) hit = t;
+    if (performance > t.threshold) hit = t;
     else break;
   }
   return hit;
@@ -39,6 +44,11 @@ export function calcBaseSalary(
   return hit ? hit.amount * position.headcount : 0;
 }
 
+/**
+ * 泳教性别底薪
+ * - 命中档有 base（统一底薪）→ 用 base
+ * - 否则用【男教练】底薪（不再男女平均）
+ */
 export function calcGenderBaseSalary(
   position: PositionConfig,
   allPositions: PositionConfig[],
@@ -62,7 +72,8 @@ export function calcGenderBaseSalary(
     return hit.base * position.headcount;
   }
 
-  return ((hit.male + hit.female) / 2) * position.headcount;
+  // 按男教练底薪 × 人数
+  return hit.male * position.headcount;
 }
 
 export function calcTotalBaseSalary(

@@ -83,6 +83,28 @@ export interface SimulationInput {
   rent: number;
 }
 
+export type RevenueShareConfig = Record<string, number>;
+
+/**
+ * 课提测算输入：只填均价和节数
+ * 人数、课提模式、课提值自动从对应职位佣金阶梯取
+ */
+export interface CourseCommissionInput {
+  /** 课程名 */
+  courseName: string;
+  /** 课程均价（元/节） */
+  averagePrice: number;
+  /** 消课数量（节） */
+  classCount: number;
+  /**
+   * 对应的职位标题关键字（用于自动匹配 headcount 和阶梯课提）
+   * 例如 "泳教" / "私教"
+   */
+  positionKeyword: string;
+}
+
+export type CourseCommissionInputs = Record<string, CourseCommissionInput>;
+
 export interface SimulationBreakdown {
   positionId: string;
   title: string;
@@ -91,6 +113,9 @@ export interface SimulationBreakdown {
   commissionRate: number;
   commission: number;
   allocatedRevenue: number;
+  type?: 'shareable' | 'manager' | 'store' | 'fixed';
+  /** 课提明细（仅课程行有） */
+  classCommission?: number;
 }
 
 export interface SimulationResult {
@@ -98,7 +123,18 @@ export interface SimulationResult {
   totalBaseSalary: number;
   requiredRevenue: number;
   totalCommission: number;
+  totalClassCommission: number;
   breakdown: SimulationBreakdown[];
+  /** 课程课提明细 */
+  courseBreakdown: {
+    courseName: string;
+    averagePrice: number;
+    classCount: number;
+    headcount: number;
+    mode: ClassCommissionMode;
+    value: number;
+    commission: number;
+  }[];
   feasible: boolean;
   iterations: number;
 }

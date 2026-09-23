@@ -59,7 +59,7 @@ const PositionCard: React.FC<PositionCardProps> = ({
     position.performanceSource && position.performanceSource !== 'self';
   const resolvedTarget = resolvePerformanceTarget(position, allPositions);
 
-  /* 佣金阶梯 */
+  /* ---- 佣金阶梯 ---- */
   const addCommissionTier = () =>
     onUpdate({
       commissionTiers: [
@@ -111,7 +111,7 @@ const PositionCard: React.FC<PositionCardProps> = ({
     }
   };
 
-  /* 普通底薪 */
+  /* ---- 普通底薪 ---- */
   const addBaseTier = () =>
     onUpdate({
       baseSalaryTiers: [
@@ -134,19 +134,20 @@ const PositionCard: React.FC<PositionCardProps> = ({
 
   const setBaseTiered = (v: boolean) => onUpdate({ baseTiered: v });
 
-  /* 泳教性别底薪 */
+  /* ---- 泳教性别底薪 ---- */
   const updateGenderTiers = (tiers: GenderSalaryTier[]) =>
     onUpdate({ genderSalaryTiers: tiers });
 
-  /* 课程课提 */
+  /* ---- 课程课提 ---- */
   const updateCourseCommissions = (courses: CourseCommission[]) =>
     onUpdate({ courseCommissions: courses });
 
   return (
     <div className="group bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-lg hover:border-gray-200 transition-all duration-300 overflow-hidden animate-fade-in-up">
-      {/* 卡片头 */}
+      {/* ============ 卡片头 ============ */}
       <div className="relative px-5 py-4 bg-gradient-to-r from-gray-50/80 via-white to-white border-b border-gray-100">
         <div className="flex flex-wrap items-center gap-3">
+          {/* 职位名 */}
           <div className="flex items-center gap-2">
             <span className="w-1 h-6 rounded-full bg-gradient-to-b from-blue-500 to-indigo-500" />
             <input
@@ -156,6 +157,7 @@ const PositionCard: React.FC<PositionCardProps> = ({
             />
           </div>
 
+          {/* 人数 */}
           <div className="flex items-center gap-1.5 text-sm bg-gray-50/80 border border-gray-100 rounded-lg px-2.5 py-1.5 hover:border-gray-200 transition">
             <Users className="w-3.5 h-3.5 text-gray-400" />
             <span className="text-gray-500 text-xs">人数</span>
@@ -169,50 +171,54 @@ const PositionCard: React.FC<PositionCardProps> = ({
             />
           </div>
 
-          <div
-            className={`flex items-center gap-1.5 text-sm rounded-lg px-2.5 py-1.5 transition ${
-              isLocked
-                ? 'bg-emerald-50/80 border border-emerald-200'
-                : 'bg-emerald-50/70 border border-emerald-100 focus-within:border-emerald-400 focus-within:ring-2 focus-within:ring-emerald-400/30'
-            }`}
-            title={
-              isLocked
-                ? '业绩目标自动计算（来自下级/关联职位）'
-                : '手动输入业绩目标'
-            }
-          >
-            {isLocked ? (
-              <Lock className="w-3.5 h-3.5 text-emerald-600" />
-            ) : (
-              <Target className="w-3.5 h-3.5 text-emerald-500" />
-            )}
-            <span className="text-emerald-600 text-xs font-medium whitespace-nowrap">
-              业绩目标
-            </span>
-            {isLocked ? (
-              <span className="w-28 text-sm font-bold text-emerald-800 tabular-nums">
-                ¥{resolvedTarget.toLocaleString()}
+          {/* 业绩目标 —— 仅含佣金职位显示 */}
+          {hasCommission && (
+            <div
+              className={`flex items-center gap-1.5 text-sm rounded-lg px-2.5 py-1.5 transition ${
+                isLocked
+                  ? 'bg-emerald-50/80 border border-emerald-200'
+                  : 'bg-emerald-50/70 border border-emerald-100 focus-within:border-emerald-400 focus-within:ring-2 focus-within:ring-emerald-400/30'
+              }`}
+              title={
+                isLocked
+                  ? '业绩目标自动计算（来自下级/关联职位）'
+                  : '手动输入业绩目标'
+              }
+            >
+              {isLocked ? (
+                <Lock className="w-3.5 h-3.5 text-emerald-600" />
+              ) : (
+                <Target className="w-3.5 h-3.5 text-emerald-500" />
+              )}
+              <span className="text-emerald-600 text-xs font-medium whitespace-nowrap">
+                业绩目标
               </span>
-            ) : (
-              <>
-                <input
-                  type="number"
-                  value={position.performanceTarget}
-                  onChange={(e) =>
-                    onUpdate({
-                      performanceTarget: parseInt(e.target.value) || 0,
-                    })
-                  }
-                  className="w-24 text-sm font-semibold text-emerald-800 bg-transparent focus:outline-none tabular-nums"
-                />
-                <span className="text-[11px] text-emerald-500">元</span>
-              </>
-            )}
-          </div>
+              {isLocked ? (
+                <span className="w-28 text-sm font-bold text-emerald-800 tabular-nums">
+                  ¥{resolvedTarget.toLocaleString()}
+                </span>
+              ) : (
+                <>
+                  <input
+                    type="number"
+                    value={position.performanceTarget}
+                    onChange={(e) =>
+                      onUpdate({
+                        performanceTarget: parseInt(e.target.value) || 0,
+                      })
+                    }
+                    className="w-24 text-sm font-semibold text-emerald-800 bg-transparent focus:outline-none tabular-nums"
+                  />
+                  <span className="text-[11px] text-emerald-500">元</span>
+                </>
+              )}
+            </div>
+          )}
 
+          {/* 总底薪 */}
           <div
             className="flex items-center gap-1.5 text-sm bg-blue-50/70 border border-blue-100 rounded-lg px-2.5 py-1.5"
-            title="根据业绩目标和底薪阶梯自动计算"
+            title="根据底薪阶梯自动计算"
           >
             <Wallet className="w-3.5 h-3.5 text-blue-500" />
             <span className="text-blue-600 text-xs font-medium">总底薪</span>
@@ -221,6 +227,7 @@ const PositionCard: React.FC<PositionCardProps> = ({
             </span>
           </div>
 
+          {/* 佣金开关 */}
           <button
             onClick={toggleHasCommission}
             className={`flex items-center gap-1.5 text-xs font-medium rounded-lg px-2.5 py-1.5 border transition ${
@@ -234,6 +241,7 @@ const PositionCard: React.FC<PositionCardProps> = ({
             {hasCommission ? '含佣金' : '无佣金'}
           </button>
 
+          {/* 备注 */}
           <div className="flex items-center gap-1.5 text-sm bg-amber-50/70 border border-amber-100 rounded-lg px-2.5 py-1.5 hover:border-amber-200 focus-within:border-amber-400 focus-within:ring-2 focus-within:ring-amber-400/30 transition">
             <StickyNote className="w-3.5 h-3.5 text-amber-500" />
             <span className="text-amber-600 text-xs font-medium whitespace-nowrap">
@@ -269,31 +277,55 @@ const PositionCard: React.FC<PositionCardProps> = ({
         </div>
       </div>
 
-      {/* 佣金阶梯 */}
-      {hasCommission && (
-        <div className="p-5">
-          <TierEditor
-            mode="commission"
-            commissionTiers={position.commissionTiers}
-            onAddCommission={addCommissionTier}
-            onUpdateCommission={updateCommissionTier}
-            onRemoveCommission={removeCommissionTier}
-            showClassCommission={showClassCommission}
-            defaultClassMode={defaultClassMode}
-            tiered={position.commissionTiered !== false}
-            onTieredChange={setCommissionTiered}
-          />
-        </div>
+      {/* ============ 泳教：上下两行 ============ */}
+      {isSwimCoach && (
+        <>
+          {hasCommission && (
+            <div className="p-5">
+              <TierEditor
+                mode="commission"
+                commissionTiers={position.commissionTiers}
+                onAddCommission={addCommissionTier}
+                onUpdateCommission={updateCommissionTier}
+                onRemoveCommission={removeCommissionTier}
+                showClassCommission={showClassCommission}
+                defaultClassMode={defaultClassMode}
+                tiered={position.commissionTiered !== false}
+                onTieredChange={setCommissionTiered}
+              />
+            </div>
+          )}
+
+          <div className={hasCommission ? 'px-5 pb-5' : 'p-5'}>
+            <GenderTierEditor
+              tiers={position.genderSalaryTiers || []}
+              onChange={updateGenderTiers}
+            />
+          </div>
+        </>
       )}
 
-      {/* 底薪阶梯 */}
-      <div className={hasCommission ? 'px-5 pb-5' : 'p-5'}>
-        {isSwimCoach ? (
-          <GenderTierEditor
-            tiers={position.genderSalaryTiers || []}
-            onChange={updateGenderTiers}
-          />
-        ) : (
+      {/* ============ 其他职位：左右两列 ============ */}
+      {!isSwimCoach && (
+        <div className="p-5 grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {hasCommission ? (
+            <TierEditor
+              mode="commission"
+              commissionTiers={position.commissionTiers}
+              onAddCommission={addCommissionTier}
+              onUpdateCommission={updateCommissionTier}
+              onRemoveCommission={removeCommissionTier}
+              showClassCommission={showClassCommission}
+              defaultClassMode={defaultClassMode}
+              tiered={position.commissionTiered !== false}
+              onTieredChange={setCommissionTiered}
+            />
+          ) : (
+            <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50/40 p-4 flex items-center justify-center text-xs text-gray-400">
+              该职位无佣金
+            </div>
+          )}
+
           <TierEditor
             mode="base"
             baseSalaryTiers={position.baseSalaryTiers}
@@ -303,10 +335,10 @@ const PositionCard: React.FC<PositionCardProps> = ({
             tiered={position.baseTiered !== false}
             onTieredChange={setBaseTiered}
           />
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* 课程课提 */}
+      {/* ============ 课程课提 ============ */}
       {showCourseCommission && hasCommission && (
         <div className="px-5 pb-5">
           <CourseCommissionEditor

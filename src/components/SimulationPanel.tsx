@@ -1,5 +1,14 @@
 import React from 'react';
-import { Calculator, Building2, Zap, Home, TrendingUp } from 'lucide-react';
+import {
+  Calculator,
+  Building2,
+  Zap,
+  Home,
+  TrendingUp,
+  BadgePercent,
+  BookOpen,
+  Coins,
+} from 'lucide-react';
 import type {
   PositionConfig,
   SimulationInput,
@@ -19,6 +28,16 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({
   onInputChange,
 }) => {
   const formatMoney = (v: number) => `¥${Math.round(v).toLocaleString()}`;
+
+  /** 总佣金中课提的占比 */
+  const classCommissionRate =
+    result.totalCommission > 0
+      ? result.totalClassCommission / result.totalCommission
+      : 0;
+
+  /** 佣金里除了课提之外的销提 */
+  const salesCommission =
+    result.totalCommission - result.totalClassCommission;
 
   return (
     <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden mb-6">
@@ -67,6 +86,7 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({
             </span>
           </div>
 
+          {/* 主指标 */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
             <Metric label="固定成本" value={formatMoney(result.fixedCost)} />
             <Metric
@@ -74,8 +94,8 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({
               value={formatMoney(result.totalBaseSalary)}
             />
             <Metric
-              label="佣金"
-              value={formatMoney(result.totalCommission)}
+              label="销提"
+              value={formatMoney(salesCommission)}
               highlight
             />
             <Metric
@@ -85,6 +105,110 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({
               big
             />
           </div>
+
+          {/* 佣金拆解 */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+            <div className="rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2.5">
+              <div className="flex items-center gap-1 text-[11px] text-amber-700 mb-0.5">
+                <BadgePercent className="w-3 h-3" />
+                <span className="font-medium">销提</span>
+              </div>
+              <p className="font-bold text-sm text-amber-700 tabular-nums">
+                {formatMoney(salesCommission)}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-purple-100 bg-purple-50/60 px-3 py-2.5">
+              <div className="flex items-center gap-1 text-[11px] text-purple-700 mb-0.5">
+                <BookOpen className="w-3 h-3" />
+                <span className="font-medium">课提</span>
+              </div>
+              <p className="font-bold text-sm text-purple-700 tabular-nums">
+                {formatMoney(result.totalClassCommission)}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2.5">
+              <div className="flex items-center gap-1 text-[11px] text-indigo-700 mb-0.5">
+                <Coins className="w-3 h-3" />
+                <span className="font-medium">课提占总佣金</span>
+              </div>
+              <p className="font-bold text-sm text-indigo-700 tabular-nums">
+                {(classCommissionRate * 100).toFixed(1)}%
+              </p>
+            </div>
+          </div>
+
+          {/* 佣金总览 */}
+          <div className="rounded-xl border border-indigo-100 bg-white/70 px-3 py-2 mb-4 flex items-center justify-between text-xs">
+            <span className="text-gray-500">
+              总佣金（销提 + 课提）
+            </span>
+            <span className="font-bold text-indigo-700 tabular-nums">
+              {formatMoney(result.totalCommission)}
+            </span>
+          </div>
+
+          {/* 课提明细 */}
+          {result.courseBreakdown.length > 0 && (
+            <div className="rounded-xl border border-purple-100 bg-white/70 overflow-hidden mb-4">
+              <div className="px-3 py-2 text-[11px] font-semibold text-purple-700 bg-purple-50/60 border-b border-purple-100 flex items-center gap-1.5">
+                <BookOpen className="w-3 h-3" />
+                课提明细
+              </div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-gray-500 border-b border-gray-100">
+                    <th className="text-left px-3 py-2 font-medium">课程</th>
+                    <th className="text-right px-3 py-2 font-medium">均价</th>
+                    <th className="text-right px-3 py-2 font-medium">节数</th>
+                    <th className="text-right px-3 py-2 font-medium">人数</th>
+                    <th className="text-right px-3 py-2 font-medium">课提</th>
+                    <th className="text-right px-3 py-2 font-medium">金额</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.courseBreakdown.map((c) => (
+                    <tr
+                      key={c.courseName}
+                      className="border-b border-gray-100 last:border-0 hover:bg-purple-50/30"
+                    >
+                      <td className="px-3 py-2 text-purple-700 font-medium">
+                        {c.courseName}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
+                        {formatMoney(c.averagePrice)}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
+                        {c.classCount}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
+                        {c.headcount}
+                      </td>
+                      <td className="px-3 py-2 text-right text-purple-600 tabular-nums">
+                        {c.mode === 'percent'
+                          ? `${(c.value * 100).toFixed(1)}%`
+                          : `${c.value} 元/节`}
+                      </td>
+                      <td className="px-3 py-2 text-right text-purple-700 font-semibold tabular-nums">
+                        {formatMoney(c.commission)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-purple-50/60 font-semibold text-purple-700">
+                    <td className="px-3 py-2" colSpan={5}>
+                      课提合计
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {formatMoney(result.totalClassCommission)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
 
           {result.breakdown.length > 0 && (
             <div className="bg-white/70 backdrop-blur rounded-xl border border-indigo-100 overflow-hidden">
@@ -133,8 +257,8 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({
           )}
 
           <p className="text-[11px] text-indigo-400 mt-3 leading-relaxed">
-            注：佣金按各职位分摊业绩命中阶梯自动计算，采用二分法迭代求解，
-            迭代 {result.iterations} 次。
+            注：业绩按分配比例分摊到各职位，佣金按命中阶梯计算，课提独立累加；
+            二分法迭代 {result.iterations} 次。
           </p>
         </div>
       </div>

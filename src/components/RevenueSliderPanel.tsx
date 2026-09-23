@@ -6,14 +6,25 @@ import {
   Wallet,
   BadgePercent,
   PiggyBank,
+  BookOpen,
+  Percent,
+  Hash,
 } from 'lucide-react';
-import type { PositionConfig, SimulationInput } from '../types/compensation';
+import type {
+  PositionConfig,
+  SimulationInput,
+  RevenueShareConfig,
+  CourseCommissionInputs,
+} from '../types/compensation';
 import { calcTotalBaseSalary, getCommissionRate } from '../utils/salary';
+import { calcCourseBreakdown } from '../utils/simulation';
 
 interface RevenueSliderPanelProps {
   positions: PositionConfig[];
   input: SimulationInput;
   requiredRevenue: number;
+  shareConfig: RevenueShareConfig;
+  courseCommissions?: CourseCommissionInputs;
 }
 
 const isStoreManager = (p: PositionConfig) => p.title.includes('店长');
@@ -45,10 +56,11 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
   positions,
   input,
   requiredRevenue,
+  shareConfig,
+  courseCommissions,
 }) => {
   const fixedCost = input.propertyFee + input.electricityFee + input.rent;
 
-  /** 用 useMemo 固定 maxRevenue，避免每次渲染都变 */
   const maxRevenue = useMemo(
     () => Math.max(requiredRevenue * 2, 200000, 1),
     [requiredRevenue]
@@ -59,11 +71,8 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
     [maxRevenue]
   );
 
-  const [revenue, setRevenue] = useState(
-    requiredRevenue || maxRevenue / 2
-  );
+  const [revenue, setRevenue] = useState(requiredRevenue || maxRevenue / 2);
 
-  /** 只在 requiredRevenue 真正变化时才重置滑块 */
   const lastRequiredRef = useRef(requiredRevenue);
   useEffect(() => {
     if (lastRequiredRef.current !== requiredRevenue) {
@@ -72,7 +81,6 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
     }
   }, [requiredRevenue, maxRevenue]);
 
-  /** 全部职位底薪（用于总底薪汇总） */
   const allBaseSalaries = useMemo(
     () =>
       positions.map((p) => ({
@@ -99,33 +107,53 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
     [positions]
   );
 
-  const weightBase = useMemo(
+  const totalShare = useMemo(
     () =>
-      shareablePositions.map((p) => ({
-        position: p,
-        base: calcTotalBaseSalary(p, positions),
-      })),
-    [shareablePositions, positions]
+      shareablePositions.reduce((s, p) => s + (shareConfig[p.title] || 0), 0),
+    [shareablePositions, shareConfig]
   );
 
-  const totalWeight = useMemo(
-    () =>
-      weightBase.reduce((s, x) => s + x.base, 0) ||
-      shareablePositions.reduce((s, p) => s + p.headcount, 0),
-    [weightBase, shareablePositions]
+  const totalHead = useMemo(
+    () => shareablePositions.reduce((s, p) => s + p.headcount, 0),
+    [shareablePositions]
   );
 
-  const weightOf = (p: PositionConfig, base: number): number => {
-    if (totalWeight === 0) return 0;
-    const totalBase = weightBase.reduce((s, x) => s + x.base, 0);
-    if (totalBase > 0) return base / totalWeight;
-    return p.headcount / totalWeight;
+  const weightOf = (p: PositionConfig): number => {
+    const raw = shareConfig[p.title];
+    if (raw !== undefined && totalShare > 0) {
+      return raw / totalShare;
+    }
+    return totalHead > 0 ? p.headcount / totalHead : 0;
   };
 
-  const breakdown = useMemo(() => {
-    // 1) 分摊职位
-    const allocated = weightBase.map(({ position, base: weightBaseValue }) => {
-      const weight = weightOf(position, weightBaseValue);
+  /** 课提明细行 */
+  const courseRows = useMemo(
+    () =>
+      calcCourseBreakdown(courseCommissions, positions).map((c) => ({
+        positionId: `course-${c.courseName}`,
+        title: c.courseName,
+        headcount: c.headcount,
+        baseSalary: 0,
+        allocatedRevenue: 0,
+        commissionRate: 0,
+        commission: 0,
+        classCommission: c.commission,
+        classMode: c.mode,
+        classValue: c.value,
+        type: 'course' as const,
+      })),
+    [courseCommissions, positions]
+  );
+
+  const totalClassCommission = useMemo(
+    () => courseRows.reduce((s, c) => s + (c.classCommission || 0), 0),
+    [courseRows]
+  );
+
+  /** 职位行（销提） */
+  const positionRows = useMemo(() => {
+    const allocated = shareablePositions.map((position) => {
+      const weight = weightOf(position);
       const allocatedRevenue = revenue * weight;
 
       const baseSalary = calcTotalBaseSalary(
@@ -144,6 +172,9 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
         allocatedRevenue,
         commissionRate: rate,
         commission,
+        classCommission: 0,
+        classMode: undefined as undefined | 'percent' | 'fixed',
+        classValue: 0,
         type: 'shareable' as const,
       };
     });
@@ -151,7 +182,6 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
     const revenueByTitle = new Map<string, number>();
     allocated.forEach((a) => revenueByTitle.set(a.title, a.allocatedRevenue));
 
-    // 2) 经理
     const managerRows = managers.map((m) => {
       const source = findManagerSource(m, positions);
       const managerRevenue = source
@@ -170,11 +200,13 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
         allocatedRevenue: managerRevenue,
         commissionRate: rate,
         commission,
+        classCommission: 0,
+        classMode: undefined as undefined | 'percent' | 'fixed',
+        classValue: 0,
         type: 'manager' as const,
       };
     });
 
-    // 3) 店长
     const memberRevenue = allocated.reduce(
       (s, r) => s + r.allocatedRevenue,
       0
@@ -192,11 +224,13 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
         allocatedRevenue: memberRevenue,
         commissionRate: rate,
         commission,
+        classCommission: 0,
+        classMode: undefined as undefined | 'percent' | 'fixed',
+        classValue: 0,
         type: 'store' as const,
       };
     });
 
-    // 4) 无佣金职位
     const fixedRows = fixedPositions.map((p) => ({
       positionId: p.id,
       title: p.title,
@@ -205,34 +239,38 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
       allocatedRevenue: 0,
       commissionRate: 0,
       commission: 0,
+      classCommission: 0,
+      classMode: undefined as undefined | 'percent' | 'fixed',
+      classValue: 0,
       type: 'fixed' as const,
     }));
 
-    return [
-      ...allocated,
-      ...managerRows,
-      ...storeManagerRows,
-      ...fixedRows,
-    ];
+    return [...allocated, ...managerRows, ...storeManagerRows, ...fixedRows];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    weightBase,
+    shareablePositions,
     revenue,
     positions,
-    totalWeight,
     managers,
     storeManagers,
     fixedPositions,
+    shareConfig,
+    totalShare,
+    totalHead,
   ]);
 
   const totalBase = useMemo(
     () => allBaseSalaries.reduce((s, x) => s + x.base, 0),
     [allBaseSalaries]
   );
-  const totalCommission = useMemo(
-    () => breakdown.reduce((s, x) => s + x.commission, 0),
-    [breakdown]
+
+  const totalPositionCommission = useMemo(
+    () => positionRows.reduce((s, x) => s + x.commission, 0),
+    [positionRows]
   );
+
+  const totalCommission = totalPositionCommission + totalClassCommission;
+
   const profit = revenue - totalBase - totalCommission - fixedCost;
 
   const isProfit = profit >= 0;
@@ -305,7 +343,6 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                 [&::-moz-range-thumb]:shadow-md
                 [&::-moz-range-thumb]:cursor-pointer"
             />
-
             <div
               className="absolute top-0 h-2 w-0.5 bg-emerald-500 pointer-events-none"
               style={{ left: `${requiredPercent}%` }}
@@ -324,7 +361,7 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
         </div>
 
         {/* 结果卡片 */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-5">
           <ResultCard
             icon={<TrendingUp className="w-3.5 h-3.5" />}
             label="总业绩"
@@ -341,10 +378,17 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
           />
           <ResultCard
             icon={<BadgePercent className="w-3.5 h-3.5" />}
-            label="总佣金"
-            value={formatMoney(totalCommission)}
+            label="销提合计"
+            value={formatMoney(totalPositionCommission)}
             color="text-amber-700"
             bg="bg-amber-50 border-amber-100"
+          />
+          <ResultCard
+            icon={<BookOpen className="w-3.5 h-3.5" />}
+            label="课提合计"
+            value={formatMoney(totalClassCommission)}
+            color="text-purple-700"
+            bg="bg-purple-50 border-purple-100"
           />
           <ResultCard
             icon={
@@ -369,7 +413,9 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
         {/* 利润占比 */}
         <div className="mb-5">
           <div className="flex items-center justify-between mb-1.5 text-[11px]">
-            <span className="text-gray-500">利润占比</span>
+            <span className="text-gray-500">
+              利润占比 · 总佣金 {formatMoney(totalCommission)}
+            </span>
             <span
               className={`font-semibold tabular-nums ${
                 isProfit ? 'text-emerald-600' : 'text-red-600'
@@ -395,21 +441,24 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
           </div>
         </div>
 
-        {/* 明细表 */}
+        {/* 明细表：销提、课提分列 */}
         <div className="bg-gray-50/60 backdrop-blur rounded-xl border border-gray-100 overflow-hidden">
           <table className="w-full text-xs">
             <thead>
               <tr className="text-gray-500 border-b border-gray-100 bg-white/70">
-                <th className="text-left px-3 py-2 font-medium">职位</th>
+                <th className="text-left px-3 py-2 font-medium">职位 / 课程</th>
                 <th className="text-right px-3 py-2 font-medium">人数</th>
                 <th className="text-right px-3 py-2 font-medium">底薪</th>
                 <th className="text-right px-3 py-2 font-medium">分摊业绩</th>
+                <th className="text-right px-3 py-2 font-medium">销提比例</th>
                 <th className="text-right px-3 py-2 font-medium">销提</th>
-                <th className="text-right px-3 py-2 font-medium">佣金</th>
+                <th className="text-right px-3 py-2 font-medium">课提比例</th>
+                <th className="text-right px-3 py-2 font-medium">课提</th>
               </tr>
             </thead>
             <tbody>
-              {breakdown.map((b) => (
+              {/* 职位行 */}
+              {positionRows.map((b) => (
                 <tr
                   key={b.positionId}
                   className={`border-b border-gray-100 last:border-0 hover:bg-white/80 ${
@@ -435,10 +484,10 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                     )}
                   </td>
                   <td className="px-3 py-2 text-right text-gray-500 tabular-nums">
-                    {b.headcount}
+                    {b.headcount || '—'}
                   </td>
                   <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
-                    {formatMoney(b.baseSalary)}
+                    {b.baseSalary > 0 ? formatMoney(b.baseSalary) : '—'}
                   </td>
                   <td className="px-3 py-2 text-right text-gray-700 tabular-nums">
                     {b.allocatedRevenue > 0
@@ -453,11 +502,51 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                   <td className="px-3 py-2 text-right text-amber-600 tabular-nums">
                     {b.commission > 0 ? formatMoney(b.commission) : '—'}
                   </td>
+                  <td className="px-3 py-2 text-right text-gray-300">—</td>
+                  <td className="px-3 py-2 text-right text-gray-300">—</td>
+                </tr>
+              ))}
+
+              {/* 课提行 */}
+              {courseRows.map((c) => (
+                <tr
+                  key={c.positionId}
+                  className="border-b border-gray-100 last:border-0 bg-purple-50/40 hover:bg-purple-50/60"
+                >
+                  <td className="px-3 py-2 text-purple-700 font-medium">
+                    {c.title}
+                    <span className="ml-1 text-[10px] text-purple-600 bg-purple-100 px-1.5 py-0.5 rounded">
+                      课提
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-right text-gray-500 tabular-nums">
+                    {c.headcount || '—'}
+                  </td>
+                  <td className="px-3 py-2 text-right text-gray-300">—</td>
+                  <td className="px-3 py-2 text-right text-gray-300">—</td>
+                  <td className="px-3 py-2 text-right text-gray-300">—</td>
+                  <td className="px-3 py-2 text-right text-gray-300">—</td>
+                  <td className="px-3 py-2 text-right text-purple-600 tabular-nums">
+                    {c.classMode === 'fixed' ? (
+                      <span className="inline-flex items-center gap-1 justify-end">
+                        <Hash className="w-3 h-3" />
+                        {c.classValue} 元/节
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 justify-end">
+                        <Percent className="w-3 h-3" />
+                        {((c.classValue || 0) * 100).toFixed(1)}%
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right text-purple-700 font-semibold tabular-nums">
+                    {formatMoney(c.classCommission || 0)}
+                  </td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
-              <tr className="bg-white/80 font-semibold text-gray-700">
+              <tr className="bg-white/80 font-semibold text-gray-700 border-t-2 border-gray-200">
                 <td className="px-3 py-2" colSpan={2}>
                   合计
                 </td>
@@ -468,7 +557,19 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                   {formatMoney(revenue)}
                 </td>
                 <td className="px-3 py-2" />
-                <td className="px-3 py-2 text-right tabular-nums">
+                <td className="px-3 py-2 text-right text-amber-600 tabular-nums">
+                  {formatMoney(totalPositionCommission)}
+                </td>
+                <td className="px-3 py-2" />
+                <td className="px-3 py-2 text-right text-purple-700 tabular-nums">
+                  {formatMoney(totalClassCommission)}
+                </td>
+              </tr>
+              <tr className="bg-gray-50 font-semibold text-gray-700">
+                <td className="px-3 py-2" colSpan={7}>
+                  总佣金（销提 + 课提）
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-indigo-700">
                   {formatMoney(totalCommission)}
                 </td>
               </tr>
@@ -478,8 +579,9 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
 
         <p className="text-[11px] text-gray-400 mt-3 leading-relaxed flex items-center gap-1">
           <PiggyBank className="w-3 h-3" />
-          利润 = 总业绩 − 总底薪（含全部职位） − 总佣金 − 固定成本（
-          {formatMoney(fixedCost)}）· 仅会籍 / 泳教 / 私教参与分摊 · 经理取对应成员业绩 · 店长 = 三者合计
+          利润 = 总业绩 − 总底薪（含全部职位） − 总佣金（销提 + 课提） − 固定成本（
+          {formatMoney(fixedCost)}）· 按分配比例分摊 · 经理取对应成员业绩 · 店长 =
+          三者合计
         </p>
       </div>
     </div>
