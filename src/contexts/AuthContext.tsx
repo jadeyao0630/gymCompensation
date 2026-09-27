@@ -10,6 +10,7 @@ interface AuthContextValue {
   user: AdminUser | null;
   token: string | null;
   loading: boolean;
+  isSuperAdmin: boolean;
   login: (username: string, password: string, remember: boolean) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -23,7 +24,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   useEffect(() => {
     const init = async () => {
-      /* 优先取 localStorage，再取 sessionStorage */
       const savedToken =
         localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
       const savedUser =
@@ -44,7 +44,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const res = await adminMe(savedToken);
         setUser(res.user);
         setToken(savedToken);
-        console.log('[auth] 免密登录成功:', res.user.username);
+        console.log('[auth] 免密登录成功:', res.user.username, 'role:', res.user.role);
       } catch (e) {
         console.warn('[auth] 本地 token 失效，清除');
         localStorage.removeItem(TOKEN_KEY);
@@ -88,8 +88,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setUser(null);
   };
 
+  const isSuperAdmin = user?.role === 'admin';
+
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, token, loading, isSuperAdmin, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
