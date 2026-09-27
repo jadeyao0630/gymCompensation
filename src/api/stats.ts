@@ -1,11 +1,9 @@
 import { api } from './client';
-import type {
-  StatsRequest,
-  SalesResponse,
-  ClassResponse,
-} from './types';
+import type { StatsRequest, SalesResponse, ClassResponse } from './types';
 
-/* ---------- 售卡售课 ---------- */
+/* ============================================================
+ * 售卡售课
+ * ============================================================ */
 export async function getMembershipStats(
   payload: StatsRequest
 ): Promise<SalesResponse> {
@@ -36,7 +34,9 @@ export async function getPrivateCoachStats(
   return data;
 }
 
-/* ---------- 消课 ---------- */
+/* ============================================================
+ * 消课
+ * ============================================================ */
 export async function getSwimmingClassStats(
   payload: StatsRequest
 ): Promise<ClassResponse> {
@@ -54,5 +54,21 @@ export async function getCoachClassStats(
     '/api/coach_class_statistic',
     payload
   );
+  return data;
+}
+
+/* ============================================================
+ * ⭐ 运营团队
+ * ============================================================ */
+export interface MarketersRequest {
+  group_id: string;
+  page_no: number;
+  page_size: number;
+}
+
+export async function getMarketersList(
+  payload: MarketersRequest
+): Promise<any> {
+  const { data } = await api.post('/api/get_marketers_list', payload);
   return data;
 }

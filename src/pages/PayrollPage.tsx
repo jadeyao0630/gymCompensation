@@ -1,75 +1,252 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import {
-  ArrowLeft,
-  Calculator,
-  Loader2,
-  Users,
-  Wallet,
-  TrendingUp,
-  BookOpen,
-} from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Calculator, X } from 'lucide-react';
 import type {
   CompensationStore,
   MonthlyCompensationPlan,
+  PositionConfig,
 } from '../types/compensation';
 import { usePayroll } from '../hooks/usePayroll';
+import type { PayrollResult, Department, EmployeePerformance } from '../utils/payroll';
+import {
+  calcDepartmentStats,
+  calcEmployeePayroll,
+  findPositionByTitle,
+} from '../utils/payroll';
+import { exportPayrollTableToExcel } from '../utils/exportPayrollTable';
+import { fetchPlanByMonth } from '../api/compensation';
+import MissingPositionConfigDialog from '../components/MissingPositionConfigDialog';
+import StoreSwitcher from '../components/StoreSwitcher';
+import { useStore } from '../contexts/StoreContext';
+import { getStoreById } from '../constants/stores';
+import { PayrollHeader } from './payroll/PayrollHeader';
+import { PayrollToolbar } from './payroll/PayrollToolbar';
+import { PayrollSummary } from './payroll/PayrollSummary';
+import { PayrollMissingAlert } from './payroll/PayrollMissingAlert';
+import { PayrollAllTable } from './payroll/PayrollAllTable';
+import { PayrollDeptList } from './payroll/PayrollDeptList';
 
-const STORAGE_KEY = 'gym_compensation_store_v1';
+const STORAGE_KEY = 'gym_compensation_store_v2';
+const OVERRIDES_KEY = 'gym_position_overrides_v1';
+type FullStore = Record<string, CompensationStore>;
+type ViewMode = 'all' | 'department';
 
+/* ============================================================
+ * 职位设置对话框
+ * ============================================================ */
+const PositionEditDialog: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  currentTitle: string;
+  options: string[];
+  staffName: string;
+  onSave: (title: string) => void;
+}> = ({ open, onClose, currentTitle, options, staffName, onSave }) => {
+  const [value, setValue] = useState(currentTitle);
+
+  useEffect(() => {
+    if (open) setValue(currentTitle);
+  }, [open, currentTitle]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-bold text-gray-900">设置职位</h2>
+            <p className="text-xs text-gray-500 mt-0.5">{staffName}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="px-5 py-4">
+          <label className="text-xs font-medium text-gray-600 mb-2 block">选择职位</label>
+          <select
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          >
+            {options.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-gray-400 mt-2">保存后会立即重新计算该员工薪资</p>
+        </div>
+        <div className="px-5 py-3 border-t border-gray-100 flex justify-end gap-2 bg-gray-50/50">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
+          >
+            取消
+          </button>
+          <button
+            onClick={() => {
+              onSave(value);
+              onClose();
+            }}
+            className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-sm font-semibold shadow-md transition active:scale-[0.97]"
+          >
+            保存
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ============================================================
+ * 主页面
+ * ============================================================ */
 const PayrollPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { storeId } = useStore();
 
-  const [store, setStore] = useState<CompensationStore>({});
-  const [selectedMonth, setSelectedMonth] = useState<string>(
-    searchParams.get('month') || ''
-  );
+  const [fullStore, setFullStore] = useState<FullStore>({});
+  const [selectedMonth, setSelectedMonth] = useState<string>(searchParams.get('month') || '');
+  const [missing, setMissing] = useState<string[]>([]);
+  const [missingDialogOpen, setMissingDialogOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('department');
+  const [hideExcluded, setHideExcluded] = useState<boolean>(true);
 
-  /* ---------- 读 localStorage 配置 ---------- */
+  const [resultsByStore, setResultsByStore] = useState<Record<string, PayrollResult[]>>({});
+  const [performancesByStore, setPerformancesByStore] = useState<Record<string, EmployeePerformance[]>>({});
+  const [expanded, setExpanded] = useState<Record<Department, boolean>>({
+    会籍: true,
+    私教: true,
+    泳教: true,
+    运营: true,
+  });
+  const [excludedByStore, setExcludedByStore] = useState<Record<string, Set<string>>>({});
+  const [overridesByStore, setOverridesByStore] = useState<Record<string, Record<string, string>>>({});
+  const [editingStaff, setEditingStaff] = useState<PayrollResult | null>(null);
+
+  const store: CompensationStore = fullStore[storeId] || {};
+  const allResults: PayrollResult[] = resultsByStore[storeId] || [];
+  const excludedSet: Set<string> = excludedByStore[storeId] || new Set();
+  const overrides: Record<string, string> = overridesByStore[storeId] || {};
+
+  /* ============================================================
+   * 加载本地存储
+   * ============================================================ */
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
-    console.log('[PayrollPage] localStorage 原始:', saved ? '有' : '空');
     if (saved) {
       try {
-        const parsed: CompensationStore = JSON.parse(saved);
-        console.log('[PayrollPage] 解析后月份:', Object.keys(parsed));
-        setStore(parsed);
-        if (!selectedMonth) {
-          const months = Object.keys(parsed).sort();
-          if (months.length > 0) setSelectedMonth(months[months.length - 1]);
-        }
+        setFullStore(JSON.parse(saved));
       } catch (e) {
         console.error('[PayrollPage] 解析失败', e);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const savedOv = localStorage.getItem(OVERRIDES_KEY);
+    if (savedOv) {
+      try {
+        setOverridesByStore(JSON.parse(savedOv));
+      } catch (e) {
+        console.error('[PayrollPage] 覆盖表解析失败', e);
+      }
+    }
   }, []);
 
-  /* ---------- URL 参数同步 ---------- */
+  const username = import.meta.env.VITE_TEST_USERNAME || '';
+  const password = import.meta.env.VITE_TEST_PASSWORD || '';
+  const { run, loading, error } = usePayroll({ username, password, busId: storeId });
+
+  /* ============================================================
+   * 切门店时初始化默认月份
+   * ============================================================ */
+  useEffect(() => {
+    const months = Object.keys(fullStore[storeId] || {}).sort();
+    if (months.length > 0) {
+      setSelectedMonth(months[months.length - 1]);
+    } else {
+      const now = new Date();
+      setSelectedMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeId]);
+
+  /* URL 参数优先 */
   useEffect(() => {
     const m = searchParams.get('month');
     if (m) setSelectedMonth(m);
   }, [searchParams]);
 
+  /* ============================================================
+   * ⭐ 新增：切门店 / 切月份时，从 API 拉方案（本地缓存作为兜底）
+   * ============================================================ */
+  useEffect(() => {
+    if (!storeId || !selectedMonth) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const remote = await fetchPlanByMonth(storeId, selectedMonth);
+        if (cancelled || !remote) return;
+        setFullStore((prev) => {
+          const next = {
+            ...prev,
+            [storeId]: { ...(prev[storeId] || {}), [selectedMonth]: remote },
+          };
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+          } catch {
+            /* ignore */
+          }
+          return next;
+        });
+        console.log('[PayrollPage] 已从 API 加载方案', storeId, selectedMonth);
+      } catch (e) {
+        console.warn('[PayrollPage] API 加载失败，使用本地缓存', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [storeId, selectedMonth]);
+
   const currentPlan: MonthlyCompensationPlan | undefined = selectedMonth
     ? store[selectedMonth]
     : undefined;
 
-  console.log('[PayrollPage] selectedMonth:', selectedMonth);
-  console.log('[PayrollPage] currentPlan:', currentPlan);
+  /* 所有可选的职位名 */
+  const positionOptions = useMemo(() => {
+    const set = new Set<string>();
+    (currentPlan?.positions || []).forEach((p) => set.add(p.title));
+    [
+      '运营主管',
+      '运营',
+      '店长',
+      '会籍经理',
+      '泳教经理',
+      '会籍',
+      '私教',
+      '泳教',
+      '前台',
+      '保洁',
+      '维修',
+    ].forEach((t) => set.add(t));
+    return Array.from(set);
+  }, [currentPlan]);
 
-  /* ---------- 账号（从环境变量读） ---------- */
-  const username = import.meta.env.VITE_TEST_USERNAME || '';
-  const password = import.meta.env.VITE_TEST_PASSWORD || '';
-
-  /* ---------- 薪酬计算 Hook ---------- */
-  const { run, loading, error, results } = usePayroll({ username, password });
-
-  /* ---------- 汇总 ---------- */
+  /* 汇总（仅计入的员工） */
   const summary = useMemo(() => {
-    if (results.length === 0) return null;
-    return results.reduce(
+    const filtered = allResults.filter((r) => !excludedSet.has(r.staffId));
+    if (filtered.length === 0) return null;
+    return filtered.reduce(
       (acc, r) => ({
         headcount: acc.headcount + 1,
         baseSalary: acc.baseSalary + r.baseSalary,
@@ -77,310 +254,309 @@ const PayrollPage: React.FC = () => {
         classCommission: acc.classCommission + r.classCommission,
         total: acc.total + r.total,
       }),
-      {
-        headcount: 0,
-        baseSalary: 0,
-        salesCommission: 0,
-        classCommission: 0,
-        total: 0,
-      }
+      { headcount: 0, baseSalary: 0, salesCommission: 0, classCommission: 0, total: 0 }
     );
-  }, [results]);
+  }, [allResults, excludedSet]);
 
-  /* ---------- 开始计算 ---------- */
+  const toggleExclude = (staffId: string) => {
+    setExcludedByStore((prev) => {
+      const cur = new Set(prev[storeId] || []);
+      if (cur.has(staffId)) cur.delete(staffId);
+      else cur.add(staffId);
+      return { ...prev, [storeId]: cur };
+    });
+  };
+
+  const toggleDept = (dept: Department) =>
+    setExpanded((p) => ({ ...p, [dept]: !p[dept] }));
+
+  const updateAttendance = (
+    staffId: string,
+    updates: { fullAttendance: boolean; absentDays: number }
+  ) => {
+    setResultsByStore((prev) => {
+      const list = prev[storeId] || [];
+      const next = list.map((r) => {
+        if (r.staffId !== staffId) return r;
+        const absentDeduction =
+          !updates.fullAttendance && updates.absentDays > 0 && r.baseSalary > 0
+            ? (r.baseSalary / 30) * updates.absentDays
+            : 0;
+        return {
+          ...r,
+          fullAttendance: updates.fullAttendance,
+          absentDays: updates.absentDays,
+          absentDeduction,
+          total: Math.max(
+            0,
+            r.baseSalary + r.salesCommission + r.classCommission - absentDeduction
+          ),
+        };
+      });
+      return { ...prev, [storeId]: next };
+    });
+  };
+
+  /* 保存职位覆盖 + 立即重算 */
+  const handleSavePosition = (staffId: string, newTitle: string) => {
+    const nextOverrides = { ...overrides, [staffId]: newTitle };
+    setOverridesByStore((prev) => {
+      const next = { ...prev, [storeId]: nextOverrides };
+      localStorage.setItem(OVERRIDES_KEY, JSON.stringify(next));
+      return next;
+    });
+
+    const perfs = performancesByStore[storeId] || [];
+    const perf = perfs.find((p) => p.staffId === staffId);
+    if (!perf || !currentPlan) return;
+
+    const position = findPositionByTitle(currentPlan.positions, newTitle);
+    const effectivePosition: PositionConfig =
+      position || {
+        id: `virtual_${newTitle}`,
+        title: newTitle,
+        category: 'operations',
+        headcount: 0,
+        performanceTarget: 0,
+        performanceSource: 'self',
+        totalBaseSalary: 0,
+        commissionTiers: [],
+        baseSalaryTiers: [],
+        genderSalaryTiers: undefined,
+        extraNote: '',
+        courseCommissions: [],
+      };
+
+    const nextPerf: EmployeePerformance = { ...perf, positionTitle: newTitle };
+    if (newTitle === '运营主管') {
+      const storePerf = perfs.find(
+        (p) => p.positionTitle === '店长' || p.positionTitle.includes('门店经理')
+      );
+      nextPerf.managerSalesBase = storePerf?.salesAmount ?? 0;
+    }
+
+    const newResult = calcEmployeePayroll(effectivePosition, nextPerf);
+    setResultsByStore((prev) => {
+      const list = prev[storeId] || [];
+      const next = list.map((r) => (r.staffId === staffId ? newResult : r));
+      return { ...prev, [storeId]: next };
+    });
+  };
+
   const handleRun = async () => {
-    console.log('[handleRun] 点击了');
-    console.log('[handleRun] currentPlan:', currentPlan);
-    console.log('[handleRun] selectedMonth:', selectedMonth);
-    console.log('[handleRun] username:', username);
-    console.log('[handleRun] password:', password ? '有' : '空');
-
     if (!currentPlan || !selectedMonth) {
       alert('请先选择月份，并确保该月已有配置');
       return;
     }
     try {
-      await run(selectedMonth, currentPlan);
+      const res = await run(selectedMonth, currentPlan, overrides);
+      if (res.missingPositions.length > 0) {
+        setMissing(res.missingPositions);
+        setMissingDialogOpen(true);
+      }
+      setResultsByStore((prev) => ({ ...prev, [storeId]: res.results }));
+      setPerformancesByStore((prev) => ({ ...prev, [storeId]: res.performances }));
     } catch (e) {
       console.error('[handleRun] 失败:', e);
     }
   };
 
+  /* 导出整表 */
+  const handleExportTable = () => {
+    if (allResults.length === 0) {
+      alert('暂无可导出的数据，请先点击「开始计算」');
+      return;
+    }
+    exportPayrollTableToExcel({
+      allResults,
+      excludedSet,
+      plan: currentPlan,
+      month: selectedMonth,
+      storeName: storeName || '门店',
+    });
+  };
+
+  const handleConfirmMissing = async (
+    configs: Record<string, PositionConfig>
+  ) => {
+    if (!currentPlan || !selectedMonth) return;
+    const newPositions: PositionConfig[] = [...currentPlan.positions];
+    const existingTitles = new Set(newPositions.map((p) => p.title));
+    Object.entries(configs).forEach(([missingName, cfg]) => {
+      const finalTitle = ((cfg?.title as string) || missingName).trim();
+      if (existingTitles.has(finalTitle)) return;
+      newPositions.push({
+        ...(cfg || {}),
+        id: cfg?.id || `virtual_${finalTitle}_${Date.now()}`,
+        title: finalTitle,
+      } as PositionConfig);
+      existingTitles.add(finalTitle);
+    });
+
+    const nextPlan: MonthlyCompensationPlan = {
+      ...currentPlan,
+      positions: newPositions,
+    };
+    const nextStore: FullStore = {
+      ...fullStore,
+      [storeId]: { ...store, [selectedMonth]: nextPlan },
+    };
+    setFullStore(nextStore);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextStore));
+    setMissing([]);
+    setMissingDialogOpen(false);
+
+    try {
+      const res = await run(selectedMonth, nextPlan, overrides);
+      setResultsByStore((prev) => ({ ...prev, [storeId]: res.results }));
+      setPerformancesByStore((prev) => ({ ...prev, [storeId]: res.performances }));
+    } catch (e) {
+      console.error('[重新计算失败]', e);
+    }
+  };
+
+  const storeName = getStoreById(storeId)?.name || '';
+  const excludedCount = allResults.length - allResults.filter((r) => !excludedSet.has(r.staffId)).length;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-emerald-50/50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* ============ 头部 ============ */}
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-600 shadow-2xl shadow-emerald-500/20 p-8 sm:p-10 mb-8 text-white">
-          <div className="absolute -top-24 -right-24 w-72 h-72 rounded-full bg-white/10 blur-3xl pointer-events-none" />
-          <div className="relative flex items-start justify-between flex-wrap gap-6">
-            <div>
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 backdrop-blur-sm border border-white/20 mb-4">
-                <Calculator className="w-3.5 h-3.5" />
-                <span className="text-[11px] font-semibold tracking-widest uppercase">
-                  Payroll Calculation
-                </span>
-              </div>
-              <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
-                薪酬佣金计算
-              </h1>
-              <p className="text-sm text-emerald-100/90 mt-3 max-w-md">
-                基于所选月份的薪酬配置，拉取售卡售课与消课数据，自动计算每位员工的底薪、销提、课提
-              </p>
-            </div>
+        <PayrollHeader
+          storeName={storeName}
+          month={selectedMonth}
+          excludedCount={excludedCount}
+          onGoSimulation={() => navigate(`/simulation?month=${selectedMonth}`)}
+          onBackToConfig={() => navigate('/compensation')}
+        />
 
-            <button
-              onClick={() => navigate('/compensation')}
-              className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-2.5 border border-white/25 shadow-lg hover:bg-white/25 transition"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span className="text-sm font-medium">返回配置</span>
-            </button>
-          </div>
+        <div className="mb-4">
+          <StoreSwitcher />
         </div>
 
-        {/* ============ 操作栏 ============ */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-600">月份</label>
-              <select
-                value={selectedMonth}
-                onChange={(e) => {
-                  setSelectedMonth(e.target.value);
-                  navigate(`/payroll?month=${e.target.value}`, {
-                    replace: true,
-                  });
-                }}
-                className="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              >
-                {Object.keys(store).sort().map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-                {!selectedMonth && <option value="">请选择月份</option>}
-              </select>
-            </div>
+        <PayrollToolbar
+          month={selectedMonth}
+          months={Object.keys(store)}
+          viewMode={viewMode}
+          loading={loading}
+          showViewToggle={allResults.length > 0}
+          hideExcluded={hideExcluded}
+          canExport={allResults.length > 0}
+          hasPlan={!!currentPlan}
+          onMonthChange={(m) => {
+            setSelectedMonth(m);
+            navigate(`/payroll?month=${m}`, { replace: true });
+          }}
+          onViewModeChange={setViewMode}
+          onHideExcludedChange={setHideExcluded}
+          onRun={handleRun}
+          onExportTable={handleExportTable}
+        />
 
-            <div className="flex-1" />
-
-            <button
-              onClick={handleRun}
-              disabled={loading}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:from-gray-300 disabled:to-gray-300 text-white rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  计算中…
-                </>
-              ) : (
-                <>
-                  <Calculator className="w-4 h-4" />
-                  开始计算
-                </>
-              )}
-            </button>
-          </div>
-
-          {!currentPlan && (
-            <p className="text-xs text-amber-600 mt-3">
-              该月份暂无薪酬配置，请先到「薪酬配置」页面导入 Excel
-            </p>
-          )}
-        </div>
-
-        {/* ============ 错误提示 ============ */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 text-sm text-red-700">
             {error}
           </div>
         )}
 
-        {/* ============ 汇总卡片 ============ */}
-        {summary && (
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
-            <SummaryCard
-              icon={<Users className="w-4 h-4" />}
-              label="计算人数"
-              value={summary.headcount}
-              isMoney={false}
-              color="from-slate-500 to-gray-500"
-            />
-            <SummaryCard
-              icon={<Wallet className="w-4 h-4" />}
-              label="底薪合计"
-              value={summary.baseSalary}
-              color="from-blue-500 to-indigo-500"
-            />
-            <SummaryCard
-              icon={<TrendingUp className="w-4 h-4" />}
-              label="销提合计"
-              value={summary.salesCommission}
-              color="from-sky-500 to-cyan-500"
-            />
-            <SummaryCard
-              icon={<BookOpen className="w-4 h-4" />}
-              label="课提合计"
-              value={summary.classCommission}
-              color="from-violet-500 to-purple-500"
-            />
-            <SummaryCard
-              icon={<Wallet className="w-4 h-4" />}
-              label="总计"
-              value={summary.total}
-              color="from-emerald-500 to-teal-500"
-            />
+        <PayrollMissingAlert
+          missing={missing}
+          onOpenDialog={() => setMissingDialogOpen(true)}
+        />
+
+        <PayrollSummary summary={summary} />
+
+        {allResults.length > 0 && viewMode === 'all' && (
+          <PayrollAllTable
+            results={allResults}
+            excludedSet={excludedSet}
+            overrides={overrides}
+            plan={currentPlan}
+            month={selectedMonth}
+            summary={summary}
+            hideExcluded={hideExcluded}
+            onToggleExclude={toggleExclude}
+            onEditPosition={setEditingStaff}
+            onUpdateAttendance={updateAttendance}
+          />
+        )}
+
+        {allResults.length > 0 && viewMode === 'department' && (
+          <PayrollDeptList
+            allResults={allResults}
+            excludedSet={excludedSet}
+            overrides={overrides}
+            plan={currentPlan}
+            month={selectedMonth}
+            expanded={expanded}
+            hideExcluded={hideExcluded}
+            onToggleDept={toggleDept}
+            onToggleExclude={toggleExclude}
+            onEditPosition={setEditingStaff}
+            onUpdateAttendance={updateAttendance}
+          />
+        )}
+
+        {!loading && allResults.length === 0 && currentPlan && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-12 text-center">
+            <div className="w-14 h-14 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-4">
+              <Calculator className="w-6 h-6 text-emerald-500" />
+            </div>
+            <h3 className="font-semibold text-gray-700 mb-1">暂无计算结果</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              点击「开始计算」按钮，根据本月配置拉取数据并计算薪酬
+            </p>
+            <button
+              onClick={handleRun}
+              disabled={loading}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97]"
+            >
+              <Calculator className="w-4 h-4" />
+              开始计算
+            </button>
           </div>
         )}
 
-        {/* ============ 结果表 ============ */}
-        {results.length > 0 ? (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-gray-600">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium">员工</th>
-                    <th className="px-4 py-3 text-left font-medium">职位</th>
-                    <th className="px-4 py-3 text-right font-medium">销售金额</th>
-                    <th className="px-4 py-3 text-right font-medium">消课节数</th>
-                    <th className="px-4 py-3 text-right font-medium">消课金额</th>
-                    <th className="px-4 py-3 text-right font-medium">底薪</th>
-                    <th className="px-4 py-3 text-right font-medium">销提</th>
-                    <th className="px-4 py-3 text-right font-medium">课提</th>
-                    <th className="px-4 py-3 text-right font-medium">合计</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {results.map((r) => (
-                    <tr
-                      key={r.staffId || r.staffName}
-                      className="hover:bg-gray-50/50"
-                    >
-                      {/* 员工：姓名 + 电话 */}
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-gray-800">
-                          {r.staffName || '—'}
-                        </div>
-                        {r.staffPhone && (
-                          <div className="text-xs text-gray-400">
-                            {r.staffPhone}
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="px-4 py-3 text-gray-600">
-                        {r.positionTitle}
-                      </td>
-
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        ¥{r.salesAmount.toLocaleString()}
-                      </td>
-
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        {r.classCount}
-                      </td>
-
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        ¥{r.classAmount.toLocaleString()}
-                      </td>
-
-                      {/* 底薪 + 命中档位比例 */}
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        <div>¥{r.baseSalary.toLocaleString()}</div>
-                        {r.hitCommissionRate > 0 && (
-                          <div className="text-xs text-gray-400">
-                            档位 {(r.hitCommissionRate * 100).toFixed(1)}%
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="px-4 py-3 text-right tabular-nums text-sky-600">
-                        ¥{r.salesCommission.toLocaleString()}
-                      </td>
-
-                      <td className="px-4 py-3 text-right tabular-nums text-violet-600">
-                        ¥{r.classCommission.toLocaleString()}
-                      </td>
-
-                      <td className="px-4 py-3 text-right tabular-nums font-bold text-emerald-700">
-                        ¥{r.total.toLocaleString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot className="bg-gray-50 font-semibold text-gray-800">
-                  <tr>
-                    <td className="px-4 py-3" colSpan={5}>
-                      合计（{summary?.headcount || 0} 人）
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      ¥{(summary?.baseSalary || 0).toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-sky-700">
-                      ¥{(summary?.salesCommission || 0).toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-violet-700">
-                      ¥{(summary?.classCommission || 0).toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-emerald-700">
-                      ¥{(summary?.total || 0).toLocaleString()}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
+        {!loading && !currentPlan && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-12 text-center">
+            <div className="w-14 h-14 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
+              <AlertTriangle className="w-6 h-6 text-amber-500" />
             </div>
+            <h3 className="font-semibold text-gray-700 mb-1">该月份暂无薪酬配置</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              请先到「薪酬配置」页面上传或导入 {selectedMonth || '当月'} 的薪酬方案
+            </p>
+            <button
+              onClick={() => navigate('/compensation')}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-xl text-sm font-semibold shadow-sm transition-all"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              去配置
+            </button>
           </div>
-        ) : (
-          !loading && (
-            <div className="bg-white rounded-3xl shadow-sm border border-dashed border-gray-200 p-20 text-center">
-              <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-emerald-50 to-teal-50 flex items-center justify-center mb-5">
-                <Calculator className="w-8 h-8 text-emerald-500" />
-              </div>
-              <h3 className="text-gray-700 font-semibold mb-1">
-                还没有计算结果
-              </h3>
-              <p className="text-sm text-gray-400">
-                选择月份后点击「开始计算」
-              </p>
-            </div>
-          )
         )}
       </div>
+
+      {missingDialogOpen && missing.length > 0 && (
+        <MissingPositionConfigDialog
+          missing={missing}
+          existing={currentPlan?.positions || []}
+          onCancel={() => setMissingDialogOpen(false)}
+          onConfirm={handleConfirmMissing}
+        />
+      )}
+
+      <PositionEditDialog
+        open={!!editingStaff}
+        onClose={() => setEditingStaff(null)}
+        staffName={editingStaff?.staffName || ''}
+        currentTitle={editingStaff?.positionTitle || ''}
+        options={positionOptions}
+        onSave={(newTitle) => {
+          if (editingStaff) handleSavePosition(editingStaff.staffId, newTitle);
+        }}
+      />
     </div>
   );
 };
-
-/* ============================================================
- * 汇总卡片
- * ============================================================ */
-interface SummaryCardProps {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  color: string;
-  isMoney?: boolean;
-}
-
-const SummaryCard: React.FC<SummaryCardProps> = ({
-  icon,
-  label,
-  value,
-  color,
-  isMoney = true,
-}) => (
-  <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm hover:shadow-md transition-shadow">
-    <div
-      className={`w-8 h-8 rounded-lg bg-gradient-to-br ${color} text-white flex items-center justify-center mb-2`}
-    >
-      {icon}
-    </div>
-    <p className="text-xs text-gray-500">{label}</p>
-    <p className="text-lg font-bold text-gray-800 tabular-nums">
-      {isMoney ? `¥${value.toLocaleString()}` : value}
-    </p>
-  </div>
-);
 
 export default PayrollPage;

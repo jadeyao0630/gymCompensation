@@ -6,6 +6,8 @@ export type PositionCategory =
 
 export type ClassCommissionMode = 'percent' | 'fixed';
 
+export type DepartmentKey = '会籍' | '私教' | '泳教' | '运营';
+
 export interface CommissionTier {
   id: string;
   threshold: number;
@@ -25,12 +27,12 @@ export interface BaseSalaryTier {
 export interface GenderSalaryTier {
   id: string;
   threshold: number;
-  base?: number;
   male: number;
   female: number;
   newbie: number;
-  note?: string;
+  base?: number;
   newbieFixed?: boolean;
+  note?: string;
 }
 
 export interface CourseCommission {
@@ -39,6 +41,22 @@ export interface CourseCommission {
   mode: ClassCommissionMode;
   value: number;
   note?: string;
+}
+
+/** ⭐ 老课费用：按业绩门槛配置的单价（元/节） */
+export interface OldClassFeeTier {
+  id: string;
+  threshold: number;
+  fee: number;
+  note?: string;
+}
+
+export interface PositionCalcFlags {
+  includePerformance?: boolean;
+  includeSalesCommission?: boolean;
+  includeBaseSalary?: boolean;
+  includeClassAmount?: boolean;
+  includeClassCommission?: boolean;
 }
 
 export interface PositionConfig {
@@ -53,14 +71,20 @@ export interface PositionConfig {
   genderSalaryTiers?: GenderSalaryTier[];
   extraNote?: string;
   classCommissionMode?: ClassCommissionMode;
+
+  /** 兼容字段：单一老课单价（旧数据） */
   oldClassFee?: number;
+  /** ⭐ 新增：按业绩档位配置的老课单价（优先于 oldClassFee） */
+  oldClassFees?: OldClassFeeTier[];
+
   courseCommissions?: CourseCommission[];
   performanceSource?: 'self' | 'manager' | 'members' | 'aggregate';
   linkedManagerId?: string;
 
-  commissionTiered?: boolean;
-  baseTiered?: boolean;
+  includedDepartments?: DepartmentKey[];
+  includeSelf?: boolean;
   hasCommission?: boolean;
+  calcFlags?: PositionCalcFlags;
 }
 
 export interface MonthlyCompensationPlan {
@@ -74,67 +98,79 @@ export interface MonthlyCompensationPlan {
 export type CompensationStore = Record<string, MonthlyCompensationPlan>;
 
 /* ============================================================
- * 模拟测算
+ * 课提测算
  * ============================================================ */
-
-export interface SimulationInput {
-  propertyFee: number;
-  electricityFee: number;
-  rent: number;
-}
-
-export type RevenueShareConfig = Record<string, number>;
-
-/**
- * 课提测算输入：只填均价和节数
- * 人数、课提模式、课提值自动从对应职位佣金阶梯取
- */
 export interface CourseCommissionInput {
-  /** 课程名 */
   courseName: string;
-  /** 课程均价（元/节） */
   averagePrice: number;
-  /** 消课数量（节） */
   classCount: number;
-  /**
-   * 对应的职位标题关键字（用于自动匹配 headcount 和阶梯课提）
-   * 例如 "泳教" / "私教"
-   */
   positionKeyword: string;
 }
 
 export type CourseCommissionInputs = Record<string, CourseCommissionInput>;
 
-export interface SimulationBreakdown {
+/* ============================================================
+ * 模拟测算
+ * ============================================================ */
+export interface SimulationInput {
+  propertyFee: number;
+  electricityFee: number;
+  rent: number;
+  waterFee: number;
+  networkFee: number;
+  otherFee: number;
+}
+
+export interface SimulationPositionBreakdown {
   positionId: string;
   title: string;
   headcount: number;
   baseSalary: number;
+  allocatedRevenue: number;
   commissionRate: number;
   commission: number;
-  allocatedRevenue: number;
-  type?: 'shareable' | 'manager' | 'store' | 'fixed';
-  /** 课提明细（仅课程行有） */
-  classCommission?: number;
+}
+
+export interface SimulationCourseBreakdown {
+  courseName: string;
+  averagePrice: number;
+  classCount: number;
+  headcount: number;
+  mode: ClassCommissionMode;
+  value: number;
+  commission: number;
 }
 
 export interface SimulationResult {
   fixedCost: number;
   totalBaseSalary: number;
-  requiredRevenue: number;
   totalCommission: number;
   totalClassCommission: number;
-  breakdown: SimulationBreakdown[];
-  /** 课程课提明细 */
-  courseBreakdown: {
-    courseName: string;
-    averagePrice: number;
-    classCount: number;
-    headcount: number;
-    mode: ClassCommissionMode;
-    value: number;
-    commission: number;
-  }[];
-  feasible: boolean;
+  requiredRevenue: number;
   iterations: number;
+  breakdown: SimulationPositionBreakdown[];
+  courseBreakdown: SimulationCourseBreakdown[];
+}
+
+export type RevenueShareConfig = Record<string, number>;
+
+export interface GenderCount {
+  maleCount: number;
+  femaleCount: number;
+  newbieCount?: number;
+}
+
+export type GenderCountConfig = Record<string, GenderCount>;
+
+export function resolveCalcFlags(
+  position: PositionConfig | undefined
+): Required<PositionCalcFlags> {
+  const f = position?.calcFlags || {};
+  return {
+    includePerformance: f.includePerformance ?? true,
+    includeSalesCommission: f.includeSalesCommission ?? true,
+    includeBaseSalary: f.includeBaseSalary ?? true,
+    includeClassAmount: f.includeClassAmount ?? true,
+    includeClassCommission: f.includeClassCommission ?? true,
+  };
 }

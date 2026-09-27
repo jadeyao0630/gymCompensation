@@ -1,15 +1,16 @@
-import type { PositionConfig, ClassCommissionMode } from '../types/compensation';
+import type {
+  PositionConfig,
+  ClassCommissionMode,
+} from '../types/compensation';
 import { resolvePerformanceTarget } from './performance';
 
+/* ============================================================
+ * 阶梯定位工具
+ * ============================================================ */
 function sortByThreshold<T extends { threshold: number }>(tiers: T[]): T[] {
   return [...tiers].sort((a, b) => a.threshold - b.threshold);
 }
 
-/**
- * 找到命中的阶梯
- * - 严格大于：业绩正好等于门槛时，命中更低一档
- * - 初始值取第一档兜底（业绩 < 第一档门槛时也返回第一档）
- */
 function findHitTier<T extends { threshold: number }>(
   tiers: T[],
   performance: number
@@ -18,64 +19,53 @@ function findHitTier<T extends { threshold: number }>(
   const sorted = sortByThreshold(tiers);
   let hit: T = sorted[0];
   for (const t of sorted) {
-    if (performance > t.threshold) hit = t;
+    if (performance >= t.threshold) hit = t;
     else break;
   }
   return hit;
 }
 
+/* ============================================================
+ * 底薪计算
+ * ============================================================ */
+
+/**
+ * 普通职位：命中底薪阶梯的 amount × 人数
+ * @param overridePerformance 可选，覆盖业绩目标（用于测算）
+ */
 export function calcBaseSalary(
   position: PositionConfig,
   allPositions: PositionConfig[],
   overridePerformance?: number
 ): number {
   if (!position.baseSalaryTiers.length) return 0;
-
-  const tiered = position.baseTiered !== false;
   const target =
     overridePerformance !== undefined
       ? overridePerformance
       : resolvePerformanceTarget(position, allPositions);
-
-  const hit = tiered
-    ? findHitTier(position.baseSalaryTiers, target)
-    : position.baseSalaryTiers[0];
-
-  return hit ? hit.amount * position.headcount : 0;
+  const hit = findHitTier(position.baseSalaryTiers, target);
+  if (!hit) return 0;
+  return hit.amount * position.headcount;
 }
 
-/**
- * 泳教性别底薪
- * - 命中档有 base（统一底薪）→ 用 base
- * - 否则用【男教练】底薪（不再男女平均）
- */
+/** 泳教：命中性别阶梯的底薪 × 人数 */
 export function calcGenderBaseSalary(
   position: PositionConfig,
   allPositions: PositionConfig[],
   overridePerformance?: number
 ): number {
   if (!position.genderSalaryTiers?.length) return 0;
-
-  const tiered = position.baseTiered !== false;
   const target =
     overridePerformance !== undefined
       ? overridePerformance
       : resolvePerformanceTarget(position, allPositions);
-
-  const hit = tiered
-    ? findHitTier(position.genderSalaryTiers, target)
-    : position.genderSalaryTiers[0];
-
+  const hit = findHitTier(position.genderSalaryTiers, target);
   if (!hit) return 0;
-
-  if (hit.base && hit.base > 0) {
-    return hit.base * position.headcount;
-  }
-
-  // 按男教练底薪 × 人数
-  return hit.male * position.headcount;
+  const avg = (hit.male + hit.female) / 2;
+  return avg * position.headcount;
 }
 
+/** 统一入口：总底薪 */
 export function calcTotalBaseSalary(
   position: PositionConfig,
   allPositions: PositionConfig[],
@@ -88,62 +78,58 @@ export function calcTotalBaseSalary(
   return calcBaseSalary(position, allPositions, overridePerformance);
 }
 
+/* ============================================================
+ * 佣金 / 课提
+ * ============================================================ */
+
+/** 取销提比例 */
 export function getCommissionRate(
   position: PositionConfig,
   allPositions: PositionConfig[],
   overridePerformance?: number
 ): number {
-  if (!position.commissionTiers.length) return 0;
-
-  const tiered = position.commissionTiered !== false;
   const target =
     overridePerformance !== undefined
       ? overridePerformance
       : resolvePerformanceTarget(position, allPositions);
-
-  const hit = tiered
-    ? findHitTier(position.commissionTiers, target)
-    : position.commissionTiers[0];
-
+  const hit = findHitTier(position.commissionTiers, target);
   return hit ? hit.rate : 0;
 }
 
+/** 取课提规则 */
 export function getClassCommission(
   position: PositionConfig,
-  allPositions: PositionConfig[],
-  overridePerformance?: number
+  allPositions: PositionConfig[]
 ): { mode: ClassCommissionMode; value: number } {
-  if (!position.commissionTiers.length) {
-    return { mode: position.classCommissionMode || 'percent', value: 0 };
+  const target = resolvePerformanceTarget(position, allPositions);
+  const hit = findHitTier(position.commissionTiers, target);
+
+  if (hit?.classRate !== undefined) {
+    return {
+      mode: hit.classMode || position.classCommissionMode || 'percent',
+      value: hit.classRate,
+    };
   }
 
-  const tiered = position.commissionTiered !== false;
-  const target =
-    overridePerformance !== undefined
-      ? overridePerformance
-      : resolvePerformanceTarget(position, allPositions);
+  const course = position.courseCommissions?.[0];
+  if (course) {
+    return { mode: course.mode, value: course.value };
+  }
 
-  const hit = tiered
-    ? findHitTier(position.commissionTiers, target)
-    : position.commissionTiers[0];
-
-  const mode: ClassCommissionMode =
-    hit?.classMode || position.classCommissionMode || 'percent';
-
-  return { mode, value: hit?.classRate ?? 0 };
+  return { mode: 'percent', value: 0 };
 }
 
+/** 老课单节费用 */
 export function getOldClassFee(position: PositionConfig): number {
   return position.oldClassFee ?? 0;
 }
 
+/** 按课程名取课提 */
 export function getCourseCommission(
   position: PositionConfig,
   courseName: string
 ): { mode: ClassCommissionMode; value: number } | undefined {
-  const c = position.courseCommissions?.find(
-    (x) => x.courseName === courseName
-  );
+  const c = position.courseCommissions?.find((x) => x.courseName === courseName);
   if (!c) return undefined;
   return { mode: c.mode, value: c.value };
 }

@@ -15,9 +15,10 @@ import type {
   SimulationInput,
   RevenueShareConfig,
   CourseCommissionInputs,
+  GenderCountConfig,
 } from '../types/compensation';
-import { calcTotalBaseSalary, getCommissionRate } from '../utils/salary';
-import { calcCourseBreakdown } from '../utils/simulation';
+import { resolveCalcFlags } from '../types/compensation';
+import { calcSimulation, buildShareWeights } from '../utils/simulation';
 
 interface RevenueSliderPanelProps {
   positions: PositionConfig[];
@@ -25,32 +26,19 @@ interface RevenueSliderPanelProps {
   requiredRevenue: number;
   shareConfig: RevenueShareConfig;
   courseCommissions?: CourseCommissionInputs;
+  genderCounts?: GenderCountConfig;
 }
 
-const isStoreManager = (p: PositionConfig) => p.title.includes('店长');
-const isManager = (p: PositionConfig) => p.title.includes('经理');
+const isStoreManager = (p: PositionConfig) =>
+  p.title.includes('店长') || p.title.includes('门店经理');
+
+const isManager = (p: PositionConfig) =>
+  p.title.includes('经理') && !isStoreManager(p);
 
 const hasCommission = (p: PositionConfig) =>
   p.hasCommission !== undefined
     ? p.hasCommission
     : p.commissionTiers.length > 0;
-
-const isShareable = (p: PositionConfig) =>
-  hasCommission(p) && !isStoreManager(p) && !isManager(p);
-
-function findManagerSource(
-  manager: PositionConfig,
-  positions: PositionConfig[]
-): PositionConfig | undefined {
-  const keyword = manager.title.replace('经理', '');
-  return positions.find(
-    (p) =>
-      p.id !== manager.id &&
-      !isManager(p) &&
-      !isStoreManager(p) &&
-      p.title.includes(keyword)
-  );
-}
 
 const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
   positions,
@@ -58,8 +46,15 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
   requiredRevenue,
   shareConfig,
   courseCommissions,
+  genderCounts,
 }) => {
-  const fixedCost = input.propertyFee + input.electricityFee + input.rent;
+  const fixedCost =
+    (input.propertyFee || 0) +
+    (input.electricityFee || 0) +
+    (input.rent || 0) +
+    (input.waterFee || 0) +
+    (input.networkFee || 0) +
+    (input.otherFee || 0);
 
   const maxRevenue = useMemo(
     () => Math.max(requiredRevenue * 2, 200000, 1),
@@ -81,55 +76,100 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
     }
   }, [requiredRevenue, maxRevenue]);
 
-  const allBaseSalaries = useMemo(
-    () =>
-      positions.map((p) => ({
-        position: p,
-        base: calcTotalBaseSalary(p, positions),
-      })),
-    [positions]
+  const weights = useMemo(
+    () => buildShareWeights(positions, shareConfig),
+    [positions, shareConfig]
   );
 
-  const shareablePositions = useMemo(
-    () => positions.filter(isShareable),
-    [positions]
-  );
-  const managers = useMemo(
-    () => positions.filter((p) => isManager(p) && hasCommission(p)),
-    [positions]
-  );
-  const storeManagers = useMemo(
-    () => positions.filter((p) => isStoreManager(p) && hasCommission(p)),
-    [positions]
-  );
-  const fixedPositions = useMemo(
-    () => positions.filter((p) => !hasCommission(p)),
-    [positions]
-  );
+  const result = useMemo(() => {
+    if (!positions.length) return null;
+    return calcSimulation(
+      positions,
+      input,
+      courseCommissions,
+      shareConfig,
+      genderCounts
+    );
+  }, [positions, input, courseCommissions, shareConfig, genderCounts]);
 
-  const totalShare = useMemo(
-    () =>
-      shareablePositions.reduce((s, p) => s + (shareConfig[p.title] || 0), 0),
-    [shareablePositions, shareConfig]
-  );
+  /* 用当前 revenue 重算明细 */
+  const positionRows = useMemo(() => {
+    if (!result) return [];
 
-  const totalHead = useMemo(
-    () => shareablePositions.reduce((s, p) => s + p.headcount, 0),
-    [shareablePositions]
-  );
+    return result.breakdown.map((b) => {
+      const pos = positions.find((p) => p.id === b.positionId);
+      if (!pos) return b;
 
-  const weightOf = (p: PositionConfig): number => {
-    const raw = shareConfig[p.title];
-    if (raw !== undefined && totalShare > 0) {
-      return raw / totalShare;
-    }
-    return totalHead > 0 ? p.headcount / totalHead : 0;
-  };
+      let allocatedRevenue = b.allocatedRevenue;
 
-  /** 课提明细行 */
+      if (isStoreManager(pos)) {
+        const included = pos.includedDepartments ?? ['会籍', '私教', '泳教'];
+        const deptSales: Record<string, number> = {
+          会籍: 0,
+          私教: 0,
+          泳教: 0,
+          运营: 0,
+        };
+        positions.forEach((p) => {
+          if (isManager(p) || isStoreManager(p)) return;
+          const flags = resolveCalcFlags(p);
+          if (!flags.includePerformance) return;
+          const share = weights[p.title] ?? 0;
+          const dept =
+            p.title.includes('会籍')
+              ? '会籍'
+              : p.title.includes('私教') ||
+                p.title.includes('瑜伽') ||
+                p.title.includes('舞蹈') ||
+                p.title.includes('团操')
+              ? '私教'
+              : p.title.includes('泳教') || p.title.includes('游泳')
+              ? '泳教'
+              : '运营';
+          deptSales[dept] += revenue * share;
+        });
+        allocatedRevenue = included.reduce(
+          (s, d) => s + (deptSales[d] || 0),
+          0
+        );
+      } else if (isManager(pos)) {
+        const keyword = pos.title.replace('经理', '');
+        const source = positions.find(
+          (x) =>
+            x.id !== pos.id &&
+            !isManager(x) &&
+            !isStoreManager(x) &&
+            x.title.includes(keyword)
+        );
+        if (source) {
+          const share = weights[source.title] ?? 0;
+          allocatedRevenue = revenue * share;
+        }
+      } else {
+        const share = weights[pos.title] ?? 0;
+        allocatedRevenue = revenue * share;
+      }
+
+      const flags = resolveCalcFlags(pos);
+      const rate = b.commissionRate;
+      const commission = flags.includeSalesCommission
+        ? allocatedRevenue * rate
+        : 0;
+
+      const baseSalary = flags.includeBaseSalary ? b.baseSalary : 0;
+
+      return {
+        ...b,
+        baseSalary,
+        allocatedRevenue,
+        commission,
+      };
+    });
+  }, [result, positions, revenue, weights]);
+
   const courseRows = useMemo(
     () =>
-      calcCourseBreakdown(courseCommissions, positions).map((c) => ({
+      (result?.courseBreakdown || []).map((c) => ({
         positionId: `course-${c.courseName}`,
         title: c.courseName,
         headcount: c.headcount,
@@ -142,126 +182,12 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
         classValue: c.value,
         type: 'course' as const,
       })),
-    [courseCommissions, positions]
+    [result]
   );
-
-  const totalClassCommission = useMemo(
-    () => courseRows.reduce((s, c) => s + (c.classCommission || 0), 0),
-    [courseRows]
-  );
-
-  /** 职位行（销提） */
-  const positionRows = useMemo(() => {
-    const allocated = shareablePositions.map((position) => {
-      const weight = weightOf(position);
-      const allocatedRevenue = revenue * weight;
-
-      const baseSalary = calcTotalBaseSalary(
-        position,
-        positions,
-        allocatedRevenue
-      );
-      const rate = getCommissionRate(position, positions, allocatedRevenue);
-      const commission = allocatedRevenue * rate;
-
-      return {
-        positionId: position.id,
-        title: position.title,
-        headcount: position.headcount,
-        baseSalary,
-        allocatedRevenue,
-        commissionRate: rate,
-        commission,
-        classCommission: 0,
-        classMode: undefined as undefined | 'percent' | 'fixed',
-        classValue: 0,
-        type: 'shareable' as const,
-      };
-    });
-
-    const revenueByTitle = new Map<string, number>();
-    allocated.forEach((a) => revenueByTitle.set(a.title, a.allocatedRevenue));
-
-    const managerRows = managers.map((m) => {
-      const source = findManagerSource(m, positions);
-      const managerRevenue = source
-        ? revenueByTitle.get(source.title) ?? 0
-        : 0;
-
-      const baseSalary = calcTotalBaseSalary(m, positions, managerRevenue);
-      const rate = getCommissionRate(m, positions, managerRevenue);
-      const commission = managerRevenue * rate;
-
-      return {
-        positionId: m.id,
-        title: m.title,
-        headcount: m.headcount,
-        baseSalary,
-        allocatedRevenue: managerRevenue,
-        commissionRate: rate,
-        commission,
-        classCommission: 0,
-        classMode: undefined as undefined | 'percent' | 'fixed',
-        classValue: 0,
-        type: 'manager' as const,
-      };
-    });
-
-    const memberRevenue = allocated.reduce(
-      (s, r) => s + r.allocatedRevenue,
-      0
-    );
-    const storeManagerRows = storeManagers.map((sm) => {
-      const baseSalary = calcTotalBaseSalary(sm, positions, memberRevenue);
-      const rate = getCommissionRate(sm, positions, memberRevenue);
-      const commission = memberRevenue * rate;
-
-      return {
-        positionId: sm.id,
-        title: sm.title,
-        headcount: sm.headcount,
-        baseSalary,
-        allocatedRevenue: memberRevenue,
-        commissionRate: rate,
-        commission,
-        classCommission: 0,
-        classMode: undefined as undefined | 'percent' | 'fixed',
-        classValue: 0,
-        type: 'store' as const,
-      };
-    });
-
-    const fixedRows = fixedPositions.map((p) => ({
-      positionId: p.id,
-      title: p.title,
-      headcount: p.headcount,
-      baseSalary: calcTotalBaseSalary(p, positions),
-      allocatedRevenue: 0,
-      commissionRate: 0,
-      commission: 0,
-      classCommission: 0,
-      classMode: undefined as undefined | 'percent' | 'fixed',
-      classValue: 0,
-      type: 'fixed' as const,
-    }));
-
-    return [...allocated, ...managerRows, ...storeManagerRows, ...fixedRows];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    shareablePositions,
-    revenue,
-    positions,
-    managers,
-    storeManagers,
-    fixedPositions,
-    shareConfig,
-    totalShare,
-    totalHead,
-  ]);
 
   const totalBase = useMemo(
-    () => allBaseSalaries.reduce((s, x) => s + x.base, 0),
-    [allBaseSalaries]
+    () => positionRows.reduce((s, x) => s + x.baseSalary, 0),
+    [positionRows]
   );
 
   const totalPositionCommission = useMemo(
@@ -269,12 +195,22 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
     [positionRows]
   );
 
-  const totalCommission = totalPositionCommission + totalClassCommission;
+  const totalClassCommission = useMemo(
+    () => courseRows.reduce((s, c) => s + (c.classCommission || 0), 0),
+    [courseRows]
+  );
 
+  const totalCommission = totalPositionCommission + totalClassCommission;
   const profit = revenue - totalBase - totalCommission - fixedCost;
 
   const isProfit = profit >= 0;
   const formatMoney = (v: number) => `¥${Math.round(v).toLocaleString()}`;
+
+  /* ⭐ 销提 / 课提 占总佣金比例 */
+  const salesCommissionRatio =
+    totalCommission > 0 ? totalPositionCommission / totalCommission : 0;
+  const classCommissionRatio =
+    totalCommission > 0 ? totalClassCommission / totalCommission : 0;
 
   const requiredPercent = Math.min((requiredRevenue / maxRevenue) * 100, 100);
 
@@ -287,7 +223,7 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
         <div>
           <h3 className="text-sm font-bold text-gray-800">业绩调控测算</h3>
           <p className="text-[11px] text-gray-400">
-            拖动滑块调整业绩，实时查看利润、底薪、佣金
+            拖动滑块调整总业绩，实时查看利润与佣金比例
           </p>
         </div>
       </div>
@@ -339,9 +275,7 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                 [&::-moz-range-thumb]:rounded-full
                 [&::-moz-range-thumb]:bg-white
                 [&::-moz-range-thumb]:border-2
-                [&::-moz-range-thumb]:border-indigo-500
-                [&::-moz-range-thumb]:shadow-md
-                [&::-moz-range-thumb]:cursor-pointer"
+                [&::-moz-range-thumb]:border-indigo-500"
             />
             <div
               className="absolute top-0 h-2 w-0.5 bg-emerald-500 pointer-events-none"
@@ -361,7 +295,7 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
         </div>
 
         {/* 结果卡片 */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-5">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
           <ResultCard
             icon={<TrendingUp className="w-3.5 h-3.5" />}
             label="总业绩"
@@ -410,38 +344,49 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
           />
         </div>
 
-        {/* 利润占比 */}
-        <div className="mb-5">
-          <div className="flex items-center justify-between mb-1.5 text-[11px]">
-            <span className="text-gray-500">
-              利润占比 · 总佣金 {formatMoney(totalCommission)}
-            </span>
-            <span
-              className={`font-semibold tabular-nums ${
-                isProfit ? 'text-emerald-600' : 'text-red-600'
-              }`}
-            >
-              {revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : '0.0'}%
-            </span>
+        {/* ⭐ 销提 / 课提 占比 */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+          <div className="rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2.5">
+            <div className="flex items-center gap-1 text-[11px] text-amber-700 mb-0.5">
+              <BadgePercent className="w-3 h-3" />
+              <span className="font-medium">销提比例</span>
+            </div>
+            <p className="font-bold text-sm text-amber-700 tabular-nums">
+              {(salesCommissionRatio * 100).toFixed(1)}%
+            </p>
+            <p className="text-[10px] text-amber-500 mt-0.5 tabular-nums">
+              {formatMoney(totalPositionCommission)} / {formatMoney(totalCommission)}
+            </p>
           </div>
-          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div
-              className={`h-full transition-all duration-300 ${
-                isProfit
-                  ? 'bg-gradient-to-r from-emerald-400 to-emerald-500'
-                  : 'bg-gradient-to-r from-red-400 to-red-500'
-              }`}
-              style={{
-                width: `${Math.min(
-                  Math.max((profit / Math.max(revenue, 1)) * 100, 0),
-                  100
-                )}%`,
-              }}
-            />
+
+          <div className="rounded-xl border border-purple-100 bg-purple-50/60 px-3 py-2.5">
+            <div className="flex items-center gap-1 text-[11px] text-purple-700 mb-0.5">
+              <BookOpen className="w-3 h-3" />
+              <span className="font-medium">课提比例</span>
+            </div>
+            <p className="font-bold text-sm text-purple-700 tabular-nums">
+              {(classCommissionRatio * 100).toFixed(1)}%
+            </p>
+            <p className="text-[10px] text-purple-500 mt-0.5 tabular-nums">
+              {formatMoney(totalClassCommission)} / {formatMoney(totalCommission)}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2.5">
+            <div className="flex items-center gap-1 text-[11px] text-indigo-700 mb-0.5">
+              <PiggyBank className="w-3 h-3" />
+              <span className="font-medium">总佣金</span>
+            </div>
+            <p className="font-bold text-sm text-indigo-700 tabular-nums">
+              {formatMoney(totalCommission)}
+            </p>
+            <p className="text-[10px] text-indigo-500 mt-0.5">
+              销提 + 课提
+            </p>
           </div>
         </div>
 
-        {/* 明细表：销提、课提分列 */}
+        {/* 明细表 */}
         <div className="bg-gray-50/60 backdrop-blur rounded-xl border border-gray-100 overflow-hidden">
           <table className="w-full text-xs">
             <thead>
@@ -457,57 +402,62 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
               </tr>
             </thead>
             <tbody>
-              {/* 职位行 */}
-              {positionRows.map((b) => (
-                <tr
-                  key={b.positionId}
-                  className={`border-b border-gray-100 last:border-0 hover:bg-white/80 ${
-                    b.type === 'fixed' ? 'opacity-60' : ''
-                  }`}
-                >
-                  <td className="px-3 py-2 text-gray-700 font-medium">
-                    {b.title}
-                    {b.type === 'manager' && (
-                      <span className="ml-1 text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
-                        经理
-                      </span>
-                    )}
-                    {b.type === 'store' && (
-                      <span className="ml-1 text-[10px] text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded">
-                        汇总
-                      </span>
-                    )}
-                    {b.type === 'fixed' && (
-                      <span className="ml-1 text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
-                        无佣金
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-right text-gray-500 tabular-nums">
-                    {b.headcount || '—'}
-                  </td>
-                  <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
-                    {b.baseSalary > 0 ? formatMoney(b.baseSalary) : '—'}
-                  </td>
-                  <td className="px-3 py-2 text-right text-gray-700 tabular-nums">
-                    {b.allocatedRevenue > 0
-                      ? formatMoney(b.allocatedRevenue)
-                      : '—'}
-                  </td>
-                  <td className="px-3 py-2 text-right text-sky-600 tabular-nums">
-                    {b.commissionRate > 0
-                      ? `${(b.commissionRate * 100).toFixed(1)}%`
-                      : '—'}
-                  </td>
-                  <td className="px-3 py-2 text-right text-amber-600 tabular-nums">
-                    {b.commission > 0 ? formatMoney(b.commission) : '—'}
-                  </td>
-                  <td className="px-3 py-2 text-right text-gray-300">—</td>
-                  <td className="px-3 py-2 text-right text-gray-300">—</td>
-                </tr>
-              ))}
+              {positionRows.map((b) => {
+                const pos = positions.find((p) => p.id === b.positionId);
+                const isStore = pos ? isStoreManager(pos) : false;
+                const isMgr = pos ? isManager(pos) : false;
+                const noCommission = pos ? !hasCommission(pos) : false;
 
-              {/* 课提行 */}
+                return (
+                  <tr
+                    key={b.positionId}
+                    className={`border-b border-gray-100 last:border-0 hover:bg-white/80 ${
+                      noCommission ? 'opacity-60' : ''
+                    }`}
+                  >
+                    <td className="px-3 py-2 text-gray-700 font-medium">
+                      {b.title}
+                      {isMgr && (
+                        <span className="ml-1 text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
+                          经理
+                        </span>
+                      )}
+                      {isStore && (
+                        <span className="ml-1 text-[10px] text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded">
+                          汇总
+                        </span>
+                      )}
+                      {noCommission && (
+                        <span className="ml-1 text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                          无佣金
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right text-gray-500 tabular-nums">
+                      {b.headcount || '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
+                      {b.baseSalary > 0 ? formatMoney(b.baseSalary) : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right text-gray-700 tabular-nums">
+                      {b.allocatedRevenue > 0
+                        ? formatMoney(b.allocatedRevenue)
+                        : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right text-sky-600 tabular-nums">
+                      {b.commissionRate > 0
+                        ? `${(b.commissionRate * 100).toFixed(1)}%`
+                        : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right text-amber-600 tabular-nums">
+                      {b.commission > 0 ? formatMoney(b.commission) : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right text-gray-300">—</td>
+                    <td className="px-3 py-2 text-right text-gray-300">—</td>
+                  </tr>
+                );
+              })}
+
               {courseRows.map((c) => (
                 <tr
                   key={c.positionId}
@@ -579,9 +529,8 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
 
         <p className="text-[11px] text-gray-400 mt-3 leading-relaxed flex items-center gap-1">
           <PiggyBank className="w-3 h-3" />
-          利润 = 总业绩 − 总底薪（含全部职位） − 总佣金（销提 + 课提） − 固定成本（
-          {formatMoney(fixedCost)}）· 按分配比例分摊 · 经理取对应成员业绩 · 店长 =
-          三者合计
+          利润 = 总业绩 − 总底薪 − 总佣金 − 固定成本（
+          {formatMoney(fixedCost)}）
         </p>
       </div>
     </div>

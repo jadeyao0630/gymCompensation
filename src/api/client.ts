@@ -2,10 +2,17 @@ import axios, { AxiosError } from 'axios';
 import type { AxiosInstance } from 'axios';
 import type { ApiError } from './types';
 
+/* ============================================================
+ * ⭐ 方案 A：baseURL 设为空字符串
+ *   前端请求路径保持原样（例如 /api/swimming_class_statistics）
+ *   Vite 代理会把 /api/* 转发到 http://<IP>:4000/api/*
+ *
+ *   生产环境可用 VITE_API_BASE 覆盖成完整地址
+ * ============================================================ */
 export const API_BASE =
-  import.meta.env.VITE_API_BASE || 'http://localhost:4000';
+  import.meta.env.VITE_API_BASE || '';
 
-console.log('[api] baseURL:', API_BASE);
+console.log('[api] baseURL:', API_BASE || '(相对路径，由 Vite 代理转发)');
 
 export const api: AxiosInstance = axios.create({
   baseURL: API_BASE,
