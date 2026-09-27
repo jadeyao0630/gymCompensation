@@ -1,7 +1,17 @@
-import React from 'react';
-import { Calendar, Sparkles, Store } from 'lucide-react';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Calendar,
+  Sparkles,
+  Store,
+  LogOut,
+  KeyRound,
+  User as UserIcon,
+} from 'lucide-react';
 import { formatMonthLabel } from '../utils/format';
 import { getStoreById } from '../constants/stores';
+import { useAuth } from '../contexts/AuthContext';
+import ChangePasswordDialog from './ChangePasswordDialog';
 
 interface PageHeaderProps {
   selectedMonth: string;
@@ -10,13 +20,20 @@ interface PageHeaderProps {
 
 const PageHeader: React.FC<PageHeaderProps> = ({ selectedMonth, storeId }) => {
   const storeName = getStoreById(storeId || '')?.name || '—';
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [showChangePwd, setShowChangePwd] = useState(false);
+
+  const handleLogout = async () => {
+    if (!confirm('确定要退出登录吗？')) return;
+    await logout();
+    navigate('/login', { replace: true });
+  };
 
   return (
     <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-blue-600 to-violet-600 shadow-2xl shadow-indigo-500/20 p-8 sm:p-10 mb-8 text-white">
-      {/* 装饰光晕 */}
       <div className="absolute -top-24 -right-24 w-72 h-72 rounded-full bg-white/10 blur-3xl animate-glow pointer-events-none" />
       <div className="absolute -bottom-32 -left-20 w-80 h-80 rounded-full bg-violet-400/20 blur-3xl animate-glow pointer-events-none" />
-      {/* 网格 */}
       <div
         className="absolute inset-0 opacity-[0.07] pointer-events-none"
         style={{
@@ -42,7 +59,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({ selectedMonth, storeId }) => {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {/* 门店徽章 */}
           <div className="flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-3 border border-white/25 shadow-lg">
             <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
@@ -70,8 +87,45 @@ const PageHeader: React.FC<PageHeaderProps> = ({ selectedMonth, storeId }) => {
               </p>
             </div>
           </div>
+
+          {/* 用户信息 + 改密 + 登出 */}
+          <div className="flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-3 py-2 border border-white/25 shadow-lg">
+            <div className="w-8 h-8 rounded-full bg-white/25 flex items-center justify-center">
+              <UserIcon className="w-4 h-4" />
+            </div>
+            <div className="hidden sm:block">
+              <p className="text-[10px] uppercase tracking-wider text-blue-100/80 font-medium">
+                当前用户
+              </p>
+              <p className="text-xs font-semibold">
+                {user?.displayName || user?.username || '未登录'}
+              </p>
+            </div>
+            <button
+              onClick={() => setShowChangePwd(true)}
+              title="修改密码"
+              className="ml-1 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-amber-500/40 border border-white/20 hover:border-amber-300/40 text-xs font-medium transition active:scale-[0.97]"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              改密
+            </button>
+            <button
+              onClick={handleLogout}
+              title="退出登录"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-red-500/40 border border-white/20 hover:border-red-300/40 text-xs font-medium transition active:scale-[0.97]"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              登出
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* 改密对话框 */}
+      <ChangePasswordDialog
+        open={showChangePwd}
+        onClose={() => setShowChangePwd(false)}
+      />
     </div>
   );
 };

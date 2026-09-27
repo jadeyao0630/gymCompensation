@@ -27,7 +27,7 @@ export async function fetchPlanByMonth(
   return res.data.data as MonthlyCompensationPlan | null;
 }
 
-/** 保存方案（新增或覆盖） */
+/** 保存方案 */
 export async function savePlan(
   storeId: string,
   plan: MonthlyCompensationPlan
@@ -48,7 +48,7 @@ export async function deletePlan(storeId: string, month: string) {
   });
 }
 
-/** 初始化门店：无方案时预置上月 + 当月空方案 */
+/** 初始化门店 */
 export async function initStorePlans(storeId: string) {
   const res = await api.post('/api/compensation/init', { storeId });
   return res.data.data as {
@@ -58,8 +58,22 @@ export async function initStorePlans(storeId: string) {
   };
 }
 
+/** ⭐ 复制方案（同门店，fromMonth → toMonth） */
+export async function copyPlan(
+  storeId: string,
+  fromMonth: string,
+  toMonth: string
+) {
+  const res = await api.post('/api/compensation/plan/copy', {
+    storeId,
+    fromMonth,
+    toMonth,
+  });
+  return res.data.data as { id: number; positionCount: number };
+}
+
 /* ============================================================
- * ⭐ 测算设置
+ * 测算设置
  * ============================================================ */
 
 export interface SimulationSetting {
@@ -94,4 +108,18 @@ export async function saveSimulationSetting(
     input,
   });
   return res.data;
+}
+
+/** ⭐ 复制测算设置 */
+export async function copySimulationSetting(
+  storeId: string,
+  fromMonth: string,
+  toMonth: string
+) {
+  const res = await api.post('/api/simulation/setting/copy', {
+    storeId,
+    fromMonth,
+    toMonth,
+  });
+  return res.data.data as { copied: boolean; reason?: string };
 }

@@ -2,15 +2,7 @@ import axios, { AxiosError } from 'axios';
 import type { AxiosInstance } from 'axios';
 import type { ApiError } from './types';
 
-/* ============================================================
- * ⭐ 方案 A：baseURL 设为空字符串
- *   前端请求路径保持原样（例如 /api/swimming_class_statistics）
- *   Vite 代理会把 /api/* 转发到 http://<IP>:4000/api/*
- *
- *   生产环境可用 VITE_API_BASE 覆盖成完整地址
- * ============================================================ */
-export const API_BASE =
-  import.meta.env.VITE_API_BASE || '';
+export const API_BASE = import.meta.env.VITE_API_BASE || '';
 
 console.log('[api] baseURL:', API_BASE || '(相对路径，由 Vite 代理转发)');
 
@@ -22,6 +14,14 @@ export const api: AxiosInstance = axios.create({
 });
 
 api.interceptors.request.use((config) => {
+  /* ⭐ 自动带上 Authorization */
+  const token =
+    localStorage.getItem('gym_admin_token') ||
+    sessionStorage.getItem('gym_admin_token');
+  if (token) {
+    config.headers = config.headers || {};
+    (config.headers as any).Authorization = `Bearer ${token}`;
+  }
   console.log('[api request]', config.method?.toUpperCase(), config.url, config.data);
   return config;
 });
@@ -33,6 +33,21 @@ api.interceptors.response.use(
   },
   (error: AxiosError<ApiError>) => {
     console.error('[api error]', error.config?.url, error.message, error.response?.data);
+
+    /* ⭐ 401 → 清 token + 跳登录 */
+    if (error.response?.status === 401) {
+      localStorage.removeItem('gym_admin_token');
+      localStorage.removeItem('gym_admin_user');
+      sessionStorage.removeItem('gym_admin_token');
+      sessionStorage.removeItem('gym_admin_user');
+      if (
+        typeof window !== 'undefined' &&
+        window.location.pathname !== '/login'
+      ) {
+        window.location.href = '/login';
+      }
+    }
+
     return Promise.reject(error);
   }
 );
