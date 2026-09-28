@@ -41,6 +41,8 @@ export interface CourseCommission {
   mode: ClassCommissionMode;
   value: number;
   note?: string;
+  /** ⭐ 课程单价（仅前端展示用） */
+  singlePrice?: number;
 }
 
 /** ⭐ 老课费用：按业绩门槛配置的单价（元/节） */
@@ -72,10 +74,9 @@ export interface PositionConfig {
   extraNote?: string;
   classCommissionMode?: ClassCommissionMode;
 
-  /** 兼容字段：单一老课单价（旧数据） */
   oldClassFee?: number;
-  /** ⭐ 新增：按业绩档位配置的老课单价（优先于 oldClassFee） */
   oldClassFees?: OldClassFeeTier[];
+  oldClassFeeTiers?: OldClassFeeTier[];
 
   courseCommissions?: CourseCommission[];
   performanceSource?: 'self' | 'manager' | 'members' | 'aggregate';
@@ -85,6 +86,9 @@ export interface PositionConfig {
   includeSelf?: boolean;
   hasCommission?: boolean;
   calcFlags?: PositionCalcFlags;
+
+  /** ⭐ 禁用后不在「职位列表」中显示，数据保留 */
+  disabled?: boolean;
 }
 
 export interface MonthlyCompensationPlan {

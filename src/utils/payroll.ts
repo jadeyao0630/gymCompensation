@@ -10,6 +10,7 @@ import { normalizePositionTitle, isManagerTitle } from '../constants/positions';
 
 export type Gender = 'male' | 'female' | 'newbie';
 
+/** ⭐ 单个会员的上课明细（支持自定义课提方式） */
 export interface ClassMemberDetail {
   courseName: string;
   memberName: string;
@@ -17,6 +18,17 @@ export interface ClassMemberDetail {
   signNum: number;
   price: number;
   amount: number;
+
+  /** ⭐ 该会员这条记录自定义课提方式（覆盖课程级默认） */
+  mode?: 'percent' | 'fixed';
+  /** ⭐ 该会员这条记录自定义课提值（percent: 0.3；fixed: 50） */
+  value?: number;
+}
+
+/** ⭐ 单门课的课提率 */
+export interface CourseCommissionRate {
+  rate: number;
+  mode: 'percent' | 'fixed';
 }
 
 export interface EmployeePerformance {
@@ -53,7 +65,9 @@ export interface PayrollResult {
   hitBaseSalary: number;
   baseSalary: number;
   salesCommission: number;
+
   classCommissionDetail?: Record<string, number>;
+  courseCommissionRates?: Record<string, CourseCommissionRate>;
   classCommission: number;
 
   classMemberDetail?: ClassMemberDetail[];
@@ -440,13 +454,12 @@ export function calcEmployeePayroll(
   position: PositionConfig,
   perf: EmployeePerformance
 ): PayrollResult {
-  /* ⭐ 运营主管专属分支：底薪 + 佣金（店长销售 × 3%） */
+  /* 运营主管专属 */
   if (position.title === '运营主管') {
     const managerSalesBase = perf.managerSalesBase ?? 0;
     const rate = 0.03;
     const opsCommission = Math.round(managerSalesBase * rate * 100) / 100;
 
-    /* 底薪从岗位配置的 baseSalaryTiers[0] 取（Excel 里配的固定底薪） */
     const baseTier = (position.baseSalaryTiers || [])[0];
     const baseSalary = baseTier?.amount ?? 0;
 
@@ -478,6 +491,7 @@ export function calcEmployeePayroll(
       baseSalary,
       salesCommission: opsCommission,
       classCommissionDetail: undefined,
+      courseCommissionRates: undefined,
       classCommission: 0,
       classMemberDetail: [],
       fullAttendance,
@@ -510,10 +524,13 @@ export function calcEmployeePayroll(
     ? perf.salesAmount * hitCommissionRate
     : 0;
 
+  /* ---------- 课提 ---------- */
   let classCommission = 0;
   const classCommissionDetail: Record<string, number> = {};
+  const courseCommissionRates: Record<string, CourseCommissionRate> = {};
 
   if (flags.includeClassCommission) {
+    /* 1) 先算默认课提率 */
     if (isSwimCoach && perf.classByCourse) {
       const classRate = hitCommissionTier?.classRate ?? 0;
       const oldClassFees = position.oldClassFees ?? [];
@@ -530,43 +547,64 @@ export function calcEmployeePayroll(
         return position.oldClassFee;
       })();
 
-      Object.entries(perf.classByCourse).forEach(([course, v]) => {
+      Object.keys(perf.classByCourse).forEach((course) => {
         const isOld = /老课/.test(course);
-        let fee = 0;
         if (isOld && hitOldFee !== undefined) {
-          fee = v.count * hitOldFee;
+          courseCommissionRates[course] = { rate: hitOldFee, mode: 'fixed' };
         } else if (classRate > 0) {
-          fee = v.amount * classRate;
-        }
-        if (fee > 0) {
-          classCommissionDetail[course] = fee;
-          classCommission += fee;
+          courseCommissionRates[course] = { rate: classRate, mode: 'percent' };
         }
       });
     } else {
       const courseCommissions = position.courseCommissions ?? [];
       if (courseCommissions.length > 0 && perf.classByCourse) {
-        Object.entries(perf.classByCourse).forEach(([course, v]) => {
+        Object.keys(perf.classByCourse).forEach((course) => {
           const rule =
             courseCommissions.find((c) => c.courseName === course) ||
             courseCommissions.find(
               (c) => course.includes(c.courseName) || c.courseName.includes(course)
             );
-          if (!rule) return;
-          let fee = 0;
-          if (rule.mode === 'percent') fee = v.amount * rule.value;
-          else fee = v.count * rule.value;
-          classCommissionDetail[course] = fee;
-          classCommission += fee;
+          if (rule) {
+            courseCommissionRates[course] = { rate: rule.value, mode: rule.mode };
+          }
         });
       }
-      if (classCommission === 0 && hitCommissionTier?.classRate !== undefined) {
+      if (
+        Object.keys(courseCommissionRates).length === 0 &&
+        hitCommissionTier?.classRate !== undefined &&
+        perf.classByCourse
+      ) {
         const mode = hitCommissionTier.classMode || 'percent';
-        classCommission =
-          mode === 'percent'
-            ? perf.classAmount * hitCommissionTier.classRate
-            : perf.classCount * hitCommissionTier.classRate;
+        Object.keys(perf.classByCourse).forEach((course) => {
+          courseCommissionRates[course] = {
+            rate: hitCommissionTier.classRate as number,
+            mode,
+          };
+        });
       }
+    }
+
+    /* 2) 逐会员计算（会员自定义优先） */
+    if (perf.classMemberDetail && perf.classMemberDetail.length > 0) {
+      perf.classMemberDetail.forEach((m) => {
+        const course = m.courseName;
+        const fallback = courseCommissionRates[course];
+        const mode = m.mode ?? fallback?.mode ?? 'percent';
+        const value = m.value ?? fallback?.rate ?? 0;
+
+        const fee = mode === 'percent' ? m.amount * value : m.signNum * value;
+
+        classCommission += fee;
+        classCommissionDetail[course] = (classCommissionDetail[course] ?? 0) + fee;
+      });
+    } else if (perf.classByCourse) {
+      Object.entries(perf.classByCourse).forEach(([course, v]) => {
+        const r = courseCommissionRates[course];
+        if (!r) return;
+        const fee = r.mode === 'percent' ? v.amount * r.rate : v.count * r.rate;
+        classCommission += fee;
+        classCommissionDetail[course] = fee;
+      });
     }
   }
 
@@ -601,6 +639,7 @@ export function calcEmployeePayroll(
     baseSalary,
     salesCommission,
     classCommissionDetail,
+    courseCommissionRates,
     classCommission,
     classMemberDetail: perf.classMemberDetail ?? [],
     fullAttendance,
@@ -783,7 +822,6 @@ export function collectMissingPositionDetails(
 
 /* ============================================================
  * 部门统计
- *   ⭐ 运营主管：不计人数，但底薪 / 销售基数 / 销提 / 总计都累加
  * ============================================================ */
 export interface DepartmentStats {
   department: Department;
@@ -834,7 +872,6 @@ export function calcDepartmentStats(
     const dept = getDepartmentOf(r.positionTitle);
     const s = ensure(dept);
 
-    /* ⭐ 运营主管：不计人数，但各项金额累加 */
     if (r.positionTitle === '运营主管') {
       s.baseSalary += r.baseSalary;
       s.salesAmount += r.salesAmount;

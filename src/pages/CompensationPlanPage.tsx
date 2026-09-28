@@ -45,11 +45,11 @@ import PositionOverview from '../components/PositionOverview';
 import MonthPickerDialog from '../components/MonthPickerDialog';
 import StoreSwitcher from '../components/StoreSwitcher';
 import { useStore } from '../contexts/StoreContext';
+import { useAuth } from '../contexts/AuthContext';
 
 const STORAGE_KEY = 'gym_compensation_store_v2';
 const UNDO_LIMIT = 20;
 const SAVE_DEBOUNCE_MS = 400;
-
 const INIT_FLAG_PREFIX = 'gym_store_initialized_';
 
 type FullStore = Record<string, CompensationStore>;
@@ -66,6 +66,7 @@ const CompensationPlanPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { storeId } = useStore();
+  const { isSuperAdmin } = useAuth();
 
   const [fullStore, setFullStore] = useState<FullStore>({});
   const [selectedMonth, setSelectedMonth] = useState<string>(
@@ -83,10 +84,7 @@ const CompensationPlanPage: React.FC = () => {
 
   const undoStackRef = useRef<UndoEntry[]>([]);
   const [undoDepth, setUndoDepth] = useState(0);
-
   const saveTimerRef = useRef<number | null>(null);
-
-  /* ⭐ 关键：记录「本门店是否已执行过"默认月份选择"」，避免重复覆盖用户选择 */
   const isInitialSelectDoneRef = useRef<boolean>(false);
 
   const store: CompensationStore = fullStore[storeId] || {};
@@ -189,7 +187,6 @@ const CompensationPlanPage: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, [handleUndo]);
 
-  /* 首次加载本地缓存 */
   useEffect(() => {
     const v1 = localStorage.getItem('gym_compensation_store_v1');
     const v2 = localStorage.getItem(STORAGE_KEY);
@@ -210,7 +207,6 @@ const CompensationPlanPage: React.FC = () => {
     }
   }, []);
 
-  /* 切门店：拉月份列表 → 只加不减 / 无则初始化（带标记） */
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -279,41 +275,30 @@ const CompensationPlanPage: React.FC = () => {
     };
   }, [storeId]);
 
-  /* 切门店清空撤销栈 + 重置默认月份标记 */
   useEffect(() => {
     undoStackRef.current = [];
     setUndoDepth(0);
     isInitialSelectDoneRef.current = false;
   }, [storeId]);
 
-  /* ============================================================
-   * ⭐ 切门店时选默认月份：只依赖 storeId，且只执行一次
-   * ============================================================ */
   useEffect(() => {
     if (isInitialSelectDoneRef.current) return;
-
     const months = Object.keys(fullStore[storeId] || {}).sort();
     if (months.length > 0) {
       setSelectedMonth(months[months.length - 1]);
       isInitialSelectDoneRef.current = true;
-    } else {
-      /* 还没拉到数据，等 fullStore 更新后再判断（下面第二个 effect 处理） */
     }
   }, [storeId, fullStore]);
 
-  /* 当 fullStore 有数据但 selectedMonth 还是空 → 补选最新月份（只做一次） */
   useEffect(() => {
     if (isInitialSelectDoneRef.current) return;
     if (selectedMonth) return;
-
     const months = Object.keys(fullStore[storeId] || {}).sort();
     if (months.length === 0) return;
-
     setSelectedMonth(months[months.length - 1]);
     isInitialSelectDoneRef.current = true;
   }, [storeId, fullStore, selectedMonth]);
 
-  /* URL 参数优先（首次进入） */
   useEffect(() => {
     const m = searchParams.get('month');
     if (m) {
@@ -322,7 +307,6 @@ const CompensationPlanPage: React.FC = () => {
     }
   }, [searchParams]);
 
-  /* 选中月份但本地为空 → 从 API 拉详情 */
   useEffect(() => {
     if (!selectedMonth) return;
     const localPlan = fullStore[storeId]?.[selectedMonth];
@@ -344,7 +328,6 @@ const CompensationPlanPage: React.FC = () => {
           } catch {}
           return next;
         });
-        console.log('[CompensationPage] 已从 API 加载方案', storeId, selectedMonth);
       } catch (e) {
         console.warn('[CompensationPage] 加载方案详情失败', e);
       }
@@ -357,20 +340,24 @@ const CompensationPlanPage: React.FC = () => {
 
   const currentPlan = selectedMonth ? store[selectedMonth] : undefined;
 
+  /* ⭐ 职位列表：过滤掉 disabled 的 */
   const currentPositions = useMemo(
-    () => currentPlan?.positions.filter((p) => p.category === activeTab) || [],
+    () =>
+      currentPlan?.positions.filter(
+        (p) => p.category === activeTab && !p.disabled
+      ) || [],
     [currentPlan, activeTab]
   );
 
   const totalHeadcount =
-    currentPlan?.positions.reduce((s, p) => s + p.headcount, 0) || 0;
+    currentPlan?.positions
+      .filter((p) => !p.disabled)
+      .reduce((s, p) => s + p.headcount, 0) || 0;
   const totalBase =
-    currentPlan?.positions.reduce(
-      (s, p) => s + calcTotalBaseSalary(p, currentPlan.positions),
-      0
-    ) || 0;
+    currentPlan?.positions
+      .filter((p) => !p.disabled)
+      .reduce((s, p) => s + calcTotalBaseSalary(p, currentPlan.positions), 0) || 0;
 
-  /* ⭐ 月份切换（供 Toolbar 调用） */
   const handleSelectMonth = useCallback(
     (m: string) => {
       isInitialSelectDoneRef.current = true;
@@ -380,9 +367,30 @@ const CompensationPlanPage: React.FC = () => {
     [navigate]
   );
 
-  /* ============================================================
-   * 统一导入：按扩展名分流 Excel / JSON
-   * ============================================================ */
+  /* ⭐ 切换职位禁用状态 */
+  const handleToggleDisabled = (title: string, disabled: boolean) => {
+    if (!currentPlan) return;
+    const target = currentPlan.positions.find((p) => p.title === title);
+    if (!target) {
+      alert(`职位「${title}」不存在，无法切换`);
+      return;
+    }
+
+    pushUndo(
+      currentPlan.month,
+      currentPlan,
+      disabled ? `禁用职位「${title}」` : `启用职位「${title}」`
+    );
+
+    const nextPlan: MonthlyCompensationPlan = {
+      ...currentPlan,
+      positions: currentPlan.positions.map((p) =>
+        p.title === title ? { ...p, disabled } : p
+      ),
+    };
+    persistPlan(currentPlan.month, nextPlan);
+  };
+
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -463,7 +471,6 @@ const CompensationPlanPage: React.FC = () => {
     }
   };
 
-  /* 导出 JSON */
   const handleExport = () => {
     if (!currentPlan) return;
     const blob = new Blob([JSON.stringify(currentPlan, null, 2)], {
@@ -477,7 +484,6 @@ const CompensationPlanPage: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  /* 新增月份（支持复制） */
   const handleAddMonth = async (
     month: string,
     copyFrom?: string,
@@ -564,13 +570,11 @@ const CompensationPlanPage: React.FC = () => {
     }
   };
 
-  /* 删除月份 */
   const removeMonth = async () => {
     if (!selectedMonth || !currentPlan) return;
     if (!confirm(`确定删除 ${formatMonthLabel(selectedMonth)} 的全部配置？`)) return;
 
     const monthToDelete = selectedMonth;
-
     pushUndo(monthToDelete, currentPlan, '删除月份');
 
     setFullStore((prev) => {
@@ -588,7 +592,6 @@ const CompensationPlanPage: React.FC = () => {
     if (dbOnline) {
       try {
         await deletePlan(storeId, monthToDelete);
-        console.log('[removeMonth] 已从数据库删除', storeId, monthToDelete);
       } catch (e) {
         console.error('[removeMonth] 数据库删除失败', e);
         setSaveStatus('error');
@@ -607,7 +610,6 @@ const CompensationPlanPage: React.FC = () => {
     }
   };
 
-  /* 职位操作 */
   const updatePlan = (
     updates: Partial<MonthlyCompensationPlan>,
     undoLabel: string
@@ -680,7 +682,6 @@ const CompensationPlanPage: React.FC = () => {
     navigate(`/simulation?month=${selectedMonth}`);
   };
 
-  /* 状态徽章 */
   const StatusBadge: React.FC = () => {
     if (!dbOnline) {
       return (
@@ -749,18 +750,20 @@ const CompensationPlanPage: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={goToSimulation}
-              disabled={!selectedMonth}
-              className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] ${
-                selectedMonth
-                  ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-indigo-500/20'
-                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              <Sliders className="w-4 h-4" />
-              去测算
-            </button>
+            {isSuperAdmin && (
+              <button
+                onClick={goToSimulation}
+                disabled={!selectedMonth}
+                className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] ${
+                  selectedMonth
+                    ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-indigo-500/20'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                <Sliders className="w-4 h-4" />
+                去测算
+              </button>
+            )}
 
             <button
               onClick={goToPayroll}
@@ -777,7 +780,6 @@ const CompensationPlanPage: React.FC = () => {
           </div>
         </div>
 
-        {/* ⭐ onSelectMonth 用 handleSelectMonth（同步 URL） */}
         <Toolbar
           months={Object.keys(store).sort()}
           selectedMonth={selectedMonth}
@@ -809,7 +811,7 @@ const CompensationPlanPage: React.FC = () => {
               <StatCard
                 icon={<Briefcase className="w-5 h-5" />}
                 label="职位数"
-                value={currentPlan.positions.length}
+                value={currentPlan.positions.filter((p) => !p.disabled).length}
                 gradient="from-blue-500 to-indigo-500"
                 glow="bg-blue-300"
               />
@@ -829,14 +831,16 @@ const CompensationPlanPage: React.FC = () => {
               />
             </div>
 
+            {/* ⭐ 职位总览：带禁用开关 */}
             <PositionOverview
               positions={currentPlan.positions}
               onGoTo={(cat) => setActiveTab(cat)}
+              onToggleDisabled={handleToggleDisabled}
             />
 
             <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
               <CategoryTabs
-                positions={currentPlan.positions}
+                positions={currentPlan.positions.filter((p) => !p.disabled)}
                 active={activeTab}
                 onChange={setActiveTab}
               />
@@ -847,7 +851,9 @@ const CompensationPlanPage: React.FC = () => {
                     <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-gray-100 to-gray-50 flex items-center justify-center mb-4">
                       <Briefcase className="w-7 h-7 text-gray-300" />
                     </div>
-                    <p className="text-sm text-gray-400 mb-1">该分类下暂无职位</p>
+                    <p className="text-sm text-gray-400 mb-1">
+                      该分类下暂无职位
+                    </p>
                     <p className="text-xs text-gray-300">点击下方按钮新增</p>
                   </div>
                 ) : (

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Trash2, Users, Wallet, StickyNote, Target, Store } from 'lucide-react';
 import type {
   PositionConfig,
@@ -13,6 +13,12 @@ import { resolveCalcFlags } from '../types/compensation';
 import { uid } from '../utils/id';
 import { calcTotalBaseSalary } from '../utils/salary';
 import { resolvePerformanceTarget } from '../utils/performance';
+import { useStore } from '../contexts/StoreContext';
+import {
+  fetchCardList,
+  resolveCardTypeByPosition,
+  type CardItem,
+} from '../api/card';
 import TierEditor from './TierEditor';
 import GenderTierEditor from './GenderTierEditor';
 import CourseCommissionEditor from './CourseCommissionEditor';
@@ -119,19 +125,72 @@ const PositionCard: React.FC<PositionCardProps> = ({
   onUpdate,
   onRemove,
 }) => {
-  const isSwimCoach =
-    position.title.includes('泳教') && !position.title.includes('经理');
-  const isSwimOrPersonal =
-    position.title.includes('泳教') || position.title.includes('私教');
+  const { storeId } = useStore();
 
-  const showClassCommission = isSwimOrPersonal;
+  /* ⭐ 课程列表 */
+  const [cardOptions, setCardOptions] = useState<CardItem[]>([]);
+  const [loadingCards, setLoadingCards] = useState(false);
+
   const showCourseCommission =
     position.title.includes('泳教') ||
     position.title.includes('私教') ||
     position.title.includes('泳教经理') ||
     position.title.includes('瑜伽') ||
     position.title.includes('舞蹈') ||
-    position.title.includes('团操');
+    position.title.includes('团操') ||
+    position.category === 'swim' ||
+    position.category === 'personalTraining';
+
+  useEffect(() => {
+    if (!showCourseCommission) {
+      setCardOptions([]);
+      return;
+    }
+
+    const cardType = resolveCardTypeByPosition(
+      position.title,
+      position.category
+    );
+
+    console.log(
+      `[PositionCard] 职位「${position.title}」→ cardType=${cardType}`
+    );
+
+    if (!cardType) {
+      setCardOptions([]);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      setLoadingCards(true);
+      try {
+        const list = await fetchCardList(storeId, cardType);
+        if (!cancelled) {
+          setCardOptions(list);
+          console.log(
+            `[PositionCard] 职位「${position.title}」加载课程 ${list.length} 门 (card_type=${cardType})`
+          );
+        }
+      } catch (e) {
+        console.error('[PositionCard] 加载课程列表失败', e);
+      } finally {
+        if (!cancelled) setLoadingCards(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeId, position.title, position.category, showCourseCommission]);
+
+  const isSwimCoach =
+    position.title.includes('泳教') && !position.title.includes('经理');
+  const isSwimOrPersonal =
+    position.title.includes('泳教') || position.title.includes('私教');
+
+  const showClassCommission = isSwimOrPersonal;
 
   const isStore =
     position.title.includes('店长') || position.title.includes('门店经理');
@@ -395,6 +454,8 @@ const PositionCard: React.FC<PositionCardProps> = ({
           <CourseCommissionEditor
             courses={position.courseCommissions || []}
             onChange={updateCourseCommissions}
+            cardOptions={cardOptions}
+            loadingCards={loadingCards}
           />
         </div>
       )}

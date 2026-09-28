@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
 import {
   ArrowLeft,
   Sliders,
@@ -25,6 +25,7 @@ import SimulationSettingsPanel from '../components/SimulationSettingsPanel';
 import RevenueSliderPanel from '../components/RevenueSliderPanel';
 import StoreSwitcher from '../components/StoreSwitcher';
 import { useStore } from '../contexts/StoreContext';
+import { useAuth } from '../contexts/AuthContext';
 import { getStoreById } from '../constants/stores';
 import {
   fetchSimulationSetting,
@@ -63,32 +64,25 @@ const SimulationPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { storeId } = useStore();
+  const { isSuperAdmin } = useAuth();   // ⭐ 新增
 
   const [fullStore, setFullStore] = useState<FullStore>({});
   const [selectedMonth, setSelectedMonth] = useState<string>(
     searchParams.get('month') || ''
   );
 
-  /* ⭐ 数据库连接 / 保存状态 */
   const [dbOnline, setDbOnline] = useState(true);
   const [savingSetting, setSavingSetting] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
 
-  /* ⭐ 防抖定时器 */
   const saveTimerRef = useRef<number | null>(null);
-
-  /* 只在「从 API 加载」时使用，防止刚读回来就写回去 */
   const skipNextSaveRef = useRef(false);
 
-  /* ⭐ 撤销栈 */
   const undoStackRef = useRef<SimulationUndoEntry[]>([]);
   const [undoDepth, setUndoDepth] = useState(0);
 
   const store: CompensationStore = fullStore[storeId] || {};
 
-  /* ============================================================
-   * 加载本地缓存：薪酬方案
-   * ============================================================ */
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
@@ -100,7 +94,6 @@ const SimulationPage: React.FC = () => {
     }
   }, []);
 
-  /* 切门店时选默认月份 */
   useEffect(() => {
     const months = Object.keys(fullStore[storeId] || {}).sort();
     if (months.length > 0) {
@@ -113,7 +106,6 @@ const SimulationPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId]);
 
-  /* URL 的 month 参数优先 */
   useEffect(() => {
     const m = searchParams.get('month');
     if (m) setSelectedMonth(m);
@@ -123,9 +115,6 @@ const SimulationPage: React.FC = () => {
     ? store[selectedMonth]
     : undefined;
 
-  /* ============================================================
-   * 课提设置（仍走 localStorage）
-   * ============================================================ */
   const [courseInputs, setCourseInputs] = useState<CourseCommissionInputs>(() => {
     const saved = localStorage.getItem(SIM_KEY);
     if (saved) {
@@ -140,9 +129,6 @@ const SimulationPage: React.FC = () => {
     localStorage.setItem(SIM_KEY, JSON.stringify(courseInputs));
   }, [courseInputs]);
 
-  /* ============================================================
-   * 成本设置（simInput）
-   * ============================================================ */
   const [simInput, setSimInput] = useState<SimulationInput>(() => {
     const saved = localStorage.getItem(COST_KEY);
     if (saved) {
@@ -165,9 +151,6 @@ const SimulationPage: React.FC = () => {
     localStorage.setItem(COST_KEY, JSON.stringify(simInput));
   }, [simInput]);
 
-  /* ============================================================
-   * ⭐ 切门店 / 切月份 → 从 API 拉测算设置
-   * ============================================================ */
   useEffect(() => {
     if (!storeId || !selectedMonth) return;
     let cancelled = false;
@@ -177,8 +160,6 @@ const SimulationPage: React.FC = () => {
         const remote = await fetchSimulationSetting(storeId, selectedMonth);
         if (cancelled) return;
         setDbOnline(true);
-
-        /* ⭐ 标记「下一次变化来自 API」，不回写 */
         skipNextSaveRef.current = true;
         setSimInput(remote);
         console.log('[SimulationPage] 已从 API 加载测算设置', storeId, selectedMonth, remote);
@@ -193,9 +174,6 @@ const SimulationPage: React.FC = () => {
     };
   }, [storeId, selectedMonth]);
 
-  /* ============================================================
-   * ⭐ simInput 变化 → 本地立即生效 + 500ms 防抖写数据库
-   * ============================================================ */
   useEffect(() => {
     if (skipNextSaveRef.current) {
       skipNextSaveRef.current = false;
@@ -227,9 +205,6 @@ const SimulationPage: React.FC = () => {
     };
   }, [simInput, storeId, selectedMonth, dbOnline]);
 
-  /* ============================================================
-   * 业绩分配比例（仍走 localStorage）
-   * ============================================================ */
   const [shareConfig, setShareConfig] = useState<RevenueShareConfig>(() => {
     const saved = localStorage.getItem(SHARE_KEY);
     if (saved) {
@@ -244,9 +219,6 @@ const SimulationPage: React.FC = () => {
     localStorage.setItem(SHARE_KEY, JSON.stringify(shareConfig));
   }, [shareConfig]);
 
-  /* ============================================================
-   * 性别人数（仍走 localStorage）
-   * ============================================================ */
   const [genderCounts, setGenderCounts] = useState<GenderCountConfig>(() => {
     const saved = localStorage.getItem(GENDER_KEY);
     if (saved) {
@@ -261,9 +233,6 @@ const SimulationPage: React.FC = () => {
     localStorage.setItem(GENDER_KEY, JSON.stringify(genderCounts));
   }, [genderCounts]);
 
-  /* ============================================================
-   * ⭐ 撤销栈
-   * ============================================================ */
   const pushUndo = (label: string) => {
     const stack = undoStackRef.current;
     stack.push({
@@ -278,7 +247,6 @@ const SimulationPage: React.FC = () => {
     setUndoDepth(stack.length);
   };
 
-  /* ⭐ 撤销：直接 setSimInput，让它走正常的防抖保存流程 */
   const handleUndo = () => {
     const stack = undoStackRef.current;
     if (stack.length === 0) return;
@@ -293,7 +261,6 @@ const SimulationPage: React.FC = () => {
     console.log('[undo] 已撤销:', last.label, last.setting);
   };
 
-  /* Ctrl/Cmd+Z 快捷键 */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
@@ -308,15 +275,11 @@ const SimulationPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* 切门店 / 切月份清空撤销栈 */
   useEffect(() => {
     undoStackRef.current = [];
     setUndoDepth(0);
   }, [storeId, selectedMonth]);
 
-  /* ============================================================
-   * ⭐ 所有入口包一层「先压栈再 set」
-   * ============================================================ */
   const handleInputChange = (next: SimulationInput) => {
     pushUndo('修改成本设置');
     setSimInput(next);
@@ -337,9 +300,6 @@ const SimulationPage: React.FC = () => {
     setCourseInputs(next);
   };
 
-  /* ============================================================
-   * 测算结果
-   * ============================================================ */
   const simResult: SimulationResult = useMemo(() => {
     if (!currentPlan) {
       return {
@@ -361,6 +321,11 @@ const SimulationPage: React.FC = () => {
       genderCounts
     );
   }, [currentPlan, simInput, courseInputs, shareConfig, genderCounts]);
+
+  /* ⭐ 非超管：直接跳回配置页（Hook 之后才能条件返回） */
+  if (!isSuperAdmin) {
+    return <Navigate to="/compensation" replace />;
+  }
 
   const storeName = getStoreById(storeId)?.name || '';
 
@@ -388,7 +353,6 @@ const SimulationPage: React.FC = () => {
                 <Store className="w-3.5 h-3.5" />
                 <span className="text-sm font-medium">{storeName}</span>
 
-                {/* ⭐ 数据库状态徽章 */}
                 <span className="ml-2 inline-flex items-center gap-1 text-[10px] bg-white/20 rounded px-1.5 py-0.5">
                   {!dbOnline ? (
                     <>
@@ -432,12 +396,10 @@ const SimulationPage: React.FC = () => {
           </div>
         </div>
 
-        {/* 门店切换 */}
         <div className="mb-4">
           <StoreSwitcher />
         </div>
 
-        {/* 月份选择 + 撤销 */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">
           <div className="flex flex-wrap items-center gap-3">
             <label className="text-sm font-medium text-gray-600">月份</label>
@@ -465,7 +427,6 @@ const SimulationPage: React.FC = () => {
 
             <div className="flex-1" />
 
-            {/* ⭐ 撤销按钮 */}
             <button
               onClick={handleUndo}
               disabled={undoDepth === 0}
@@ -493,7 +454,6 @@ const SimulationPage: React.FC = () => {
 
         {currentPlan ? (
           <>
-            {/* 设置区 */}
             <SimulationSettingsPanel
               positions={currentPlan.positions}
               input={simInput}
@@ -506,7 +466,6 @@ const SimulationPage: React.FC = () => {
               onCourseInputsChange={handleCourseInputsChange}
             />
 
-            {/* 结果区 */}
             <RevenueSliderPanel
               positions={currentPlan.positions}
               input={simInput}
