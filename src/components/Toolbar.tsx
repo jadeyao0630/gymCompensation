@@ -1,5 +1,12 @@
 import React from 'react';
-import { Plus, Trash2, Upload, Download } from 'lucide-react';
+import {
+  Plus,
+  Trash2,
+  Upload,
+  Download,
+  Calendar,
+  Loader2,
+} from 'lucide-react';
 import { formatMonthLabel } from '../utils/format';
 
 interface ToolbarProps {
@@ -26,80 +33,121 @@ const Toolbar: React.FC<ToolbarProps> = ({
   onRemoveMonth,
   onImport,
   onExport,
-}) => (
-  <div className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-8">
-    <div className="flex flex-wrap items-center gap-3">
-      <div className="flex items-center gap-2 bg-gray-50 rounded-xl p-1 pl-3 border border-gray-100">
-        <span className="text-xs font-medium text-gray-500">月份</span>
-        <select
-          value={selectedMonth}
-          onChange={(e) => onSelectMonth(e.target.value)}
-          className="bg-transparent border-none text-sm font-semibold text-gray-800 pr-2 py-1.5 focus:outline-none cursor-pointer"
-        >
-          {months.length === 0 && <option value="">请选择</option>}
-          {months.map((m) => (
-            <option key={m} value={m}>
-              {formatMonthLabel(m)}
-            </option>
-          ))}
-        </select>
-      </div>
+}) => {
+  /* ⭐ 排序后的月份列表（升序，最新在最后） */
+  const sortedMonths = React.useMemo(
+    () => months.slice().sort(),
+    [months]
+  );
 
-      <button
-        onClick={onAddMonth}
-        className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-sm font-medium transition-all shadow-sm hover:shadow active:scale-[0.97]"
-      >
-        <Plus className="w-4 h-4" />
-        新增月份
-      </button>
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">
+      <div className="flex flex-wrap items-center gap-3">
+        {/* 月份选择 */}
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-gray-600">月份</label>
+          <select
+            value={selectedMonth}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (next) onSelectMonth(next);
+            }}
+            className="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          >
+            {sortedMonths.length === 0 && <option value="">暂无月份</option>}
+            {sortedMonths.map((m) => (
+              <option key={m} value={m}>
+                {formatMonthLabel(m)}
+              </option>
+            ))}
+          </select>
+        </div>
 
-      {hasPlan && (
+        {/* 新增月份 */}
         <button
+          type="button"
+          onClick={onAddMonth}
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-blue-200 bg-white text-blue-700 hover:bg-blue-50 transition"
+        >
+          <Plus className="w-4 h-4" />
+          新增月份
+        </button>
+
+        {/* 已导入信息 */}
+        {importedFrom && (
+          <div className="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-xs text-gray-500 max-w-xs truncate">
+            <Calendar className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate" title={importedFrom}>
+              来源：{importedFrom}
+            </span>
+          </div>
+        )}
+
+        <div className="flex-1" />
+
+        {/* 统一导入 */}
+        <label
+          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition cursor-pointer ${
+            importing
+              ? 'opacity-50 cursor-not-allowed'
+              : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'
+          }`}
+          title="导入 Excel (.xlsx/.xls) 或 JSON 方案文件"
+        >
+          <input
+            type="file"
+            accept=".xlsx,.xls,.json,application/json"
+            className="hidden"
+            disabled={importing}
+            onChange={onImport}
+          />
+          {importing ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              导入中…
+            </>
+          ) : (
+            <>
+              <Upload className="w-4 h-4" />
+              导入
+            </>
+          )}
+        </label>
+
+        {/* 导出 JSON */}
+        <button
+          type="button"
+          onClick={onExport}
+          disabled={!hasPlan}
+          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition ${
+            hasPlan
+              ? 'bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50'
+              : 'bg-gray-50 text-gray-300 border-gray-200 cursor-not-allowed'
+          }`}
+          title={hasPlan ? '导出当前月份方案为 JSON' : '暂无可导出的方案'}
+        >
+          <Download className="w-4 h-4" />
+          导出
+        </button>
+
+        {/* 删除月份 */}
+        <button
+          type="button"
           onClick={onRemoveMonth}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl text-sm font-medium transition-all active:scale-[0.97]"
+          disabled={!hasPlan}
+          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition ${
+            hasPlan
+              ? 'bg-white text-red-600 border-red-200 hover:bg-red-50'
+              : 'bg-gray-50 text-gray-300 border-gray-200 cursor-not-allowed'
+          }`}
+          title={hasPlan ? '删除当前月份配置' : '暂无月份可删除'}
         >
           <Trash2 className="w-4 h-4" />
-          删除
+          删除月份
         </button>
-      )}
-
-      <div className="flex-1" />
-
-      <label
-        className={`cursor-pointer inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-md shadow-blue-500/20 transition-all active:scale-[0.97] ${
-          importing || !selectedMonth
-            ? 'bg-blue-300 cursor-not-allowed'
-            : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg hover:shadow-blue-500/30'
-        }`}
-      >
-        <Upload className="w-4 h-4" />
-        {importing ? '解析中…' : '导入 Excel'}
-        <input
-          type="file"
-          accept=".xlsx,.xls"
-          onChange={onImport}
-          disabled={!selectedMonth || importing}
-          className="hidden"
-        />
-      </label>
-
-      <button
-        onClick={onExport}
-        disabled={!hasPlan}
-        className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300 text-gray-700 rounded-xl text-sm font-medium transition-all active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white"
-      >
-        <Download className="w-4 h-4" />
-        导出
-      </button>
-    </div>
-
-    {importedFrom && (
-      <div className="mt-3 inline-flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-2.5 py-1.5">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-        已导入：{importedFrom}
       </div>
-    )}
-  </div>
-);
+    </div>
+  );
+};
 
 export default Toolbar;

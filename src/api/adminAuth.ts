@@ -16,13 +16,39 @@ export interface AdminUserListItem {
   updatedAt: string;
 }
 
-/** 登录 */
+/* ============================================================
+ * ⭐ 初始化状态
+ * ============================================================ */
+
+/** 检查数据库是否已初始化 */
+export async function adminCheckInitStatus() {
+  const res = await api.get('/api/admin/init-status');
+  return res.data.data as {
+    initialized: boolean;
+    adminCount: number;
+    reason?: 'no_table' | 'no_admin';
+  };
+}
+
+/** 主动初始化数据库（幂等） */
+export async function adminInitDatabase() {
+  const res = await api.post('/api/admin/init');
+  return res.data.data as {
+    initialized: boolean;
+    adminCount: number;
+    message?: string;
+  };
+}
+
+/* ============================================================
+ * 登录 / 登出
+ * ============================================================ */
+
 export async function adminLogin(username: string, password: string) {
   const res = await api.post('/api/admin/login', { username, password });
   return res.data.data as { token: string; user: AdminUser };
 }
 
-/** 校验 token */
 export async function adminMe(token: string) {
   const res = await api.get('/api/admin/me', {
     headers: { Authorization: `Bearer ${token}` },
@@ -30,7 +56,6 @@ export async function adminMe(token: string) {
   return res.data.data as { user: AdminUser };
 }
 
-/** 登出 */
 export async function adminLogout() {
   try {
     await api.post('/api/admin/logout');
@@ -39,7 +64,10 @@ export async function adminLogout() {
   }
 }
 
-/** 修改自己的密码 */
+/* ============================================================
+ * 密码
+ * ============================================================ */
+
 export async function adminChangePassword(
   oldPassword: string,
   newPassword: string
@@ -51,15 +79,15 @@ export async function adminChangePassword(
   return res.data.data as { ok: boolean };
 }
 
-/* ============== 以下仅超管可调 ============== */
+/* ============================================================
+ * 用户管理（仅超管）
+ * ============================================================ */
 
-/** 用户列表 */
 export async function adminListUsers() {
   const res = await api.get('/api/admin/users');
   return res.data.data as AdminUserListItem[];
 }
 
-/** 新增用户 */
 export async function adminCreateUser(
   username: string,
   password: string,
@@ -78,13 +106,11 @@ export async function adminCreateUser(
   };
 }
 
-/** 删除用户 */
 export async function adminDeleteUser(id: number) {
   const res = await api.delete(`/api/admin/users/${id}`);
   return res.data.data as { ok: boolean };
 }
 
-/** ⭐ 重置用户密码 */
 export async function adminResetUserPassword(
   id: number,
   newPassword: string
