@@ -1,5 +1,5 @@
 import React, { memo, useState } from 'react';
-import { Percent, Hash, Save, X } from 'lucide-react';
+import { Percent, Hash } from 'lucide-react';
 import type { PayrollResult } from '../../utils/payroll';
 import { usePayrollActions } from './PayrollActionsContext';
 
@@ -108,6 +108,18 @@ const ClassMemberDetailRowBase: React.FC<Props> = ({ result, colSpan }) => {
     setDraftValue('');
   };
 
+  /* ⭐ 新增：恢复为课程默认费率（清除该条自定义设置） */
+  const resetToDefault = (row: RowWithIdx) => {
+    updateMemberCommission(result.staffId, row._globalIdx, {
+      mode: undefined,
+      value: undefined,
+    });
+    if (editingKey === makeKey(row.courseName, row._globalIdx)) {
+      setEditingKey(null);
+      setDraftValue('');
+    }
+  };
+
   return (
     <tr className="bg-slate-50/60">
       <td colSpan={colSpan} className="px-4 py-3">
@@ -171,7 +183,7 @@ const ClassMemberDetailRowBase: React.FC<Props> = ({ result, colSpan }) => {
                             <th className="px-3 py-1.5 text-right font-medium">
                               课提金额
                             </th>
-                            <th className="px-3 py-1.5 text-center font-medium w-24">
+                            <th className="px-3 py-1.5 text-center font-medium w-32">
                               操作
                             </th>
                           </tr>
@@ -278,34 +290,60 @@ const ClassMemberDetailRowBase: React.FC<Props> = ({ result, colSpan }) => {
 
                                 <td className="px-3 py-1.5 text-center">
                                   {isEditing ? (
+                                    /* ⭐ 编辑态：保存 / 取消 / 返回初始（纯文字，无图标） */
                                     <div className="inline-flex items-center gap-1">
                                       <button
                                         type="button"
                                         onClick={() => saveEdit(row)}
-                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-medium hover:bg-emerald-700"
+                                        className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-medium hover:bg-emerald-700"
                                       >
-                                        <Save className="w-3 h-3" />
                                         保存
                                       </button>
                                       <button
                                         type="button"
                                         onClick={cancelEdit}
-                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-medium hover:bg-gray-200"
+                                        className="px-2 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-medium hover:bg-gray-200"
                                       >
-                                        <X className="w-3 h-3" />
                                         取消
                                       </button>
+                                      {custom && (
+                                        <button
+                                          type="button"
+                                          onClick={() => resetToDefault(row)}
+                                          className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-medium hover:bg-amber-100"
+                                          title={`恢复为课程默认 ${fmtRate(
+                                            fallbackRate
+                                          )}`}
+                                        >
+                                          返回初始
+                                        </button>
+                                      )}
                                     </div>
                                   ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        startEdit(row, fallbackRate)
-                                      }
-                                      className="text-[10px] px-2 py-0.5 rounded border border-purple-200 text-purple-600 hover:bg-purple-50"
-                                    >
-                                      编辑
-                                    </button>
+                                    /* ⭐ 非编辑态：编辑 / 返回初始（纯文字，无图标） */
+                                    <div className="inline-flex items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          startEdit(row, fallbackRate)
+                                        }
+                                        className="text-[10px] px-2 py-0.5 rounded border border-purple-200 text-purple-600 hover:bg-purple-50"
+                                      >
+                                        编辑
+                                      </button>
+                                      {custom && (
+                                        <button
+                                          type="button"
+                                          onClick={() => resetToDefault(row)}
+                                          className="text-[10px] px-2 py-0.5 rounded border border-amber-200 text-amber-700 hover:bg-amber-50"
+                                          title={`恢复为课程默认 ${fmtRate(
+                                            fallbackRate
+                                          )}`}
+                                        >
+                                          返回初始
+                                        </button>
+                                      )}
+                                    </div>
                                   )}
                                 </td>
                               </tr>

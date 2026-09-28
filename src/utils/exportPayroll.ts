@@ -51,37 +51,131 @@ export function exportEmployeePayrollToExcel(
   ws1['!cols'] = [{ wch: 18 }, { wch: 18 }];
   XLSX.utils.book_append_sheet(wb, ws1, '汇总');
 
-  /* ============== Sheet 2：上课明细（泳教 / 私教） ============== */
-  if (isCoach && result.classMemberDetail && result.classMemberDetail.length > 0) {
-    const detailRows: any[][] = [
-      ['课程名称', '会员姓名', '会员ID', '消课节数', '单价', '金额'],
-    ];
-    result.classMemberDetail.forEach((d) => {
-      detailRows.push([
-        d.courseName,
-        d.memberName,
-        d.memberId,
-        d.signNum,
-        d.price,
-        d.amount,
-      ]);
+  /* ============== Sheet 2：消课明细（按课程分组 + 课提信息） ============== */
+  const details = result.classMemberDetail || [];
+  if (details.length > 0) {
+    const rates = result.courseCommissionRates || {};
+    const classCommissionDetail = result.classCommissionDetail || {};
+
+    /* 按课程分组，同时记录原始全局索引（与 updateMemberCommission 对应） */
+    const grouped: Record<
+      string,
+      Array<{
+        memberName: string;
+        memberId?: string;
+        signNum: number;
+        price: number;
+        amount: number;
+        mode?: 'percent' | 'fixed';
+        value?: number;
+        _globalIdx: number;
+      }>
+    > = {};
+
+    details.forEach((d, globalIdx) => {
+      if (!grouped[d.courseName]) grouped[d.courseName] = [];
+      grouped[d.courseName].push({
+        memberName: d.memberName,
+        memberId: d.memberId,
+        signNum: d.signNum,
+        price: d.price,
+        amount: d.amount,
+        mode: d.mode,
+        value: d.value,
+        _globalIdx: globalIdx,
+      });
     });
+
+    const detailRows: any[][] = [
+      ['课程名称', '会员姓名', '会员ID', '消课节数', '单价', '金额', '课提方式', '课提金额', '是否自定义'],
+    ];
+
+    let grandCount = 0;
+    let grandAmount = 0;
+    let grandCommission = 0;
+
+    Object.entries(grouped).forEach(([course, list]) => {
+      const fallbackRate = rates[course];
+      let groupCount = 0;
+      let groupAmount = 0;
+      let groupCommission = 0;
+
+      list.forEach((row) => {
+        const custom = row.mode != null && row.value != null;
+        const mode = row.mode ?? fallbackRate?.mode ?? 'percent';
+        const value = row.value ?? fallbackRate?.rate ?? 0;
+        const fee =
+          mode === 'percent' ? row.amount * value : row.signNum * value;
+
+        groupCount += row.signNum;
+        groupAmount += row.amount;
+        groupCommission += fee;
+
+        detailRows.push([
+          course,
+          row.memberName,
+          row.memberId ?? '',
+          row.signNum,
+          row.price,
+          row.amount,
+          mode === 'percent'
+            ? `${(value * 100).toFixed(2)}%`
+            : `${value.toFixed(2)} 元/节`,
+          Number(fee.toFixed(2)),
+          custom ? '是' : '否',
+        ]);
+      });
+
+      /* 课程小计 */
+      detailRows.push([
+        `${course} 小计`,
+        '',
+        '',
+        groupCount,
+        '',
+        Number(groupAmount.toFixed(2)),
+        '',
+        Number(
+          (classCommissionDetail[course] ?? groupCommission).toFixed(2)
+        ),
+        '',
+      ]);
+      detailRows.push([]); // 组间空行
+
+      grandCount += groupCount;
+      grandAmount += groupAmount;
+      grandCommission += classCommissionDetail[course] ?? groupCommission;
+    });
+
+    /* 总计 */
     detailRows.push([
-      '合计',
+      '总计',
       '',
       '',
-      result.classMemberDetail.reduce((s, d) => s + d.signNum, 0),
+      grandCount,
       '',
-      result.classMemberDetail.reduce((s, d) => s + d.amount, 0),
+      Number(grandAmount.toFixed(2)),
+      '',
+      Number(grandCommission.toFixed(2)),
+      '',
     ]);
+
     const ws2 = XLSX.utils.aoa_to_sheet(detailRows);
     ws2['!cols'] = [
-      { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 12 },
+      { wch: 22 }, // 课程名称
+      { wch: 14 }, // 会员姓名
+      { wch: 14 }, // 会员ID
+      { wch: 10 }, // 消课节数
+      { wch: 10 }, // 单价
+      { wch: 12 }, // 金额
+      { wch: 14 }, // 课提方式
+      { wch: 12 }, // 课提金额
+      { wch: 12 }, // 是否自定义
     ];
-    XLSX.utils.book_append_sheet(wb, ws2, '上课明细');
+    XLSX.utils.book_append_sheet(wb, ws2, '消课明细');
   }
 
-  /* ============== Sheet 3：课提明细 ============== */
+  /* ============== Sheet 3：课提汇总（保留原来的按课程汇总） ============== */
   if (
     result.classCommissionDetail &&
     Object.keys(result.classCommissionDetail).length > 0
@@ -93,7 +187,7 @@ export function exportEmployeePayrollToExcel(
     detailRows.push(['合计', result.classCommission]);
     const ws3 = XLSX.utils.aoa_to_sheet(detailRows);
     ws3['!cols'] = [{ wch: 24 }, { wch: 14 }];
-    XLSX.utils.book_append_sheet(wb, ws3, '课提明细');
+    XLSX.utils.book_append_sheet(wb, ws3, '课提汇总');
   }
 
   /* ============== Sheet 4：岗位配置 ============== */
