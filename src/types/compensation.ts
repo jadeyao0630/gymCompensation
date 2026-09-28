@@ -41,11 +41,9 @@ export interface CourseCommission {
   mode: ClassCommissionMode;
   value: number;
   note?: string;
-  /** ⭐ 课程单价（仅前端展示用） */
   singlePrice?: number;
 }
 
-/** ⭐ 老课费用：按业绩门槛配置的单价（元/节） */
 export interface OldClassFeeTier {
   id: string;
   threshold: number;
@@ -87,8 +85,14 @@ export interface PositionConfig {
   hasCommission?: boolean;
   calcFlags?: PositionCalcFlags;
 
-  /** ⭐ 禁用后不在「职位列表」中显示，数据保留 */
   disabled?: boolean;
+
+  managerAggregateByDept?: boolean;
+
+  /** ⭐ 佣金是否按阶梯（false = 统一值，只用第一条） */
+  commissionTiered?: boolean;
+  /** ⭐ 底薪是否按阶梯（false = 统一值，只用第一条） */
+  baseSalaryTiered?: boolean;
 }
 
 export interface MonthlyCompensationPlan {
@@ -101,21 +105,15 @@ export interface MonthlyCompensationPlan {
 
 export type CompensationStore = Record<string, MonthlyCompensationPlan>;
 
-/* ============================================================
- * 课提测算
- * ============================================================ */
 export interface CourseCommissionInput {
-  courseName: string;
+  note: string;
   averagePrice: number;
   classCount: number;
-  positionKeyword: string;
+  positionTitle: string;
 }
 
 export type CourseCommissionInputs = Record<string, CourseCommissionInput>;
 
-/* ============================================================
- * 模拟测算
- * ============================================================ */
 export interface SimulationInput {
   propertyFee: number;
   electricityFee: number;

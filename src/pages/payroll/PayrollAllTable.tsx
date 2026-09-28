@@ -34,6 +34,8 @@ interface Props {
     total: number;
   } | null;
   hideExcluded: boolean;
+  /** ⭐ 个人导出权限（无权限时整列隐藏） */
+  canExportPersonal: boolean;
   onToggleExclude: (staffId: string) => void;
   onEditPosition: (r: PayrollResult) => void;
   onUpdateAttendance: (
@@ -116,6 +118,7 @@ export const PayrollAllTable: React.FC<Props> = ({
   month,
   summary,
   hideExcluded,
+  canExportPersonal,
   onToggleExclude,
   onEditPosition,
   onUpdateAttendance,
@@ -139,7 +142,8 @@ export const PayrollAllTable: React.FC<Props> = ({
     });
   };
 
-  const COLS = 14;
+  /* ⭐ 列数：有导出权限时为 14，没有则为 13 */
+  const COLS = canExportPersonal ? 14 : 13;
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -174,7 +178,10 @@ export const PayrollAllTable: React.FC<Props> = ({
               <th className="px-4 py-3 text-right font-medium">销提</th>
               <th className="px-4 py-3 text-right font-medium">课提</th>
               <th className="px-4 py-3 text-right font-medium">合计</th>
-              <th className="px-4 py-3 text-center font-medium">导出</th>
+              {/* ⭐ 导出列：有权限才显示 */}
+              {canExportPersonal && (
+                <th className="px-4 py-3 text-center font-medium">导出</th>
+              )}
               <th className="px-3 py-3 text-center font-medium w-10">明细</th>
             </tr>
           </thead>
@@ -306,19 +313,23 @@ export const PayrollAllTable: React.FC<Props> = ({
                       <td className="px-4 py-3 text-right tabular-nums font-bold text-emerald-700">
                         {fmtMoney(r.total)}
                       </td>
-                      <td className="px-4 py-3 text-center">
-                        <button
-                          disabled={!plan}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (!plan) return;
-                            exportEmployeePayrollToExcel(r, plan, month);
-                          }}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-[11px] font-medium transition disabled:opacity-50"
-                        >
-                          <Download className="w-3 h-3" /> 导出
-                        </button>
-                      </td>
+
+                      {/* ⭐ 导出列：有权限才渲染 */}
+                      {canExportPersonal && (
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            disabled={!plan}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!plan) return;
+                              exportEmployeePayrollToExcel(r, plan, month);
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-[11px] font-medium transition disabled:opacity-50"
+                          >
+                            <Download className="w-3 h-3" /> 导出
+                          </button>
+                        </td>
+                      )}
 
                       <td className="px-3 py-3 text-center">
                         <button
@@ -346,7 +357,6 @@ export const PayrollAllTable: React.FC<Props> = ({
                       </td>
                     </tr>
 
-                    {/* ⭐ 只传 result 和 colSpan，回调从 Context 取 */}
                     {isExpanded && hasDetails && (
                       <ClassMemberDetailRow result={r} colSpan={COLS} />
                     )}
@@ -374,7 +384,8 @@ export const PayrollAllTable: React.FC<Props> = ({
               <td className="px-4 py-3 text-right tabular-nums text-emerald-700">
                 {fmtMoney(summary?.total)}
               </td>
-              <td />
+              {/* ⭐ 导出列空占位 */}
+              {canExportPersonal && <td />}
               <td />
             </tr>
           </tfoot>
@@ -383,3 +394,5 @@ export const PayrollAllTable: React.FC<Props> = ({
     </div>
   );
 };
+
+export default PayrollAllTable;

@@ -120,10 +120,11 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
     async (
       month: string,
       plan: MonthlyCompensationPlan,
-      overrides?: Record<string, string>
+      overrides?: Record<string, string>,
+      opsViewEnabled = true
     ): Promise<RunResult> => {
       console.log('[usePayroll] === 开始 ===');
-      console.log('[usePayroll] busId:', busId, 'month:', month);
+      console.log('[usePayroll] busId:', busId, 'month:', month, 'opsViewEnabled:', opsViewEnabled);
       setLoading(true);
       setError('');
       setResults([]);
@@ -159,7 +160,7 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           console.error('[usePayroll] 拉取运营团队失败:', mkErr);
         }
 
-        /* ⭐ 2.5) marketers 双重去重：id + 姓名+电话 */
+        /* 2.5) marketers 双重去重 */
         const seenMarketerIds = new Set<string>();
         const seenMarketerNP = new Set<string>();
         const uniqueMarketers: AnyRecord[] = [];
@@ -175,10 +176,7 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           if (np) seenMarketerNP.add(np);
           uniqueMarketers.push(m);
         });
-        console.log(
-          '[usePayroll] 运营团队去重后条数:',
-          uniqueMarketers.length
-        );
+        console.log('[usePayroll] 运营团队去重后条数:', uniqueMarketers.length);
 
         /* 3) 参数 */
         const { s_date, e_date } = getMonthRange(month);
@@ -220,7 +218,7 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
         /* 6) 合并 */
         let performances = mergePerformance(salesGroups, classGroups);
 
-        /* ⭐ 6.5) 应用职位覆盖 */
+        /* 6.5) 应用职位覆盖 */
         if (overrides && Object.keys(overrides).length > 0) {
           let appliedCount = 0;
           performances = performances.map((p) => {
@@ -239,11 +237,7 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           performances = applyCoachInfo(performances, coaches);
         }
 
-        /* ============================================================
-         * 8) 合并运营团队
-         *   已存在 → 覆盖职位；不存在 → 新增
-         *   若该 staffId 有职位覆盖，跳过自动分配
-         * ============================================================ */
+        /* 8) 合并运营团队 */
         const perfIndex = new Map<string, number>();
         performances.forEach((p, i) => perfIndex.set(p.staffId, i));
 
@@ -347,16 +341,9 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
         }
         console.log('[usePayroll] 补全无业绩员工:', addedCount);
 
-        /* ============================================================
-         * ⭐ 9.5) performances 去重
-         *   规则：
-         *   1. 优先按 staffId 判重
-         *   2. staffId 不同但「姓名 + 岗位」相同 → 也判为同一人
-         *   3. 保留第一条，丢弃后续重复（不合并金额，防止业绩翻倍）
-         *      仅补全缺失的 staffPhone / staffName
-         * ============================================================ */
+        /* 9.5) performances 去重 */
         const perfMap = new Map<string, EmployeePerformance>();
-        const nameTitleIndex = new Map<string, string>();  // 姓名__岗位 → 主 key
+        const nameTitleIndex = new Map<string, string>();
 
         let dupSkipped = 0;
 
@@ -364,7 +351,6 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           const idKey = String(p.staffId ?? '').trim();
           const nameTitleKey = `${(p.staffName || '').trim()}__${(p.positionTitle || '').trim()}`;
 
-          // 1) 按 staffId 命中
           if (idKey && perfMap.has(idKey)) {
             const cur = perfMap.get(idKey)!;
             if (!cur.staffPhone && p.staffPhone) cur.staffPhone = p.staffPhone;
@@ -373,7 +359,6 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
             return;
           }
 
-          // 2) 按「姓名 + 岗位」命中
           if (nameTitleKey && nameTitleIndex.has(nameTitleKey)) {
             const mainKey = nameTitleIndex.get(nameTitleKey)!;
             const cur = perfMap.get(mainKey);
@@ -385,7 +370,6 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
             return;
           }
 
-          // 全新记录
           const newKey = idKey || nameTitleKey || `__${perfMap.size}`;
           perfMap.set(newKey, { ...p });
           if (nameTitleKey) nameTitleIndex.set(nameTitleKey, newKey);
@@ -399,7 +383,7 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           dupSkipped
         );
 
-        /* ⭐ 9.6) 去重后再应用一次覆盖（防止去重合并回旧岗位） */
+        /* 9.6) 去重后再应用一次覆盖 */
         if (overrides && Object.keys(overrides).length > 0) {
           performances = performances.map((p) => {
             const overrideTitle = overrides[p.staffId];
@@ -433,8 +417,8 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           plan.positions
         );
 
-        /* 12) 计算 */
-        const payroll = calcPayrollForAll(plan, performances);
+        /* 12) 计算（⭐ 传入 opsViewEnabled） */
+        const payroll = calcPayrollForAll(plan, performances, opsViewEnabled);
         setResults(payroll);
 
         return {

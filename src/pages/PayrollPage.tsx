@@ -23,6 +23,7 @@ import { fetchPlanByMonth } from '../api/compensation';
 import MissingPositionConfigDialog from '../components/MissingPositionConfigDialog';
 import StoreSwitcher from '../components/StoreSwitcher';
 import { useStore } from '../contexts/StoreContext';
+import { useAuth } from '../contexts/AuthContext';
 import { getStoreById } from '../constants/stores';
 import { PayrollHeader } from './payroll/PayrollHeader';
 import { PayrollToolbar } from './payroll/PayrollToolbar';
@@ -125,6 +126,10 @@ const PayrollPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { storeId } = useStore();
+  const { hasPermission } = useAuth();
+
+  /* ⭐ 查看运营主管权限 */
+  const opsViewEnabled = hasPermission('ops:view', storeId);
 
   const [fullStore, setFullStore] = useState<FullStore>({});
   const [selectedMonth, setSelectedMonth] = useState<string>(
@@ -436,18 +441,30 @@ const PayrollPage: React.FC = () => {
     });
   };
 
+  /* ⭐ handleRun：传入 opsViewEnabled */
   const handleRun = async () => {
     if (!currentPlan || !selectedMonth) {
       alert('请先选择月份，并确保该月已有配置');
       return;
     }
     try {
-      const res = await run(selectedMonth, currentPlan, overrides);
+      const res = await run(
+        selectedMonth,
+        currentPlan,
+        overrides,
+        opsViewEnabled
+      );
+
+      /* ⭐ 无 ops:view 时，过滤运营主管结果 */
+      const filteredResults = opsViewEnabled
+        ? res.results
+        : res.results.filter((r) => r.positionTitle !== '运营主管');
+
       if (res.missingPositions.length > 0) {
         setMissing(res.missingPositions);
         setMissingDialogOpen(true);
       }
-      setResultsByStore((prev) => ({ ...prev, [storeId]: res.results }));
+      setResultsByStore((prev) => ({ ...prev, [storeId]: filteredResults }));
       setPerformancesByStore((prev) => ({
         ...prev,
         [storeId]: res.performances,
@@ -502,8 +519,16 @@ const PayrollPage: React.FC = () => {
     setMissingDialogOpen(false);
 
     try {
-      const res = await run(selectedMonth, nextPlan, overrides);
-      setResultsByStore((prev) => ({ ...prev, [storeId]: res.results }));
+      const res = await run(
+        selectedMonth,
+        nextPlan,
+        overrides,
+        opsViewEnabled
+      );
+      const filteredResults = opsViewEnabled
+        ? res.results
+        : res.results.filter((r) => r.positionTitle !== '运营主管');
+      setResultsByStore((prev) => ({ ...prev, [storeId]: filteredResults }));
       setPerformancesByStore((prev) => ({
         ...prev,
         [storeId]: res.performances,
@@ -518,7 +543,6 @@ const PayrollPage: React.FC = () => {
     allResults.length -
     allResults.filter((r) => !excludedSet.has(r.staffId)).length;
 
-  /* ⭐ Context 值：只包含「更新会员课提」 */
   const payrollActions = useMemo(
     () => ({
       updateMemberCommission: handleUpdateMemberCommission,
@@ -553,6 +577,7 @@ const PayrollPage: React.FC = () => {
             hideExcluded={hideExcluded}
             canExport={allResults.length > 0}
             hasPlan={!!currentPlan}
+            canExportPayroll={hasPermission('export:payroll', storeId)}
             onMonthChange={(m) => {
               setSelectedMonth(m);
               navigate(`/payroll?month=${m}`, { replace: true });
@@ -585,6 +610,7 @@ const PayrollPage: React.FC = () => {
               month={selectedMonth}
               summary={summary}
               hideExcluded={hideExcluded}
+              canExportPersonal={hasPermission('export:personal', storeId)}
               onToggleExclude={toggleExclude}
               onEditPosition={setEditingStaff}
               onUpdateAttendance={updateAttendance}
@@ -600,6 +626,7 @@ const PayrollPage: React.FC = () => {
               month={selectedMonth}
               expanded={expanded}
               hideExcluded={hideExcluded}
+              canExportPersonal={hasPermission('export:personal', storeId)}
               onToggleDept={toggleDept}
               onToggleExclude={toggleExclude}
               onEditPosition={setEditingStaff}

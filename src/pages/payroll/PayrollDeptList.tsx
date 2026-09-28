@@ -33,6 +33,8 @@ interface Props {
   month: string;
   expanded: Record<Department, boolean>;
   hideExcluded: boolean;
+  /** ⭐ 个人导出权限（无权限时整列隐藏） */
+  canExportPersonal: boolean;
   onToggleDept: (d: Department) => void;
   onToggleExclude: (staffId: string) => void;
   onEditPosition: (r: PayrollResult) => void;
@@ -136,6 +138,7 @@ export const PayrollDeptList: React.FC<Props> = ({
   month,
   expanded,
   hideExcluded,
+  canExportPersonal,
   onToggleDept,
   onToggleExclude,
   onEditPosition,
@@ -198,6 +201,7 @@ export const PayrollDeptList: React.FC<Props> = ({
             : 'sm:grid-cols-2';
         const showPositionBadge = d.department === '运营';
 
+        /* ⭐ 列数：有导出权限时多 1 列（明细列去掉，用 colSpan） */
         const colCount =
           5 +
           (detailFields.salesAmount ? 1 : 0) +
@@ -205,7 +209,8 @@ export const PayrollDeptList: React.FC<Props> = ({
           1 +
           (detailFields.salesCommission ? 1 : 0) +
           (detailFields.classCommission ? 1 : 0) +
-          3;
+          (canExportPersonal ? 1 : 0) +  // ⭐ 导出列
+          1;                              // 明细列
 
         return (
           <div
@@ -341,9 +346,12 @@ export const PayrollDeptList: React.FC<Props> = ({
                           <th className="px-4 py-2 text-right font-medium">
                             合计
                           </th>
-                          <th className="px-4 py-2 text-center font-medium">
-                            导出
-                          </th>
+                          {/* ⭐ 导出列：有权限才显示 */}
+                          {canExportPersonal && (
+                            <th className="px-4 py-2 text-center font-medium">
+                              导出
+                            </th>
+                          )}
                           <th className="px-3 py-2 text-center font-medium w-10">
                             明细
                           </th>
@@ -491,23 +499,28 @@ export const PayrollDeptList: React.FC<Props> = ({
                                 <td className="px-4 py-2.5 text-right tabular-nums font-bold text-emerald-700">
                                   {fmtMoney(r.total)}
                                 </td>
-                                <td className="px-4 py-2.5 text-center">
-                                  <button
-                                    disabled={!plan}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (!plan) return;
-                                      exportEmployeePayrollToExcel(
-                                        r,
-                                        plan,
-                                        month
-                                      );
-                                    }}
-                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-[11px] font-medium transition disabled:opacity-50"
-                                  >
-                                    <Download className="w-3 h-3" /> 导出
-                                  </button>
-                                </td>
+
+                                {/* ⭐ 导出列：有权限才渲染 */}
+                                {canExportPersonal && (
+                                  <td className="px-4 py-2.5 text-center">
+                                    <button
+                                      disabled={!plan}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!plan) return;
+                                        exportEmployeePayrollToExcel(
+                                          r,
+                                          plan,
+                                          month
+                                        );
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-[11px] font-medium transition disabled:opacity-50"
+                                    >
+                                      <Download className="w-3 h-3" /> 导出
+                                    </button>
+                                  </td>
+                                )}
+
                                 <td className="px-3 py-2.5 text-center">
                                   <button
                                     onClick={() => toggleExpand(rowKey)}
@@ -534,7 +547,6 @@ export const PayrollDeptList: React.FC<Props> = ({
                                 </td>
                               </tr>
 
-                              {/* ⭐ 只传 result 和 colSpan，回调走 Context */}
                               {isExpanded && hasDetails && (
                                 <ClassMemberDetailRow
                                   result={r}
@@ -585,7 +597,8 @@ export const PayrollDeptList: React.FC<Props> = ({
                           <td className="px-4 py-2.5 text-right tabular-nums text-emerald-700">
                             {fmtMoney(d.total)}
                           </td>
-                          <td />
+                          {/* ⭐ 导出列空占位 */}
+                          {canExportPersonal && <td />}
                           <td />
                         </tr>
                       </tfoot>

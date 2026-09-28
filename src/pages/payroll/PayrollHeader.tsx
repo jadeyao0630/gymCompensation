@@ -1,6 +1,7 @@
 import React from 'react';
 import { ArrowLeft, Calculator, Store, Sliders, UserX } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useStore } from '../../contexts/StoreContext';
 
 interface Props {
   storeName: string;
@@ -17,7 +18,11 @@ export const PayrollHeader: React.FC<Props> = ({
   onGoSimulation,
   onBackToConfig,
 }) => {
-  const { isSuperAdmin } = useAuth();
+  const { hasPermission } = useAuth();
+  const { storeId } = useStore();
+
+  /* ⭐ 有 simulation:access 权限就显示「去测算」 */
+  const canGoSimulation = hasPermission('simulation:access', storeId);
 
   return (
     <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-600 shadow-2xl shadow-emerald-500/20 p-8 sm:p-10 mb-8 text-white">
@@ -46,8 +51,8 @@ export const PayrollHeader: React.FC<Props> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* ⭐ 去测算：仅超管可见 */}
-          {isSuperAdmin && (
+          {/* ⭐ 去测算：有 simulation:access 权限就显示 */}
+          {canGoSimulation && (
             <button
               onClick={onGoSimulation}
               className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-2.5 border border-white/25 shadow-lg hover:bg-white/25 transition"

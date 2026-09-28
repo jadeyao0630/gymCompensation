@@ -3,7 +3,6 @@ import type {
   CommissionTier,
   BaseSalaryTier,
   GenderSalaryTier,
-  CourseCommission,
   OldClassFeeTier,
   ClassCommissionMode,
   MonthlyCompensationPlan,
@@ -25,7 +24,6 @@ function normalizeText(s: string): string {
     .replace(/[～]/g, '~');
 }
 
-/* ---------- 门槛解析（通用） ---------- */
 function extractThreshold(text: string): number {
   if (!text) return 0;
   const t = normalizeText(text);
@@ -45,7 +43,6 @@ function extractThreshold(text: string): number {
   return 0;
 }
 
-/* ---------- 课提 ---------- */
 function parseClassCommission(line: string) {
   if (!line || !/课提/.test(line)) return null;
   const t = normalizeText(line);
@@ -57,7 +54,6 @@ function parseClassCommission(line: string) {
   return null;
 }
 
-/* ---------- 佣金阶梯 ---------- */
 function parseCommissionTiers(text: string): CommissionTier[] {
   if (!text) return [];
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -110,20 +106,38 @@ function parseOldClassFee(text: string): number | undefined {
   return m ? parseInt(m[1], 10) : undefined;
 }
 
-/* ---------- 底薪阶梯（合并相同底薪） ---------- */
-function parseBaseSalaryTiers(text: string): BaseSalaryTier[] {
+function parseBaseSalaryTiers(
+  text: string,
+  options: {
+    keepNote?: boolean;
+    thresholds?: number[];
+  } = {}
+): BaseSalaryTier[] {
   if (!text) return [];
+  const keepNote = options.keepNote !== false;
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
 
   const raw: BaseSalaryTier[] = [];
-  for (const rawLine of lines) {
+  lines.forEach((rawLine, idx) => {
     const line = normalizeText(rawLine);
-    const amountMatch = line.match(/(\d{3,})/g);
-    const amount = amountMatch
-      ? parseInt(amountMatch[amountMatch.length - 1], 10)
-      : 0;
-    raw.push({ id: uid(), threshold: extractThreshold(line), amount, note: line });
-  }
+    const matches = line.match(/(\d{3,})/g);
+    const amount = matches ? parseInt(matches[matches.length - 1], 10) : 0;
+
+    let threshold: number;
+    if (options.thresholds && options.thresholds.length > 0) {
+      threshold =
+        options.thresholds[Math.min(idx, options.thresholds.length - 1)] ?? 0;
+    } else {
+      threshold = extractThreshold(line);
+    }
+
+    raw.push({
+      id: uid(),
+      threshold,
+      amount,
+      note: keepNote ? line : '',
+    });
+  });
 
   const sorted = [...raw].sort((a, b) => a.threshold - b.threshold);
   const merged: BaseSalaryTier[] = [];
@@ -140,7 +154,6 @@ function buildFixedSalaryTier(amount: number): BaseSalaryTier[] {
   return [{ id: uid(), threshold: 0, amount, note: '固定底薪' }];
 }
 
-/* ---------- 通用性别底薪 ---------- */
 function parseGenderValues(text: string) {
   if (!text) return { male: 0, female: 0, newbie: 0 };
   const t = normalizeText(text);
@@ -183,9 +196,6 @@ function buildGenderSalaryTiers(text: string): GenderSalaryTier[] {
   }));
 }
 
-/* ============================================================
- * 泳教专用
- * ============================================================ */
 function extractSwimThresholds(commissionText: string): number[] {
   if (!commissionText) return [];
   const lines = normalizeText(commissionText)
@@ -215,53 +225,95 @@ function buildSwimGenderSalaryTiers(
   baseText: string
 ): GenderSalaryTier[] {
   if (!baseText) return [];
-  const thresholds = extractSwimThresholds(commissionText);
-  const baseLines = baseText.split('\n').map((l) => l.trim()).filter(Boolean);
 
-  const tierList: GenderSalaryTier[] = [];
+  const thresholds = extractSwimThresholds(commissionText);
+  const baseLines = baseText
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (baseLines.length === 0) return [];
 
   const firstAmount = parseInt(
     normalizeText(baseLines[0] || '').match(/(\d{3,})/)?.[1] || '0',
     10
   );
-  const t0 = thresholds[0] ?? 0;
-  if (firstAmount) {
-    tierList.push({
-      id: uid(),
-      threshold: t0,
-      male: firstAmount,
-      female: firstAmount,
-      newbie: firstAmount,
-      base: firstAmount,
-      note: baseLines[0] || '',
-    });
+
+  const genderText = normalizeText(baseLines.slice(1).join(' '));
+  const maleMatch = genderText.match(/男(?:性|教练)?\s*[:：]?\s*(\d{3,})/);
+  const femaleMatch = genderText.match(/女(?:性|教练)?\s*[:：]?\s*(\d{3,})/);
+  const newbieMatch = genderText.match(/(?:新人|无责)[^\d]*(\d{3,})/);
+  const maleFromText = maleMatch ? parseInt(maleMatch[1], 10) : 0;
+  const femaleFromText = femaleMatch ? parseInt(femaleMatch[1], 10) : 0;
+  const newbieFromText = newbieMatch ? parseInt(newbieMatch[1], 10) : 0;
+
+  const fallback =
+    firstAmount || maleFromText || femaleFromText || newbieFromText || 0;
+
+  const makeUnifiedBase = (m: number, f: number, n: number) =>
+    m === f && f === n ? m : 0;
+
+  if (thresholds.length === 0) {
+    const male = firstAmount || maleFromText || fallback;
+    const female = firstAmount || femaleFromText || fallback;
+    const newbie = newbieFromText || male;
+    return [
+      {
+        id: uid(),
+        threshold: 0,
+        male,
+        female,
+        newbie,
+        base: makeUnifiedBase(male, female, newbie),
+        note: '',
+      },
+    ];
   }
 
-  const secondLine = normalizeText(baseLines[1] || '');
-  const maleMatch = secondLine.match(/男(?:性|教练)?\s*[:：]?\s*(\d{3,})/);
-  const femaleMatch = secondLine.match(/女(?:性|教练)?\s*[:：]?\s*(\d{3,})/);
-  const newbieMatch = secondLine.match(/(?:新人|无责)[^\d]*(\d{3,})/);
-  const m2 = maleMatch ? parseInt(maleMatch[1], 10) : 0;
-  const f2 = femaleMatch ? parseInt(femaleMatch[1], 10) : 0;
-  const n2 = newbieMatch ? parseInt(newbieMatch[1], 10) : 0;
-
-  const t1 = thresholds[1] ?? 10000;
-  if (m2 || f2 || n2) {
-    tierList.push({
+  const raw: GenderSalaryTier[] = thresholds.map((th, idx) => {
+    if (idx === 0) {
+      const male = firstAmount || maleFromText || fallback;
+      const female = firstAmount || femaleFromText || fallback;
+      const newbie = newbieFromText || male;
+      return {
+        id: uid(),
+        threshold: th,
+        male,
+        female,
+        newbie,
+        base: makeUnifiedBase(male, female, newbie),
+        note: '',
+      };
+    }
+    const male = maleFromText || fallback;
+    const female = femaleFromText || fallback;
+    const newbie = newbieFromText || fallback;
+    return {
       id: uid(),
-      threshold: t1,
-      male: m2 || firstAmount,
-      female: f2 || firstAmount,
-      newbie: n2 || firstAmount,
-      base: m2 || firstAmount,
-      note: baseLines[1] || '',
-    });
-  }
+      threshold: th,
+      male,
+      female,
+      newbie,
+      base: makeUnifiedBase(male, female, newbie),
+      note: '',
+    };
+  });
 
-  return tierList;
+  const merged: GenderSalaryTier[] = [];
+  for (const cur of raw) {
+    const last = merged[merged.length - 1];
+    if (
+      last &&
+      last.male === cur.male &&
+      last.female === cur.female &&
+      last.newbie === cur.newbie
+    ) {
+      continue;
+    }
+    merged.push(cur);
+  }
+  return merged;
 }
 
-/** 泳教老课费用：按业绩档位拆分成数组 */
 function buildSwimOldClassFees(commissionText: string): OldClassFeeTier[] {
   if (!commissionText) return [];
   const thresholds = extractSwimThresholds(commissionText);
@@ -284,17 +336,6 @@ function buildSwimOldClassFees(commissionText: string): OldClassFeeTier[] {
   return result;
 }
 
-/* ---------- 默认课程课提 ---------- */
-function defaultCourseCommissions(): CourseCommission[] {
-  return [
-    { id: uid(), courseName: '私教课', mode: 'percent', value: 0.3 },
-    { id: uid(), courseName: '游泳课', mode: 'percent', value: 0.28 },
-  ];
-}
-
-/* ============================================================
- * 按块切片
- * ============================================================ */
 interface BlockSlice {
   commissionText: string;
   baseText: string;
@@ -331,9 +372,14 @@ function sliceBlock(
   };
 }
 
-/* ============================================================
- * 主解析
- * ============================================================ */
+/* ⭐ 只参与底薪的职位（前台/保洁）的 calcFlags */
+const FIXED_ONLY_FLAGS = {
+  includePerformance: false,
+  includeSalesCommission: false,
+  includeClassAmount: false,
+  includeClassCommission: false,
+};
+
 export function parseCompensationExcel(
   file: File,
   month: string,
@@ -358,9 +404,11 @@ export function parseCompensationExcel(
 
         const positions: PositionConfig[] = [];
 
-        /* 店长 */
+        /* 店长：底薪门槛复用佣金门槛 */
         if (String(get(2, 0)).includes('店长')) {
           const block = sliceBlock(rows, 2, 3, 8, 1);
+          const commissionTiers = parseCommissionTiers(block.commissionText);
+          const commissionThresholds = commissionTiers.map((t) => t.threshold);
           positions.push({
             id: uid(),
             title: '店长',
@@ -369,12 +417,14 @@ export function parseCompensationExcel(
             performanceTarget: 0,
             performanceSource: 'aggregate',
             totalBaseSalary: 0,
-            commissionTiers: parseCommissionTiers(block.commissionText),
-            baseSalaryTiers: parseBaseSalaryTiers(block.baseText),
+            commissionTiers,
+            baseSalaryTiers: parseBaseSalaryTiers(block.baseText, {
+              thresholds: commissionThresholds,
+            }),
           });
         }
 
-        /* 会籍经理 */
+        /* 会籍经理：performanceSource: 'self'，默认勾选业绩=部门总和 */
         if (String(get(3, 0)).includes('会籍经理')) {
           const block = sliceBlock(rows, 3, 3, 8, 1);
           positions.push({
@@ -383,17 +433,20 @@ export function parseCompensationExcel(
             category: 'membership',
             headcount: num(get(3, 12)),
             performanceTarget: 0,
-            performanceSource: 'members',
+            performanceSource: 'self',
             totalBaseSalary: 0,
             commissionTiers: parseCommissionTiers(block.commissionText),
             baseSalaryTiers: parseBaseSalaryTiers(block.baseText),
             extraNote: String(get(3, 3)).includes('店长兼任') ? '店长兼任' : '',
+            managerAggregateByDept: true,
           });
         }
 
-        /* 会籍 */
+        /* 会籍：底薪门槛复用佣金门槛 */
         if (String(get(4, 0)).includes('会籍')) {
           const block = sliceBlock(rows, 4, 3, 8, 12);
+          const commissionTiers = parseCommissionTiers(block.commissionText);
+          const commissionThresholds = commissionTiers.map((t) => t.threshold);
           positions.push({
             id: uid(),
             title: '会籍',
@@ -402,26 +455,33 @@ export function parseCompensationExcel(
             performanceTarget: 0,
             performanceSource: 'self',
             totalBaseSalary: 0,
-            commissionTiers: parseCommissionTiers(block.commissionText),
-            baseSalaryTiers: parseBaseSalaryTiers(block.baseText),
+            commissionTiers,
+            baseSalaryTiers: parseBaseSalaryTiers(block.baseText, {
+              thresholds: commissionThresholds,
+            }),
           });
         }
 
-        /* 泳教经理 */
+        /* 泳教经理：performanceSource: 'self'，默认勾选业绩=部门总和 */
         if (String(get(10, 0)).includes('泳教经理')) {
           const block = sliceBlock(rows, 10, 3, 8, 6);
+          const commissionTiers = parseCommissionTiers(block.commissionText);
+          const commissionThresholds = commissionTiers.map((t) => t.threshold);
           positions.push({
             id: uid(),
             title: '泳教经理',
             category: 'swim',
             headcount: num(get(10, 12)),
             performanceTarget: 0,
-            performanceSource: 'members',
+            performanceSource: 'self',
             totalBaseSalary: 0,
-            commissionTiers: parseCommissionTiers(block.commissionText),
-            baseSalaryTiers: parseBaseSalaryTiers(block.baseText),
+            commissionTiers,
+            baseSalaryTiers: parseBaseSalaryTiers(block.baseText, {
+              thresholds: commissionThresholds,
+            }),
             classCommissionMode: detectDefaultClassMode(block.commissionText),
-            courseCommissions: defaultCourseCommissions(),
+            courseCommissions: [],
+            managerAggregateByDept: true,
           });
         }
 
@@ -446,7 +506,7 @@ export function parseCompensationExcel(
             classCommissionMode: detectDefaultClassMode(block.commissionText),
             oldClassFee: parseOldClassFee(block.commissionText),
             oldClassFees: buildSwimOldClassFees(block.commissionText),
-            courseCommissions: defaultCourseCommissions(),
+            courseCommissions: [],
           });
         }
 
@@ -455,6 +515,10 @@ export function parseCompensationExcel(
           const cell = String(get(r, 0));
           if (cell.includes('私教') && !cell.includes('经理')) {
             const block = sliceBlock(rows, r, 3, 8, 12);
+            const commissionTiers = parseCommissionTiers(block.commissionText);
+            const commissionThresholds = commissionTiers.map(
+              (t) => t.threshold
+            );
             positions.push({
               id: uid(),
               title: '私教',
@@ -463,38 +527,68 @@ export function parseCompensationExcel(
               performanceTarget: 0,
               performanceSource: 'self',
               totalBaseSalary: 0,
-              commissionTiers: parseCommissionTiers(block.commissionText),
-              baseSalaryTiers: parseBaseSalaryTiers(block.baseText),
+              commissionTiers,
+              baseSalaryTiers: parseBaseSalaryTiers(block.baseText, {
+                keepNote: false,
+                thresholds: commissionThresholds,
+              }),
               classCommissionMode: detectDefaultClassMode(block.commissionText),
               oldClassFee: parseOldClassFee(block.commissionText),
-              courseCommissions: defaultCourseCommissions(),
+              courseCommissions: [],
             });
             break;
           }
         }
 
-        /* ⭐ 运营主管（固定底薪 + 店长销售 × 3% 佣金） */
-        for (let r = 0; r < rows.length; r++) {
-          const cell = String(get(r, 0));
-          if (cell.includes('运营主管')) {
-            const amount = num(get(r, 8));
+        /* ⭐ 运营主管：从 Excel 读，读不到就用默认 3% / 20000 */
+        {
+          let found = false;
+          for (let r = 0; r < rows.length; r++) {
+            const cell = String(get(r, 0));
+            if (cell.includes('运营主管')) {
+              const amount = num(get(r, 8));
+              const rate = (() => {
+                const raw = String(get(r, 3) ?? '');
+                const m = raw.match(/([\d.]+)\s*%/);
+                return m ? parseFloat(m[1]) / 100 : 0.03;
+              })();
+              positions.push({
+                id: uid(),
+                title: '运营主管',
+                category: 'operations',
+                headcount: num(get(r, 12)) || 1,
+                performanceTarget: 0,
+                performanceSource: 'self',
+                totalBaseSalary: 0,
+                commissionTiers: [
+                  { id: uid(), threshold: 0, rate, note: '店长销售 × 比例' },
+                ],
+                baseSalaryTiers: buildFixedSalaryTier(amount || 20000),
+                extraNote: `佣金 = 店长销售 × ${(rate * 100).toFixed(1)}%`,
+              });
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
             positions.push({
               id: uid(),
               title: '运营主管',
               category: 'operations',
-              headcount: num(get(r, 12)),
+              headcount: 1,
               performanceTarget: 0,
               performanceSource: 'self',
               totalBaseSalary: 0,
-              commissionTiers: [],
-              baseSalaryTiers: buildFixedSalaryTier(amount),
+              commissionTiers: [
+                { id: uid(), threshold: 0, rate: 0.03, note: '店长销售 × 3%' },
+              ],
+              baseSalaryTiers: buildFixedSalaryTier(20000),
               extraNote: '佣金 = 店长销售 × 3%',
             });
-            break;
           }
         }
 
-        /* 前台 */
+        /* 前台：默认只参与底薪 */
         if (String(get(21, 0)).includes('前台')) {
           const amount = num(get(21, 8));
           positions.push({
@@ -508,10 +602,11 @@ export function parseCompensationExcel(
             commissionTiers: [],
             baseSalaryTiers: buildFixedSalaryTier(amount),
             extraNote: '上一休一（早8晚10）',
+            calcFlags: { ...FIXED_ONLY_FLAGS },
           });
         }
 
-        /* 保洁 */
+        /* 保洁：默认只参与底薪 */
         if (String(get(23, 0)).includes('保洁')) {
           const amount = num(get(23, 8));
           positions.push({
@@ -524,6 +619,7 @@ export function parseCompensationExcel(
             totalBaseSalary: 0,
             commissionTiers: [],
             baseSalaryTiers: buildFixedSalaryTier(amount),
+            calcFlags: { ...FIXED_ONLY_FLAGS },
           });
         }
 
@@ -531,6 +627,12 @@ export function parseCompensationExcel(
         const existingTitles = new Set(positions.map((p) => p.title));
         POSITION_DEFINITIONS.forEach((def) => {
           if (!existingTitles.has(def.title)) {
+            const isMgr =
+              def.title.includes('经理') && !def.title.includes('店长');
+
+            const isFixedOnly =
+              def.title.includes('前台') || def.title.includes('保洁');
+
             positions.push({
               id: uid(),
               title: def.title,
@@ -544,6 +646,8 @@ export function parseCompensationExcel(
               genderSalaryTiers: undefined,
               extraNote: def.isManager ? '经理职位' : '',
               courseCommissions: [],
+              managerAggregateByDept: isMgr ? true : undefined,
+              calcFlags: isFixedOnly ? { ...FIXED_ONLY_FLAGS } : undefined,
             });
           }
         });

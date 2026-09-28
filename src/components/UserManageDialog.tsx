@@ -10,6 +10,7 @@ import {
   EyeOff,
   AlertCircle,
   Shield,
+  ShieldCheck,
   Check,
 } from 'lucide-react';
 import {
@@ -20,6 +21,7 @@ import {
   type AdminUserListItem,
 } from '../api/adminAuth';
 import { useAuth } from '../contexts/AuthContext';
+import UserPermissionDialog from './UserPermissionDialog';
 
 interface Props {
   open: boolean;
@@ -43,10 +45,15 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
   const [submitting, setSubmitting] = useState(false);
 
   /* 重置密码弹窗 */
-  const [resetTarget, setResetTarget] = useState<AdminUserListItem | null>(null);
+  const [resetTarget, setResetTarget] = useState<AdminUserListItem | null>(
+    null
+  );
   const [resetPwd, setResetPwd] = useState('');
   const [showResetPwd, setShowResetPwd] = useState(false);
   const [resetting, setResetting] = useState(false);
+
+  /* ⭐ 权限编辑弹窗 */
+  const [permTarget, setPermTarget] = useState<AdminUserListItem | null>(null);
 
   const reload = async () => {
     setLoading(true);
@@ -71,7 +78,6 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  /* 3 秒后自动清空成功提示 */
   useEffect(() => {
     if (!successMsg) return;
     const t = setTimeout(() => setSuccessMsg(''), 2500);
@@ -92,12 +98,12 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
     resetForm();
     setResetTarget(null);
     setResetPwd('');
+    setPermTarget(null);
     setError('');
     setSuccessMsg('');
     onClose();
   };
 
-  /* 新增用户 */
   const handleAdd = async () => {
     setError('');
     if (!newUsername.trim() || !newPassword) {
@@ -131,7 +137,6 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
     }
   };
 
-  /* 删除用户 */
   const handleDelete = async (item: AdminUserListItem) => {
     if (item.id === currentUser?.id) {
       alert('不能删除自己');
@@ -152,7 +157,6 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
     }
   };
 
-  /* 打开重置密码弹窗 */
   const openReset = (item: AdminUserListItem) => {
     setError('');
     setResetTarget(item);
@@ -160,7 +164,6 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
     setShowResetPwd(false);
   };
 
-  /* 提交重置密码 */
   const handleReset = async () => {
     if (!resetTarget) return;
     if (!resetPwd) {
@@ -210,7 +213,7 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
           <div className="flex-1">
             <h2 className="text-base font-bold text-gray-900">用户管理</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              仅超级管理员可新增 / 删除 / 重置密码
+              仅超级管理员可新增 / 删除 / 重置密码 / 配置权限
             </p>
           </div>
           <button
@@ -233,16 +236,17 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
           </button>
         </div>
 
-        {/* ⭐ 新增用户表单（带 label 标注） */}
+        {/* 新增用户表单 */}
         {showAdd && (
           <div className="px-5 py-4 bg-emerald-50/40 border-b border-emerald-100">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {/* 账号 */}
               <div>
                 <label className="text-xs font-medium text-gray-700 mb-1.5 flex items-center gap-1">
                   账号
                   <span className="text-red-500">*</span>
-                  <span className="text-gray-400 font-normal">（≥3位，唯一）</span>
+                  <span className="text-gray-400 font-normal">
+                    （≥3位，唯一）
+                  </span>
                 </label>
                 <input
                   type="text"
@@ -253,7 +257,6 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
                 />
               </div>
 
-              {/* 密码 */}
               <div>
                 <label className="text-xs font-medium text-gray-700 mb-1.5 flex items-center gap-1">
                   密码
@@ -273,12 +276,15 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
                     onClick={() => setShowPwd((v) => !v)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                   >
-                    {showPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {showPwd ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
                   </button>
                 </div>
               </div>
 
-              {/* 昵称 */}
               <div>
                 <label className="text-xs font-medium text-gray-700 mb-1.5 flex items-center gap-1">
                   昵称
@@ -345,7 +351,9 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
               <Loader2 className="w-5 h-5 animate-spin" />
             </div>
           ) : list.length === 0 ? (
-            <div className="text-center py-10 text-sm text-gray-400">暂无用户</div>
+            <div className="text-center py-10 text-sm text-gray-400">
+              暂无用户
+            </div>
           ) : (
             <table className="w-full text-sm">
               <thead className="text-gray-500 text-xs">
@@ -356,7 +364,9 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
                   <th className="px-3 py-2 text-left font-medium hidden sm:table-cell">
                     创建时间
                   </th>
-                  <th className="px-3 py-2 text-center font-medium w-52">操作</th>
+                  <th className="px-3 py-2 text-center font-medium w-72">
+                    操作
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -398,6 +408,18 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
                       </td>
                       <td className="px-3 py-2.5 text-center">
                         <div className="flex items-center justify-center gap-2">
+                          {/* ⭐ 权限按钮（仅普通用户显示） */}
+                          {!isAdmin && (
+                            <button
+                              onClick={() => setPermTarget(u)}
+                              title="配置权限"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition bg-white text-blue-700 border-blue-200 hover:bg-blue-50"
+                            >
+                              <ShieldCheck className="w-3 h-3" />
+                              权限
+                            </button>
+                          )}
+
                           {/* 重置密码 */}
                           <button
                             onClick={() => openReset(u)}
@@ -458,7 +480,7 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
         </div>
       </div>
 
-      {/* ⭐ 重置密码弹窗（嵌套） */}
+      {/* 重置密码弹窗（嵌套） */}
       {resetTarget && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
@@ -473,7 +495,9 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
                 <KeyRound className="w-5 h-5" />
               </div>
               <div className="flex-1">
-                <h3 className="text-base font-bold text-gray-900">重置密码</h3>
+                <h3 className="text-base font-bold text-gray-900">
+                  重置密码
+                </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
                   为「{resetTarget.username}」设置新密码
                 </p>
@@ -545,6 +569,17 @@ const UserManageDialog: React.FC<Props> = ({ open, onClose }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ⭐ 权限编辑弹窗（嵌套） */}
+      {permTarget && (
+        <UserPermissionDialog
+          user={permTarget}
+          onClose={() => setPermTarget(null)}
+          onSaved={() => {
+            setSuccessMsg(`已更新「${permTarget.username}」的权限`);
+          }}
+        />
       )}
     </div>
   );

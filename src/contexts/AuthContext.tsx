@@ -1,16 +1,36 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+} from 'react';
 import type { ReactNode } from 'react';
 import type { AdminUser } from '../api/adminAuth';
 import { adminLogin, adminMe, adminLogout } from '../api/adminAuth';
+import type { PermissionKey } from '../constants/permissions';
+import { isPermissionGranted } from '../constants/permissions';
+import {
+  fetchMyPermissions,
+  type UserPermissionConfig,
+} from '../api/permissions';
 
 const TOKEN_KEY = 'gym_admin_token';
 const USER_KEY = 'gym_admin_user';
+
+const EMPTY_CONFIG: UserPermissionConfig = {
+  storeIds: [],
+  permissions: [],
+};
 
 interface AuthContextValue {
   user: AdminUser | null;
   token: string | null;
   loading: boolean;
   isSuperAdmin: boolean;
+  config: UserPermissionConfig;
+  hasPermission: (key: PermissionKey, storeId?: string) => boolean;
+  refreshPermissions: () => Promise<void>;
   login: (username: string, password: string, remember: boolean) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -21,6 +41,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [user, setUser] = useState<AdminUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [config, setConfig] = useState<UserPermissionConfig>(EMPTY_CONFIG);
+
+  const loadPermissions = useCallback(async () => {
+    try {
+      const c = await fetchMyPermissions();
+      setConfig(c);
+    } catch (e) {
+      console.warn('[AuthContext] 拉取权限失败', e);
+      setConfig(EMPTY_CONFIG);
+    }
+  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -44,21 +75,27 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const res = await adminMe(savedToken);
         setUser(res.user);
         setToken(savedToken);
-        console.log('[auth] 免密登录成功:', res.user.username, 'role:', res.user.role);
+
+        if (res.user.role === 'admin') {
+          setConfig(EMPTY_CONFIG);
+        } else {
+          await loadPermissions();
+        }
       } catch (e) {
-        console.warn('[auth] 本地 token 失效，清除');
+        console.warn('[AuthContext] 本地 token 失效，清除');
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
         sessionStorage.removeItem(TOKEN_KEY);
         sessionStorage.removeItem(USER_KEY);
         setUser(null);
         setToken(null);
+        setConfig(EMPTY_CONFIG);
       } finally {
         setLoading(false);
       }
     };
     init();
-  }, []);
+  }, [loadPermissions]);
 
   const login = async (username: string, password: string, remember: boolean) => {
     const res = await adminLogin(username, password);
@@ -76,6 +113,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USER_KEY);
     }
+
+    if (res.user.role === 'admin') {
+      setConfig(EMPTY_CONFIG);
+    } else {
+      await loadPermissions();
+    }
   };
 
   const logout = async () => {
@@ -86,12 +129,38 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     sessionStorage.removeItem(USER_KEY);
     setToken(null);
     setUser(null);
+    setConfig(EMPTY_CONFIG);
   };
+
+  const refreshPermissions = useCallback(async () => {
+    if (!token) return;
+    await loadPermissions();
+  }, [token, loadPermissions]);
 
   const isSuperAdmin = user?.role === 'admin';
 
+  const hasPermission = useCallback(
+    (key: PermissionKey, storeId?: string): boolean => {
+      if (isSuperAdmin) return true;
+      return isPermissionGranted(config, key, storeId);
+    },
+    [isSuperAdmin, config]
+  );
+
   return (
-    <AuthContext.Provider value={{ user, token, loading, isSuperAdmin, login, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        token,
+        loading,
+        isSuperAdmin,
+        config,
+        hasPermission,
+        refreshPermissions,
+        login,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

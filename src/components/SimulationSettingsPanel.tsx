@@ -27,8 +27,11 @@ import type {
   GenderCountConfig,
 } from '../types/compensation';
 import { resolveCalcFlags } from '../types/compensation';
+import type { PermissionKey as PermKey } from '../constants/permissions';
 import { buildShareWeights } from '../utils/simulation';
 import { uid } from '../utils/id';
+import { useAuth } from '../contexts/AuthContext';
+import { useStore } from '../contexts/StoreContext';
 
 interface SimulationSettingsPanelProps {
   positions: PositionConfig[];
@@ -53,6 +56,10 @@ const isShareable = (p: PositionConfig) =>
   !isStoreManager(p) &&
   !isManager(p);
 
+/* ⭐ 参与课提的职位（用于课提设置的「关联职位」下拉） */
+const hasClassCommission = (p: PositionConfig) =>
+  resolveCalcFlags(p).includeClassCommission;
+
 const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
   positions,
   input,
@@ -67,13 +74,27 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
   const [open, setOpen] = useState(true);
   const [tab, setTab] = useState<'cost' | 'share' | 'gender' | 'course'>('cost');
 
+  /* ⭐ 权限 */
+  const { hasPermission } = useAuth();
+  const { storeId } = useStore();
+  const can = (key: PermKey) => hasPermission(key, storeId);
+
+  const canEditCost = (key: PermKey) => can(key);
+  const canEditShare = can('simulation:share');
+  const canEditGender = can('simulation:gender');
+  const canEditCourse = can('simulation:course');
+
   const shareablePositions = positions.filter(isShareable);
   const weights = buildShareWeights(positions, shareConfig);
 
   const setShare = (title: string, value: number) => {
+    if (!canEditShare) return;
     onShareConfigChange({ ...shareConfig, [title]: value });
   };
-  const resetShares = () => onShareConfigChange({});
+  const resetShares = () => {
+    if (!canEditShare) return;
+    onShareConfigChange({});
+  };
 
   const rawWeightOf = (title: string): number => {
     const raw = shareConfig[title];
@@ -106,6 +127,7 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
     key: 'maleCount' | 'femaleCount' | 'newbieCount',
     value: number
   ) => {
+    if (!canEditGender) return;
     const pos = positions.find((p) => p.title === title);
     if (!pos) return;
     const cur = countOf(pos);
@@ -128,6 +150,7 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
   };
 
   const resetGenderCounts = () => {
+    if (!canEditGender) return;
     const next: GenderCountConfig = {};
     genderTargets.forEach((p) => {
       next[p.title] = {
@@ -139,15 +162,19 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
     onGenderCountsChange(next);
   };
 
+  /* ⭐ 课提设置：关联职位下拉选项 */
+  const coursePositionOptions = positions.filter(hasClassCommission);
+
   const addCourse = () => {
+    if (!canEditCourse) return;
     const id = uid();
     onCourseInputsChange({
       ...courseInputs,
       [id]: {
-        courseName: '',
+        note: '',
         averagePrice: 0,
         classCount: 0,
-        positionKeyword: '私教',
+        positionTitle: coursePositionOptions[0]?.title || '',
       },
     });
   };
@@ -156,12 +183,14 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
     id: string,
     u: Partial<import('../types/compensation').CourseCommissionInput>
   ) => {
+    if (!canEditCourse) return;
     const cur = courseInputs[id];
     if (!cur) return;
     onCourseInputsChange({ ...courseInputs, [id]: { ...cur, ...u } });
   };
 
   const removeCourse = (id: string) => {
+    if (!canEditCourse) return;
     const next = { ...courseInputs };
     delete next[id];
     onCourseInputsChange(next);
@@ -257,6 +286,7 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
                   icon={<Building2 className="w-3.5 h-3.5" />}
                   label="物业费"
                   value={input.propertyFee}
+                  readOnly={!canEditCost('simulation:cost:property')}
                   onChange={(v) => onInputChange({ ...input, propertyFee: v })}
                   color="text-blue-600"
                 />
@@ -264,6 +294,7 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
                   icon={<Zap className="w-3.5 h-3.5" />}
                   label="电费"
                   value={input.electricityFee}
+                  readOnly={!canEditCost('simulation:cost:electricity')}
                   onChange={(v) =>
                     onInputChange({ ...input, electricityFee: v })
                   }
@@ -273,6 +304,7 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
                   icon={<Home className="w-3.5 h-3.5" />}
                   label="租金"
                   value={input.rent}
+                  readOnly={!canEditCost('simulation:cost:rent')}
                   onChange={(v) => onInputChange({ ...input, rent: v })}
                   color="text-emerald-600"
                 />
@@ -280,6 +312,7 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
                   icon={<Droplet className="w-3.5 h-3.5" />}
                   label="水费"
                   value={input.waterFee}
+                  readOnly={!canEditCost('simulation:cost:water')}
                   onChange={(v) => onInputChange({ ...input, waterFee: v })}
                   color="text-cyan-600"
                 />
@@ -287,6 +320,7 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
                   icon={<Wifi className="w-3.5 h-3.5" />}
                   label="网络费"
                   value={input.networkFee}
+                  readOnly={!canEditCost('simulation:cost:network')}
                   onChange={(v) => onInputChange({ ...input, networkFee: v })}
                   color="text-violet-600"
                 />
@@ -294,6 +328,7 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
                   icon={<MoreHorizontal className="w-3.5 h-3.5" />}
                   label="其他杂项"
                   value={input.otherFee}
+                  readOnly={!canEditCost('simulation:cost:other')}
                   onChange={(v) => onInputChange({ ...input, otherFee: v })}
                   color="text-rose-600"
                 />
@@ -313,13 +348,15 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
                       （共 {shareTotal} 权重，自动归一化）
                     </span>
                   </div>
-                  <button
-                    onClick={resetShares}
-                    className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded-lg hover:bg-indigo-100/60 transition"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    重置（按人数）
-                  </button>
+                  {canEditShare && (
+                    <button
+                      onClick={resetShares}
+                      className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded-lg hover:bg-indigo-100/60 transition"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      重置（按人数）
+                    </button>
+                  )}
                 </div>
 
                 {shareablePositions.length === 0 ? (
@@ -348,10 +385,11 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
                             max={100}
                             step={1}
                             value={raw}
+                            disabled={!canEditShare}
                             onChange={(e) =>
                               setShare(p.title, parseInt(e.target.value) || 0)
                             }
-                            className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer bg-gradient-to-r from-blue-400 to-indigo-500
+                            className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer bg-gradient-to-r from-blue-400 to-indigo-500 disabled:cursor-not-allowed disabled:opacity-60
                               [&::-webkit-slider-thumb]:appearance-none
                               [&::-webkit-slider-thumb]:w-4
                               [&::-webkit-slider-thumb]:h-4
@@ -373,10 +411,11 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
                             min={0}
                             max={100}
                             value={raw}
+                            disabled={!canEditShare}
                             onChange={(e) =>
                               setShare(p.title, parseInt(e.target.value) || 0)
                             }
-                            className="w-14 text-xs font-semibold text-indigo-700 text-right bg-indigo-50 border border-indigo-200 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-indigo-400 tabular-nums"
+                            className="w-14 text-xs font-semibold text-indigo-700 text-right bg-indigo-50 border border-indigo-200 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-indigo-400 tabular-nums disabled:cursor-not-allowed disabled:opacity-60"
                           />
                           <span className="text-[11px] text-indigo-500 w-12 text-right tabular-nums">
                             {percent}%
@@ -402,13 +441,15 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
                       （默认全男，自动保持总人数一致）
                     </span>
                   </div>
-                  <button
-                    onClick={resetGenderCounts}
-                    className="inline-flex items-center gap-1 text-xs text-rose-600 hover:text-rose-800 px-2 py-1 rounded-lg hover:bg-rose-100/60 transition"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    重置（全男）
-                  </button>
+                  {canEditGender && (
+                    <button
+                      onClick={resetGenderCounts}
+                      className="inline-flex items-center gap-1 text-xs text-rose-600 hover:text-rose-800 px-2 py-1 rounded-lg hover:bg-rose-100/60 transition"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      重置（全男）
+                    </button>
+                  )}
                 </div>
 
                 {genderTargets.length === 0 ? (
@@ -451,6 +492,7 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
                               value={c.maleCount ?? 0}
                               max={hc}
                               color="blue"
+                              readOnly={!canEditGender}
                               onChange={(v) =>
                                 setGenderCount(p.title, 'maleCount', v)
                               }
@@ -461,6 +503,7 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
                               value={c.femaleCount ?? 0}
                               max={hc}
                               color="pink"
+                              readOnly={!canEditGender}
                               onChange={(v) =>
                                 setGenderCount(p.title, 'femaleCount', v)
                               }
@@ -471,6 +514,7 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
                               value={c.newbieCount ?? 0}
                               max={hc}
                               color="violet"
+                              readOnly={!canEditGender}
                               onChange={(v) =>
                                 setGenderCount(p.title, 'newbieCount', v)
                               }
@@ -494,21 +538,24 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
                       课提设置
                     </span>
                     <span className="text-[11px] text-purple-500">
-                      （课程名 / 均价 / 节数 / 关联职位）
+                      （备注 / 均价 / 节数 / 关联职位）
                     </span>
                   </div>
-                  <button
-                    onClick={addCourse}
-                    className="inline-flex items-center gap-1 text-xs text-purple-600 hover:text-purple-800 px-2 py-1 rounded-lg hover:bg-purple-100/60 transition"
-                  >
-                    <Plus className="w-3 h-3" />
-                    添加课程
-                  </button>
+                  {canEditCourse && (
+                    <button
+                      onClick={addCourse}
+                      className="inline-flex items-center gap-1 text-xs text-purple-600 hover:text-purple-800 px-2 py-1 rounded-lg hover:bg-purple-100/60 transition"
+                    >
+                      <Plus className="w-3 h-3" />
+                      添加课程
+                    </button>
+                  )}
                 </div>
 
                 {Object.keys(courseInputs).length === 0 ? (
                   <p className="text-xs text-gray-400 italic">
-                    暂无课程，点击右上角添加
+                    暂无课程
+                    {canEditCourse && '，点击右上角添加'}
                   </p>
                 ) : (
                   <div className="space-y-2">
@@ -517,51 +564,65 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
                         key={id}
                         className="grid grid-cols-12 gap-2 bg-white rounded-xl border border-purple-100 px-3 py-2 items-center"
                       >
+                        {/* ⭐ 备注 */}
                         <input
                           type="text"
-                          value={c.courseName}
+                          value={c.note}
+                          disabled={!canEditCourse}
                           onChange={(e) =>
-                            updateCourse(id, { courseName: e.target.value })
+                            updateCourse(id, { note: e.target.value })
                           }
-                          placeholder="课程名"
-                          className="col-span-3 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-purple-400"
+                          placeholder="备注"
+                          className="col-span-3 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-purple-400 disabled:cursor-not-allowed disabled:opacity-60"
                         />
+                        {/* 均价 */}
                         <input
                           type="number"
                           value={c.averagePrice}
+                          disabled={!canEditCourse}
                           onChange={(e) =>
                             updateCourse(id, {
                               averagePrice: parseInt(e.target.value) || 0,
                             })
                           }
                           placeholder="均价"
-                          className="col-span-2 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-purple-400 tabular-nums"
+                          className="col-span-2 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-purple-400 tabular-nums disabled:cursor-not-allowed disabled:opacity-60"
                         />
+                        {/* 节数 */}
                         <input
                           type="number"
                           value={c.classCount}
+                          disabled={!canEditCourse}
                           onChange={(e) =>
                             updateCourse(id, {
                               classCount: parseInt(e.target.value) || 0,
                             })
                           }
                           placeholder="节数"
-                          className="col-span-2 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-purple-400 tabular-nums"
+                          className="col-span-2 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-purple-400 tabular-nums disabled:cursor-not-allowed disabled:opacity-60"
                         />
-                        <input
-                          type="text"
-                          value={c.positionKeyword}
+                        {/* ⭐ 关联职位：下拉 */}
+                        <select
+                          value={c.positionTitle}
+                          disabled={!canEditCourse}
                           onChange={(e) =>
                             updateCourse(id, {
-                              positionKeyword: e.target.value,
+                              positionTitle: e.target.value,
                             })
                           }
-                          placeholder="关联职位"
-                          className="col-span-3 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-purple-400"
-                        />
+                          className="col-span-3 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-purple-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <option value="">请选择职位</option>
+                          {coursePositionOptions.map((p) => (
+                            <option key={p.id} value={p.title}>
+                              {p.title}
+                            </option>
+                          ))}
+                        </select>
                         <button
                           onClick={() => removeCourse(id)}
-                          className="col-span-2 justify-self-end p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition"
+                          disabled={!canEditCourse}
+                          className="col-span-2 justify-self-end p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition disabled:opacity-30 disabled:cursor-not-allowed"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -585,6 +646,7 @@ interface CostInputProps {
   icon: React.ReactNode;
   label: string;
   value: number;
+  readOnly?: boolean;
   onChange: (v: number) => void;
   color: string;
 }
@@ -593,6 +655,7 @@ const CostInput: React.FC<CostInputProps> = ({
   icon,
   label,
   value,
+  readOnly = false,
   onChange,
   color,
 }) => (
@@ -604,8 +667,9 @@ const CostInput: React.FC<CostInputProps> = ({
     <input
       type="number"
       value={value}
+      disabled={readOnly}
       onChange={(e) => onChange(parseInt(e.target.value) || 0)}
-      className="flex-1 min-w-0 text-sm font-semibold text-gray-800 bg-transparent focus:outline-none tabular-nums text-right"
+      className="flex-1 min-w-0 text-sm font-semibold text-gray-800 bg-transparent focus:outline-none tabular-nums text-right disabled:cursor-not-allowed disabled:opacity-60"
     />
   </div>
 );
@@ -616,6 +680,7 @@ interface GenderInputProps {
   value: number;
   max: number;
   color: 'blue' | 'pink' | 'violet';
+  readOnly?: boolean;
   onChange: (v: number) => void;
 }
 
@@ -638,6 +703,7 @@ const GenderInput: React.FC<GenderInputProps> = ({
   value,
   max,
   color,
+  readOnly = false,
   onChange,
 }) => {
   const c = COLOR_STYLE[color];
@@ -652,8 +718,9 @@ const GenderInput: React.FC<GenderInputProps> = ({
         min={0}
         max={max}
         value={value}
+        disabled={readOnly}
         onChange={(e) => onChange(parseInt(e.target.value) || 0)}
-        className={`flex-1 min-w-0 text-xs font-semibold ${c.text} text-right bg-transparent focus:outline-none tabular-nums`}
+        className={`flex-1 min-w-0 text-xs font-semibold ${c.text} text-right bg-transparent focus:outline-none tabular-nums disabled:cursor-not-allowed disabled:opacity-60`}
       />
       <span className={`text-[10px] ${c.unit}`}>人</span>
     </div>

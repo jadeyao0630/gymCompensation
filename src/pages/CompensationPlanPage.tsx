@@ -46,6 +46,7 @@ import MonthPickerDialog from '../components/MonthPickerDialog';
 import StoreSwitcher from '../components/StoreSwitcher';
 import { useStore } from '../contexts/StoreContext';
 import { useAuth } from '../contexts/AuthContext';
+import PermissionGate from '../components/PermissionGate';
 
 const STORAGE_KEY = 'gym_compensation_store_v2';
 const UNDO_LIMIT = 20;
@@ -66,7 +67,7 @@ const CompensationPlanPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { storeId } = useStore();
-  const { isSuperAdmin } = useAuth();
+  const { hasPermission } = useAuth();
 
   const [fullStore, setFullStore] = useState<FullStore>({});
   const [selectedMonth, setSelectedMonth] = useState<string>(
@@ -88,6 +89,11 @@ const CompensationPlanPage: React.FC = () => {
   const isInitialSelectDoneRef = useRef<boolean>(false);
 
   const store: CompensationStore = fullStore[storeId] || {};
+
+  /* 权限 */
+  const canEditPlan = hasPermission('plan:edit', storeId);
+  const canEditTarget = hasPermission('target:edit', storeId);
+  const opsViewEnabled = hasPermission('ops:view', storeId);   // ⭐
 
   const persistToLocalStorage = useCallback((nextFullStore: FullStore) => {
     try {
@@ -144,6 +150,10 @@ const CompensationPlanPage: React.FC = () => {
   );
 
   const handleUndo = useCallback(() => {
+    if (!canEditPlan) {
+      alert('无权限：设置方案');
+      return;
+    }
     const stack = undoStackRef.current;
     if (stack.length === 0) return;
     const last = stack.pop()!;
@@ -172,7 +182,7 @@ const CompensationPlanPage: React.FC = () => {
 
     if (last.month !== selectedMonth) setSelectedMonth(last.month);
     console.log('[undo] 已撤销:', last.label);
-  }, [storeId, selectedMonth, dbOnline, persistToLocalStorage]);
+  }, [storeId, selectedMonth, dbOnline, persistToLocalStorage, canEditPlan]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -340,23 +350,30 @@ const CompensationPlanPage: React.FC = () => {
 
   const currentPlan = selectedMonth ? store[selectedMonth] : undefined;
 
-  /* ⭐ 职位列表：过滤掉 disabled 的 */
-  const currentPositions = useMemo(
-    () =>
-      currentPlan?.positions.filter(
-        (p) => p.category === activeTab && !p.disabled
-      ) || [],
-    [currentPlan, activeTab]
-  );
+  /* ⭐ 过滤运营主管（无 ops:view 时） */
+  const visiblePositions = useMemo(() => {
+    const all = currentPlan?.positions.filter((p) => !p.disabled) || [];
+    if (!opsViewEnabled) {
+      return all.filter((p) => p.title !== '运营主管');
+    }
+    return all;
+  }, [currentPlan, opsViewEnabled]);
 
-  const totalHeadcount =
-    currentPlan?.positions
-      .filter((p) => !p.disabled)
-      .reduce((s, p) => s + p.headcount, 0) || 0;
-  const totalBase =
-    currentPlan?.positions
-      .filter((p) => !p.disabled)
-      .reduce((s, p) => s + calcTotalBaseSalary(p, currentPlan.positions), 0) || 0;
+  const currentPositions = useMemo(() => {
+    const all = currentPlan?.positions.filter(
+      (p) => p.category === activeTab && !p.disabled
+    ) || [];
+    if (!opsViewEnabled) {
+      return all.filter((p) => p.title !== '运营主管');
+    }
+    return all;
+  }, [currentPlan, activeTab, opsViewEnabled]);
+
+  const totalHeadcount = visiblePositions.reduce((s, p) => s + p.headcount, 0);
+  const totalBase = visiblePositions.reduce(
+    (s, p) => s + calcTotalBaseSalary(p, currentPlan?.positions || []),
+    0
+  );
 
   const handleSelectMonth = useCallback(
     (m: string) => {
@@ -367,8 +384,11 @@ const CompensationPlanPage: React.FC = () => {
     [navigate]
   );
 
-  /* ⭐ 切换职位禁用状态 */
   const handleToggleDisabled = (title: string, disabled: boolean) => {
+    if (!canEditPlan) {
+      alert('无权限：设置方案');
+      return;
+    }
     if (!currentPlan) return;
     const target = currentPlan.positions.find((p) => p.title === title);
     if (!target) {
@@ -392,6 +412,11 @@ const CompensationPlanPage: React.FC = () => {
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEditPlan) {
+      alert('无权限：设置方案');
+      e.target.value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -489,6 +514,10 @@ const CompensationPlanPage: React.FC = () => {
     copyFrom?: string,
     copySimulation?: boolean
   ) => {
+    if (!canEditPlan) {
+      alert('无权限：设置方案');
+      return;
+    }
     setShowMonthPicker(false);
 
     if (store[month]) {
@@ -571,6 +600,10 @@ const CompensationPlanPage: React.FC = () => {
   };
 
   const removeMonth = async () => {
+    if (!canEditPlan) {
+      alert('无权限：设置方案');
+      return;
+    }
     if (!selectedMonth || !currentPlan) return;
     if (!confirm(`确定删除 ${formatMonthLabel(selectedMonth)} 的全部配置？`)) return;
 
@@ -612,8 +645,13 @@ const CompensationPlanPage: React.FC = () => {
 
   const updatePlan = (
     updates: Partial<MonthlyCompensationPlan>,
-    undoLabel: string
+    undoLabel: string,
+    allowTargetOnly = false
   ) => {
+    if (!canEditPlan && !(allowTargetOnly && canEditTarget)) {
+      alert('无权限：设置方案');
+      return;
+    }
     if (!selectedMonth || !currentPlan) return;
     pushUndo(selectedMonth, currentPlan, undoLabel);
     const nextPlan = { ...currentPlan, ...updates };
@@ -623,17 +661,29 @@ const CompensationPlanPage: React.FC = () => {
   const updatePosition = (posId: string, updates: Partial<PositionConfig>) => {
     if (!currentPlan) return;
     const target = currentPlan.positions.find((p) => p.id === posId);
+
+    const keys = Object.keys(updates);
+    const onlyTarget =
+      keys.length === 1 &&
+      (keys[0] === 'performanceTarget' ||
+        keys[0] === 'managerAggregateByDept');
+
     updatePlan(
       {
         positions: currentPlan.positions.map((p) =>
           p.id === posId ? { ...p, ...updates } : p
         ),
       },
-      `修改职位「${target?.title || '未知'}」`
+      `修改职位「${target?.title || '未知'}」`,
+      onlyTarget
     );
   };
 
   const addPosition = () => {
+    if (!canEditPlan) {
+      alert('无权限：设置方案');
+      return;
+    }
     if (!currentPlan) return;
     updatePlan(
       {
@@ -657,6 +707,10 @@ const CompensationPlanPage: React.FC = () => {
   };
 
   const removePosition = (posId: string) => {
+    if (!canEditPlan) {
+      alert('无权限：设置方案');
+      return;
+    }
     if (!currentPlan) return;
     const target = currentPlan.positions.find((p) => p.id === posId);
     if (!confirm(`确定删除职位「${target?.title}」？`)) return;
@@ -729,28 +783,34 @@ const CompensationPlanPage: React.FC = () => {
             <StoreSwitcher />
             <StatusBadge />
 
-            <button
-              onClick={handleUndo}
-              disabled={undoDepth === 0}
-              title={undoDepth > 0 ? `撤销（Ctrl/Cmd+Z，剩余 ${undoDepth} 步）` : '无可撤销'}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition ${
-                undoDepth > 0
-                  ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-                  : 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
-              }`}
-            >
-              <Undo2 className="w-3 h-3" />
-              撤销
-              {undoDepth > 0 && (
-                <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-200 text-amber-800 text-[10px] font-bold">
-                  {undoDepth}
-                </span>
-              )}
-            </button>
+            {canEditPlan && (
+              <button
+                onClick={handleUndo}
+                disabled={undoDepth === 0}
+                title={
+                  undoDepth > 0
+                    ? `撤销（Ctrl/Cmd+Z，剩余 ${undoDepth} 步）`
+                    : '无可撤销'
+                }
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition ${
+                  undoDepth > 0
+                    ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                    : 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
+                }`}
+              >
+                <Undo2 className="w-3 h-3" />
+                撤销
+                {undoDepth > 0 && (
+                  <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-200 text-amber-800 text-[10px] font-bold">
+                    {undoDepth}
+                  </span>
+                )}
+              </button>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {isSuperAdmin && (
+            {hasPermission('simulation:access', storeId) && (
               <button
                 onClick={goToSimulation}
                 disabled={!selectedMonth}
@@ -765,18 +825,20 @@ const CompensationPlanPage: React.FC = () => {
               </button>
             )}
 
-            <button
-              onClick={goToPayroll}
-              disabled={!selectedMonth}
-              className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] ${
-                selectedMonth
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-emerald-500/20'
-                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              <Calculator className="w-4 h-4" />
-              去计算薪酬
-            </button>
+            {hasPermission('payroll:calc', storeId) && (
+              <button
+                onClick={goToPayroll}
+                disabled={!selectedMonth}
+                className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] ${
+                  selectedMonth
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-emerald-500/20'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                <Calculator className="w-4 h-4" />
+                去计算薪酬
+              </button>
+            )}
           </div>
         </div>
 
@@ -786,8 +848,15 @@ const CompensationPlanPage: React.FC = () => {
           hasPlan={!!currentPlan}
           importing={importing}
           importedFrom={currentPlan?.importedFrom}
+          canEdit={canEditPlan}
           onSelectMonth={handleSelectMonth}
-          onAddMonth={() => setShowMonthPicker(true)}
+          onAddMonth={() => {
+            if (!canEditPlan) {
+              alert('无权限：设置方案');
+              return;
+            }
+            setShowMonthPicker(true);
+          }}
           onRemoveMonth={removeMonth}
           onImport={handleImport}
           onExport={handleExport}
@@ -811,7 +880,7 @@ const CompensationPlanPage: React.FC = () => {
               <StatCard
                 icon={<Briefcase className="w-5 h-5" />}
                 label="职位数"
-                value={currentPlan.positions.filter((p) => !p.disabled).length}
+                value={visiblePositions.length}
                 gradient="from-blue-500 to-indigo-500"
                 glow="bg-blue-300"
               />
@@ -831,16 +900,16 @@ const CompensationPlanPage: React.FC = () => {
               />
             </div>
 
-            {/* ⭐ 职位总览：带禁用开关 */}
             <PositionOverview
-              positions={currentPlan.positions}
+              positions={visiblePositions}
+              canEdit={canEditPlan}
               onGoTo={(cat) => setActiveTab(cat)}
               onToggleDisabled={handleToggleDisabled}
             />
 
             <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
               <CategoryTabs
-                positions={currentPlan.positions.filter((p) => !p.disabled)}
+                positions={visiblePositions}
                 active={activeTab}
                 onChange={setActiveTab}
               />
@@ -863,6 +932,8 @@ const CompensationPlanPage: React.FC = () => {
                         key={pos.id}
                         position={pos}
                         allPositions={currentPlan.positions}
+                        readOnly={!canEditPlan}
+                        canEditTarget={canEditTarget}
                         onUpdate={(u) => updatePosition(pos.id, u)}
                         onRemove={() => removePosition(pos.id)}
                       />
@@ -871,13 +942,22 @@ const CompensationPlanPage: React.FC = () => {
                 )}
 
                 <div className="mt-6">
-                  <button
-                    onClick={addPosition}
-                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-3.5 bg-white border-2 border-dashed border-gray-200 hover:border-blue-400 hover:bg-blue-50/50 rounded-2xl text-sm font-medium text-gray-500 hover:text-blue-600 transition-all active:scale-[0.99]"
+                  <PermissionGate
+                    permission="plan:edit"
+                    fallback={
+                      <div className="text-xs text-center text-gray-400 py-3">
+                        无编辑权限，无法新增职位
+                      </div>
+                    }
                   >
-                    <Plus className="w-4 h-4" />
-                    新增{getCategoryLabel(activeTab)}职位
-                  </button>
+                    <button
+                      onClick={addPosition}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-3.5 bg-white border-2 border-dashed border-gray-200 hover:border-blue-400 hover:bg-blue-50/50 rounded-2xl text-sm font-medium text-gray-500 hover:text-blue-600 transition-all active:scale-[0.99]"
+                    >
+                      <Plus className="w-4 h-4" />
+                      新增{getCategoryLabel(activeTab)}职位
+                    </button>
+                  </PermissionGate>
                 </div>
               </div>
             </div>
@@ -885,7 +965,7 @@ const CompensationPlanPage: React.FC = () => {
         )}
       </div>
 
-      {showMonthPicker && (
+      {showMonthPicker && canEditPlan && (
         <MonthPickerDialog
           existingMonths={Object.keys(store).sort()}
           onConfirm={handleAddMonth}
@@ -893,7 +973,7 @@ const CompensationPlanPage: React.FC = () => {
         />
       )}
 
-      {showGuide && (
+      {showGuide && canEditPlan && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
           onClick={() => setShowGuide(false)}

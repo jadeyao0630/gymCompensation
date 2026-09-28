@@ -10,7 +10,6 @@ import { normalizePositionTitle, isManagerTitle } from '../constants/positions';
 
 export type Gender = 'male' | 'female' | 'newbie';
 
-/** ⭐ 单个会员的上课明细（支持自定义课提方式） */
 export interface ClassMemberDetail {
   courseName: string;
   memberName: string;
@@ -18,14 +17,10 @@ export interface ClassMemberDetail {
   signNum: number;
   price: number;
   amount: number;
-
-  /** ⭐ 该会员这条记录自定义课提方式（覆盖课程级默认） */
   mode?: 'percent' | 'fixed';
-  /** ⭐ 该会员这条记录自定义课提值（percent: 0.3；fixed: 50） */
   value?: number;
 }
 
-/** ⭐ 单门课的课提率 */
 export interface CourseCommissionRate {
   rate: number;
   mode: 'percent' | 'fixed';
@@ -113,9 +108,6 @@ export function getDepartmentOf(title: string): Department {
   return '运营';
 }
 
-/* ============================================================
- * 工具
- * ============================================================ */
 function sortByThreshold<T extends { threshold: number }>(tiers: T[]): T[] {
   return [...tiers].sort((a, b) => a.threshold - b.threshold);
 }
@@ -176,9 +168,6 @@ function isInvalidId(id: string): boolean {
   return Number.isNaN(num) || num <= 0;
 }
 
-/* ============================================================
- * 消课解析
- * ============================================================ */
 interface ClassSummary {
   totalCount: number;
   totalAmount: number;
@@ -257,9 +246,6 @@ function parseClassList(record: AnyRecord): ClassSummary {
   return summary;
 }
 
-/* ============================================================
- * 合并
- * ============================================================ */
 export function mergePerformance(
   salesGroups: MergeInput[],
   classGroups: MergeInput[]
@@ -330,9 +316,6 @@ export function mergePerformance(
   return Array.from(map.values());
 }
 
-/* ============================================================
- * 教练信息
- * ============================================================ */
 export function applyCoachInfo(
   performances: EmployeePerformance[],
   coaches: CoachInfo[]
@@ -376,9 +359,6 @@ export function normalizeCoachList(records: AnyRecord[]): CoachInfo[] {
   });
 }
 
-/* ============================================================
- * 经理 / 店长 业绩汇总
- * ============================================================ */
 export function applyManagerPerformance(
   performances: EmployeePerformance[],
   positions?: PositionConfig[]
@@ -400,9 +380,7 @@ export function applyManagerPerformance(
 
   for (const perf of performances) {
     const title = perf.positionTitle || '';
-    const isMgr = isManagerTitle(title);
-    const isStore = title.includes('店长');
-    if (isMgr || isStore) continue;
+    if (title.includes('店长')) continue;
     if (title === '运营主管') continue;
 
     const pos = posByTitle.get(title);
@@ -410,6 +388,16 @@ export function applyManagerPerformance(
     if (!flags.includePerformance) continue;
 
     const dept = getDepartmentOf(title);
+    if (dept === '运营') continue;
+
+    const isMgr = isManagerTitle(title);
+
+    if (isMgr) {
+      if (pos?.managerAggregateByDept) continue;
+      deptSales[dept] += perf.salesAmount;
+      continue;
+    }
+
     deptSales[dept] += perf.salesAmount;
   }
 
@@ -424,10 +412,13 @@ export function applyManagerPerformance(
     }
 
     if (isManagerTitle(title)) {
+      const pos = posByTitle.get(title);
       const dept = getDepartmentOf(title);
-      if (dept === '会籍' || dept === '私教' || dept === '泳教') {
+
+      if (pos?.managerAggregateByDept && dept !== '运营') {
         return { ...perf, salesAmount: deptSales[dept] };
       }
+
       return perf;
     }
 
@@ -435,9 +426,6 @@ export function applyManagerPerformance(
   });
 }
 
-/* ============================================================
- * 泳教底薪
- * ============================================================ */
 function resolveGenderBase(gender: Gender | undefined, hit: GenderSalaryTier): number {
   const g: Gender = gender ?? 'male';
   if (g === 'female' && hit.female !== 0) return hit.female;
@@ -447,21 +435,21 @@ function resolveGenderBase(gender: Gender | undefined, hit: GenderSalaryTier): n
   return 0;
 }
 
-/* ============================================================
- * 单人计算
- * ============================================================ */
 export function calcEmployeePayroll(
   position: PositionConfig,
   perf: EmployeePerformance
 ): PayrollResult {
-  /* 运营主管专属 */
+  /* 运营主管 */
   if (position.title === '运营主管') {
     const managerSalesBase = perf.managerSalesBase ?? 0;
-    const rate = 0.03;
+    const rate =
+      position.commissionTiers?.[0]?.rate !== undefined
+        ? position.commissionTiers[0].rate
+        : 0.03;
     const opsCommission = Math.round(managerSalesBase * rate * 100) / 100;
 
     const baseTier = (position.baseSalaryTiers || [])[0];
-    const baseSalary = baseTier?.amount ?? 0;
+    const baseSalary = baseTier?.amount ?? 20000;
 
     const fullAttendance = perf.fullAttendance ?? true;
     const absentDays = perf.absentDays ?? 0;
@@ -486,7 +474,7 @@ export function calcEmployeePayroll(
       classCount: 0,
       classAmount: 0,
       hitCommissionRate: rate,
-      hitCommissionNote: '店长销售 × 3%',
+      hitCommissionNote: `店长销售 × ${(rate * 100).toFixed(1)}%`,
       hitBaseSalary: baseSalary,
       baseSalary,
       salesCommission: opsCommission,
@@ -503,8 +491,19 @@ export function calcEmployeePayroll(
 
   const flags = resolveCalcFlags(position);
 
+  /* ⭐ 按 tiered 过滤 */
+  const commissionTiers =
+    position.commissionTiered === false
+      ? position.commissionTiers.slice(0, 1)
+      : position.commissionTiers;
+
+  const baseSalaryTiers =
+    position.baseSalaryTiered === false
+      ? position.baseSalaryTiers.slice(0, 1)
+      : position.baseSalaryTiers;
+
   const isSwimCoach = position.title.includes('泳教');
-  const hitCommissionTier = findHitTier(position.commissionTiers, perf.salesAmount);
+  const hitCommissionTier = findHitTier(commissionTiers, perf.salesAmount);
 
   let hitBaseSalary = 0;
   if (flags.includeBaseSalary) {
@@ -512,8 +511,8 @@ export function calcEmployeePayroll(
       const hit = findHitTier(position.genderSalaryTiers, perf.salesAmount);
       if (hit) hitBaseSalary = resolveGenderBase(perf.gender, hit);
     }
-    if (hitBaseSalary === 0 && position.baseSalaryTiers.length) {
-      const hit = findHitTier(position.baseSalaryTiers, perf.salesAmount);
+    if (hitBaseSalary === 0 && baseSalaryTiers.length) {
+      const hit = findHitTier(baseSalaryTiers, perf.salesAmount);
       if (hit) hitBaseSalary = hit.amount;
     }
   }
@@ -524,13 +523,11 @@ export function calcEmployeePayroll(
     ? perf.salesAmount * hitCommissionRate
     : 0;
 
-  /* ---------- 课提 ---------- */
   let classCommission = 0;
   const classCommissionDetail: Record<string, number> = {};
   const courseCommissionRates: Record<string, CourseCommissionRate> = {};
 
   if (flags.includeClassCommission) {
-    /* 1) 先算默认课提率 */
     if (isSwimCoach && perf.classByCourse) {
       const classRate = hitCommissionTier?.classRate ?? 0;
       const oldClassFees = position.oldClassFees ?? [];
@@ -584,7 +581,6 @@ export function calcEmployeePayroll(
       }
     }
 
-    /* 2) 逐会员计算（会员自定义优先） */
     if (perf.classMemberDetail && perf.classMemberDetail.length > 0) {
       perf.classMemberDetail.forEach((m) => {
         const course = m.courseName;
@@ -652,9 +648,6 @@ export function calcEmployeePayroll(
   };
 }
 
-/* ============================================================
- * 职位匹配
- * ============================================================ */
 export function findPositionByTitle(
   positions: PositionConfig[],
   title: string
@@ -709,17 +702,17 @@ function makeEmptyPosition(title: string): PositionConfig {
   };
 }
 
-/* ============================================================
- * 批量计算
- * ============================================================ */
 export function calcPayrollForAll(
   plan: MonthlyCompensationPlan,
-  performances: EmployeePerformance[]
+  performances: EmployeePerformance[],
+  opsViewEnabled = true
 ): PayrollResult[] {
   const results: PayrollResult[] = [];
 
   for (const perf of performances) {
     if (isInvalidId(perf.staffId)) continue;
+
+    if (!opsViewEnabled && perf.positionTitle === '运营主管') continue;
 
     const salesAmount = Number(perf.salesAmount) || 0;
     const classCount = Number(perf.classCount) || 0;
@@ -763,9 +756,6 @@ export function calcPayrollForAll(
   return results;
 }
 
-/* ============================================================
- * 缺失职位
- * ============================================================ */
 export function collectMissingPositions(
   performances: EmployeePerformance[],
   positions: PositionConfig[]
@@ -820,9 +810,6 @@ export function collectMissingPositionDetails(
   return Array.from(map.values());
 }
 
-/* ============================================================
- * 部门统计
- * ============================================================ */
 export interface DepartmentStats {
   department: Department;
   headcount: number;

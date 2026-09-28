@@ -11,8 +11,9 @@ import { POSITION_DEFINITIONS } from '../constants/positions';
 
 interface PositionOverviewProps {
   positions: PositionConfig[];
+  /** ⭐ 是否有方案编辑权限（无权限时隐藏禁用开关） */
+  canEdit: boolean;
   onGoTo?: (category: PositionCategory) => void;
-  /** ⭐ 禁用 / 启用某职位 */
   onToggleDisabled?: (title: string, disabled: boolean) => void;
 }
 
@@ -20,6 +21,7 @@ const STORAGE_KEY = 'position_overview_collapsed';
 
 const PositionOverview: React.FC<PositionOverviewProps> = ({
   positions,
+  canEdit,
   onGoTo,
   onToggleDisabled,
 }) => {
@@ -72,7 +74,8 @@ const PositionOverview: React.FC<PositionOverviewProps> = ({
         <div className="mt-3">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] text-gray-400">
-              点击卡片跳转到对应分类；点击眼睛图标可禁用
+              点击卡片跳转到对应分类
+              {canEdit ? '；点击眼睛图标可禁用' : ''}
             </span>
           </div>
 
@@ -98,8 +101,8 @@ const PositionOverview: React.FC<PositionOverviewProps> = ({
                       : 'bg-amber-50/50 border-amber-200 hover:border-amber-300 hover:shadow-md'
                   }`}
                 >
-                  {/* 禁用按钮（右上角） */}
-                  {config && onToggleDisabled && (
+                  {/* ⭐ 禁用按钮（右上角）：仅 canEdit 时显示 */}
+                  {canEdit && config && onToggleDisabled && (
                     <button
                       type="button"
                       onClick={(e) => {

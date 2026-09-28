@@ -27,6 +27,8 @@ interface RevenueSliderPanelProps {
   shareConfig: RevenueShareConfig;
   courseCommissions?: CourseCommissionInputs;
   genderCounts?: GenderCountConfig;
+  /** ⭐ 是否展示运营主管 */
+  opsViewEnabled?: boolean;
 }
 
 const isStoreManager = (p: PositionConfig) =>
@@ -47,6 +49,7 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
   shareConfig,
   courseCommissions,
   genderCounts,
+  opsViewEnabled = true,
 }) => {
   const fixedCost =
     (input.propertyFee || 0) +
@@ -88,15 +91,22 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
       input,
       courseCommissions,
       shareConfig,
-      genderCounts
+      genderCounts,
+      opsViewEnabled
     );
-  }, [positions, input, courseCommissions, shareConfig, genderCounts]);
+  }, [
+    positions,
+    input,
+    courseCommissions,
+    shareConfig,
+    genderCounts,
+    opsViewEnabled,
+  ]);
 
-  /* 用当前 revenue 重算明细 */
   const positionRows = useMemo(() => {
     if (!result) return [];
 
-    return result.breakdown.map((b) => {
+    const rows = result.breakdown.map((b) => {
       const pos = positions.find((p) => p.id === b.positionId);
       if (!pos) return b;
 
@@ -145,6 +155,31 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
           const share = weights[source.title] ?? 0;
           allocatedRevenue = revenue * share;
         }
+      } else if (pos.title === '运营主管') {
+        /* ⭐ 运营主管：分摊业绩 = 店长分摊业绩 */
+        const storePos = positions.find((x) => isStoreManager(x));
+        if (storePos) {
+          const included = storePos.includedDepartments ?? ['会籍', '私教', '泳教'];
+          const deptSales: Record<string, number> = {
+            会籍: 0, 私教: 0, 泳教: 0, 运营: 0,
+          };
+          positions.forEach((p) => {
+            if (isManager(p) || isStoreManager(p) || p.title === '运营主管') return;
+            const flags = resolveCalcFlags(p);
+            if (!flags.includePerformance) return;
+            const share = weights[p.title] ?? 0;
+            const dept =
+              p.title.includes('会籍') ? '会籍'
+              : p.title.includes('私教') || p.title.includes('瑜伽') || p.title.includes('舞蹈') || p.title.includes('团操') ? '私教'
+              : p.title.includes('泳教') || p.title.includes('游泳') ? '泳教'
+              : '运营';
+            deptSales[dept] += revenue * share;
+          });
+          allocatedRevenue = included.reduce(
+            (s, d) => s + (deptSales[d] || 0),
+            0
+          );
+        }
       } else {
         const share = weights[pos.title] ?? 0;
         allocatedRevenue = revenue * share;
@@ -165,13 +200,19 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
         commission,
       };
     });
-  }, [result, positions, revenue, weights]);
+
+    /* ⭐ 无 ops:view 时过滤运营主管 */
+    if (!opsViewEnabled) {
+      return rows.filter((r) => r.title !== '运营主管');
+    }
+    return rows;
+  }, [result, positions, revenue, weights, opsViewEnabled]);
 
   const courseRows = useMemo(
     () =>
       (result?.courseBreakdown || []).map((c) => ({
         positionId: `course-${c.courseName}`,
-        title: c.courseName,
+        title: c.courseName || '未命名',
         headcount: c.headcount,
         baseSalary: 0,
         allocatedRevenue: 0,
@@ -206,7 +247,6 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
   const isProfit = profit >= 0;
   const formatMoney = (v: number) => `¥${Math.round(v).toLocaleString()}`;
 
-  /* ⭐ 销提 / 课提 占总佣金比例 */
   const salesCommissionRatio =
     totalCommission > 0 ? totalPositionCommission / totalCommission : 0;
   const classCommissionRatio =
@@ -229,7 +269,6 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
       </div>
 
       <div className="p-5">
-        {/* 业绩滑块 */}
         <div className="mb-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-gray-600">总业绩</span>
@@ -294,7 +333,6 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
           </div>
         </div>
 
-        {/* 结果卡片 */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
           <ResultCard
             icon={<TrendingUp className="w-3.5 h-3.5" />}
@@ -344,7 +382,6 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
           />
         </div>
 
-        {/* ⭐ 销提 / 课提 占比 */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
           <div className="rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2.5">
             <div className="flex items-center gap-1 text-[11px] text-amber-700 mb-0.5">
@@ -386,7 +423,6 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
           </div>
         </div>
 
-        {/* 明细表 */}
         <div className="bg-gray-50/60 backdrop-blur rounded-xl border border-gray-100 overflow-hidden">
           <table className="w-full text-xs">
             <thead>
@@ -406,6 +442,7 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                 const pos = positions.find((p) => p.id === b.positionId);
                 const isStore = pos ? isStoreManager(pos) : false;
                 const isMgr = pos ? isManager(pos) : false;
+                const isOps = pos ? pos.title === '运营主管' : false;
                 const noCommission = pos ? !hasCommission(pos) : false;
 
                 return (
@@ -425,6 +462,11 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                       {isStore && (
                         <span className="ml-1 text-[10px] text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded">
                           汇总
+                        </span>
+                      )}
+                      {isOps && (
+                        <span className="ml-1 text-[10px] text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded">
+                          运营
                         </span>
                       )}
                       {noCommission && (

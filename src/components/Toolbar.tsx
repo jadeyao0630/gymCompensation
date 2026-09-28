@@ -15,6 +15,8 @@ interface ToolbarProps {
   hasPlan: boolean;
   importing: boolean;
   importedFrom?: string;
+  /** ⭐ 是否有方案编辑权限 */
+  canEdit: boolean;
   onSelectMonth: (m: string) => void;
   onAddMonth: () => void;
   onRemoveMonth: () => void;
@@ -28,6 +30,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
   hasPlan,
   importing,
   importedFrom,
+  canEdit,
   onSelectMonth,
   onAddMonth,
   onRemoveMonth,
@@ -63,15 +66,17 @@ const Toolbar: React.FC<ToolbarProps> = ({
           </select>
         </div>
 
-        {/* 新增月份 */}
-        <button
-          type="button"
-          onClick={onAddMonth}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-blue-200 bg-white text-blue-700 hover:bg-blue-50 transition"
-        >
-          <Plus className="w-4 h-4" />
-          新增月份
-        </button>
+        {/* ⭐ 新增月份（需要 plan:edit） */}
+        {canEdit && (
+          <button
+            type="button"
+            onClick={onAddMonth}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-blue-200 bg-white text-blue-700 hover:bg-blue-50 transition"
+          >
+            <Plus className="w-4 h-4" />
+            新增月份
+          </button>
+        )}
 
         {/* 已导入信息 */}
         {importedFrom && (
@@ -85,36 +90,38 @@ const Toolbar: React.FC<ToolbarProps> = ({
 
         <div className="flex-1" />
 
-        {/* 统一导入 */}
-        <label
-          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition cursor-pointer ${
-            importing
-              ? 'opacity-50 cursor-not-allowed'
-              : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'
-          }`}
-          title="导入 Excel (.xlsx/.xls) 或 JSON 方案文件"
-        >
-          <input
-            type="file"
-            accept=".xlsx,.xls,.json,application/json"
-            className="hidden"
-            disabled={importing}
-            onChange={onImport}
-          />
-          {importing ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              导入中…
-            </>
-          ) : (
-            <>
-              <Upload className="w-4 h-4" />
-              导入
-            </>
-          )}
-        </label>
+        {/* ⭐ 统一导入（需要 plan:edit） */}
+        {canEdit && (
+          <label
+            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition cursor-pointer ${
+              importing
+                ? 'opacity-50 cursor-not-allowed'
+                : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'
+            }`}
+            title="导入 Excel (.xlsx/.xls) 或 JSON 方案文件"
+          >
+            <input
+              type="file"
+              accept=".xlsx,.xls,.json,application/json"
+              className="hidden"
+              disabled={importing}
+              onChange={onImport}
+            />
+            {importing ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                导入中…
+              </>
+            ) : (
+              <>
+                <Upload className="w-4 h-4" />
+                导入
+              </>
+            )}
+          </label>
+        )}
 
-        {/* 导出 JSON */}
+        {/* 导出 JSON：只要 plan:view 即可 */}
         <button
           type="button"
           onClick={onExport}
@@ -130,21 +137,23 @@ const Toolbar: React.FC<ToolbarProps> = ({
           导出
         </button>
 
-        {/* 删除月份 */}
-        <button
-          type="button"
-          onClick={onRemoveMonth}
-          disabled={!hasPlan}
-          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition ${
-            hasPlan
-              ? 'bg-white text-red-600 border-red-200 hover:bg-red-50'
-              : 'bg-gray-50 text-gray-300 border-gray-200 cursor-not-allowed'
-          }`}
-          title={hasPlan ? '删除当前月份配置' : '暂无月份可删除'}
-        >
-          <Trash2 className="w-4 h-4" />
-          删除月份
-        </button>
+        {/* ⭐ 删除月份（需要 plan:edit） */}
+        {canEdit && (
+          <button
+            type="button"
+            onClick={onRemoveMonth}
+            disabled={!hasPlan}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition ${
+              hasPlan
+                ? 'bg-white text-red-600 border-red-200 hover:bg-red-50'
+                : 'bg-gray-50 text-gray-300 border-gray-200 cursor-not-allowed'
+            }`}
+            title={hasPlan ? '删除当前月份配置' : '暂无月份可删除'}
+          >
+            <Trash2 className="w-4 h-4" />
+            删除月份
+          </button>
+        )}
       </div>
     </div>
   );

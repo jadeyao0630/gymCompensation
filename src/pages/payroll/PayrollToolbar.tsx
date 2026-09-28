@@ -11,6 +11,8 @@ interface Props {
   showViewToggle: boolean;
   hideExcluded: boolean;
   canExport: boolean;
+  /** ⭐ 导出整表权限（无权限时按钮不显示） */
+  canExportPayroll: boolean;
   onMonthChange: (m: string) => void;
   onViewModeChange: (v: 'all' | 'department') => void;
   onHideExcludedChange: (v: boolean) => void;
@@ -21,6 +23,7 @@ interface Props {
 
 export const PayrollToolbar: React.FC<Props> = ({
   month, months, viewMode, loading, showViewToggle, hideExcluded, canExport,
+  canExportPayroll,
   onMonthChange, onViewModeChange, onHideExcludedChange, onRun, onExportTable, hasPlan,
 }) => (
   <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">
@@ -63,15 +66,17 @@ export const PayrollToolbar: React.FC<Props> = ({
         </div>
       )}
 
-      {/* ⭐ 导出整表 */}
-      <button
-        onClick={onExportTable}
-        disabled={!canExport}
-        title="导出整表为 Excel"
-        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border transition bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        <FileDown className="w-3.5 h-3.5" /> 导出整表
-      </button>
+      {/* ⭐ 导出整表：无 export:payroll 权限时按钮不显示 */}
+      {canExportPayroll && (
+        <button
+          onClick={onExportTable}
+          disabled={!canExport}
+          title="导出整表为 Excel"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border transition bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <FileDown className="w-3.5 h-3.5" /> 导出整表
+        </button>
+      )}
 
       <button onClick={onRun} disabled={loading}
         className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:from-gray-300 disabled:to-gray-300 text-white rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] disabled:cursor-not-allowed">

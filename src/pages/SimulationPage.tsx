@@ -64,7 +64,10 @@ const SimulationPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { storeId } = useStore();
-  const { isSuperAdmin } = useAuth();   // ⭐ 新增
+  const { hasPermission } = useAuth();
+
+  /* ⭐ 查看运营主管权限 */
+  const opsViewEnabled = hasPermission('ops:view', storeId);
 
   const [fullStore, setFullStore] = useState<FullStore>({});
   const [selectedMonth, setSelectedMonth] = useState<string>(
@@ -300,6 +303,7 @@ const SimulationPage: React.FC = () => {
     setCourseInputs(next);
   };
 
+  /* ⭐ simResult：传入 opsViewEnabled */
   const simResult: SimulationResult = useMemo(() => {
     if (!currentPlan) {
       return {
@@ -318,13 +322,21 @@ const SimulationPage: React.FC = () => {
       simInput,
       courseInputs,
       shareConfig,
-      genderCounts
+      genderCounts,
+      opsViewEnabled
     );
-  }, [currentPlan, simInput, courseInputs, shareConfig, genderCounts]);
+  }, [
+    currentPlan,
+    simInput,
+    courseInputs,
+    shareConfig,
+    genderCounts,
+    opsViewEnabled,
+  ]);
 
-  /* ⭐ 非超管：直接跳回配置页（Hook 之后才能条件返回） */
-  if (!isSuperAdmin) {
-    return <Navigate to="/compensation" replace />;
+  /* 无测算权限：直接跳无权限页 */
+  if (!hasPermission('simulation:access', storeId)) {
+    return <Navigate to="/no-permission" replace />;
   }
 
   const storeName = getStoreById(storeId)?.name || '';
@@ -473,6 +485,7 @@ const SimulationPage: React.FC = () => {
               shareConfig={shareConfig}
               courseCommissions={courseInputs}
               genderCounts={genderCounts}
+              opsViewEnabled={opsViewEnabled}
             />
           </>
         ) : (

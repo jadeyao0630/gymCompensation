@@ -1,10 +1,23 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useStore } from '../contexts/StoreContext';
 import { Loader2 } from 'lucide-react';
+import type { PermissionKey } from '../constants/permissions';
 
-const RouteGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, loading } = useAuth();
+interface Props {
+  children: React.ReactNode;
+  permission?: PermissionKey;
+  redirectTo?: string;
+}
+
+const RouteGuard: React.FC<Props> = ({
+  children,
+  permission,
+  redirectTo = '/no-permission',
+}) => {
+  const { user, loading, hasPermission } = useAuth();
+  const { storeId } = useStore();
   const location = useLocation();
 
   if (loading) {
@@ -17,6 +30,10 @@ const RouteGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   if (!user) {
     return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  if (permission && !hasPermission(permission, storeId)) {
+    return <Navigate to={redirectTo} replace />;
   }
 
   return <>{children}</>;

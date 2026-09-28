@@ -23,15 +23,9 @@ import TierEditor from './TierEditor';
 import GenderTierEditor from './GenderTierEditor';
 import CourseCommissionEditor from './CourseCommissionEditor';
 
-/* ============================================================
- * 常量
- * ============================================================ */
 const ALL_DEPTS: DepartmentKey[] = ['会籍', '私教', '泳教', '运营'];
 const DEFAULT_STORE_DEPTS: DepartmentKey[] = ['会籍', '私教', '泳教'];
 
-/* ============================================================
- * 计算项开关
- * ============================================================ */
 const FLAG_COLORS: Record<string, { on: string; off: string }> = {
   emerald: {
     on: 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -57,11 +51,13 @@ const FLAG_COLORS: Record<string, { on: string; off: string }> = {
 
 const PositionCalcFlagsRow: React.FC<{
   position: PositionConfig;
+  readOnly: boolean;
   onUpdate: (u: Partial<PositionConfig>) => void;
-}> = ({ position, onUpdate }) => {
+}> = ({ position, readOnly, onUpdate }) => {
   const flags = resolveCalcFlags(position);
 
   const setFlag = (key: keyof typeof flags, value: boolean) => {
+    if (readOnly) return;
     onUpdate({
       calcFlags: {
         ...position.calcFlags,
@@ -91,13 +87,14 @@ const PositionCalcFlagsRow: React.FC<{
         return (
           <label
             key={it.key}
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border cursor-pointer transition ${
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
               active ? c.on : c.off
-            }`}
+            } ${readOnly ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
           >
             <input
               type="checkbox"
               checked={active}
+              disabled={readOnly}
               onChange={(e) => setFlag(it.key, e.target.checked)}
               className="accent-current"
             />
@@ -109,12 +106,11 @@ const PositionCalcFlagsRow: React.FC<{
   );
 };
 
-/* ============================================================
- * 主组件
- * ============================================================ */
 interface PositionCardProps {
   position: PositionConfig;
   allPositions: PositionConfig[];
+  readOnly?: boolean;
+  canEditTarget?: boolean;
   onUpdate: (updates: Partial<PositionConfig>) => void;
   onRemove: () => void;
 }
@@ -122,12 +118,13 @@ interface PositionCardProps {
 const PositionCard: React.FC<PositionCardProps> = ({
   position,
   allPositions,
+  readOnly = false,
+  canEditTarget = false,
   onUpdate,
   onRemove,
 }) => {
   const { storeId } = useStore();
 
-  /* ⭐ 课程列表 */
   const [cardOptions, setCardOptions] = useState<CardItem[]>([]);
   const [loadingCards, setLoadingCards] = useState(false);
 
@@ -152,10 +149,6 @@ const PositionCard: React.FC<PositionCardProps> = ({
       position.category
     );
 
-    console.log(
-      `[PositionCard] 职位「${position.title}」→ cardType=${cardType}`
-    );
-
     if (!cardType) {
       setCardOptions([]);
       return;
@@ -166,12 +159,7 @@ const PositionCard: React.FC<PositionCardProps> = ({
       setLoadingCards(true);
       try {
         const list = await fetchCardList(storeId, cardType);
-        if (!cancelled) {
-          setCardOptions(list);
-          console.log(
-            `[PositionCard] 职位「${position.title}」加载课程 ${list.length} 门 (card_type=${cardType})`
-          );
-        }
+        if (!cancelled) setCardOptions(list);
       } catch (e) {
         console.error('[PositionCard] 加载课程列表失败', e);
       } finally {
@@ -195,16 +183,26 @@ const PositionCard: React.FC<PositionCardProps> = ({
   const isStore =
     position.title.includes('店长') || position.title.includes('门店经理');
 
+  const isManager =
+    position.title.includes('经理') && !position.title.includes('店长');
+
+  const isOps = position.category === 'operations';
+
+  const targetAggregated =
+    position.managerAggregateByDept === true && !isOps && isManager;
+
   const autoTotalBase = calcTotalBaseSalary(position, allPositions);
   const defaultClassMode: ClassCommissionMode =
     position.classCommissionMode || 'percent';
 
   const isLocked =
-    position.performanceSource && position.performanceSource !== 'self';
+    (position.performanceSource && position.performanceSource !== 'self') ||
+    targetAggregated;
 
   const resolvedTarget = resolvePerformanceTarget(position, allPositions);
 
-  const addCommissionTier = () =>
+  const addCommissionTier = () => {
+    if (readOnly) return;
     onUpdate({
       commissionTiers: [
         ...position.commissionTiers,
@@ -217,46 +215,62 @@ const PositionCard: React.FC<PositionCardProps> = ({
         },
       ],
     });
+  };
 
-  const updateCommissionTier = (id: string, u: Partial<CommissionTier>) =>
+  const updateCommissionTier = (id: string, u: Partial<CommissionTier>) => {
+    if (readOnly) return;
     onUpdate({
       commissionTiers: position.commissionTiers.map((t) =>
         t.id === id ? { ...t, ...u } : t
       ),
     });
+  };
 
-  const removeCommissionTier = (id: string) =>
+  const removeCommissionTier = (id: string) => {
+    if (readOnly) return;
     onUpdate({
       commissionTiers: position.commissionTiers.filter((t) => t.id !== id),
     });
+  };
 
-  const addBaseTier = () =>
+  const addBaseTier = () => {
+    if (readOnly) return;
     onUpdate({
       baseSalaryTiers: [
         ...position.baseSalaryTiers,
         { id: uid(), threshold: 0, amount: 0 },
       ],
     });
+  };
 
-  const updateBaseTier = (id: string, u: Partial<BaseSalaryTier>) =>
+  const updateBaseTier = (id: string, u: Partial<BaseSalaryTier>) => {
+    if (readOnly) return;
     onUpdate({
       baseSalaryTiers: position.baseSalaryTiers.map((t) =>
         t.id === id ? { ...t, ...u } : t
       ),
     });
+  };
 
-  const removeBaseTier = (id: string) =>
+  const removeBaseTier = (id: string) => {
+    if (readOnly) return;
     onUpdate({
       baseSalaryTiers: position.baseSalaryTiers.filter((t) => t.id !== id),
     });
+  };
 
-  const updateGenderTiers = (tiers: GenderSalaryTier[]) =>
+  const updateGenderTiers = (tiers: GenderSalaryTier[]) => {
+    if (readOnly) return;
     onUpdate({ genderSalaryTiers: tiers });
+  };
 
-  const updateCourseCommissions = (courses: CourseCommission[]) =>
+  const updateCourseCommissions = (courses: CourseCommission[]) => {
+    if (readOnly) return;
     onUpdate({ courseCommissions: courses });
+  };
 
   const toggleDept = (dept: DepartmentKey) => {
+    if (readOnly) return;
     const current = position.includedDepartments ?? DEFAULT_STORE_DEPTS;
     const next = current.includes(dept)
       ? current.filter((d) => d !== dept)
@@ -266,15 +280,15 @@ const PositionCard: React.FC<PositionCardProps> = ({
 
   return (
     <div className="group bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-lg hover:border-gray-200 transition-all duration-300 overflow-hidden animate-fade-in-up">
-      {/* 卡片头 */}
       <div className="relative px-5 py-4 bg-gradient-to-r from-gray-50/80 via-white to-white border-b border-gray-100">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
             <span className="w-1 h-6 rounded-full bg-gradient-to-b from-blue-500 to-indigo-500" />
             <input
               value={position.title}
+              disabled={readOnly}
               onChange={(e) => onUpdate({ title: e.target.value })}
-              className="border border-transparent hover:border-gray-200 focus:border-blue-400 focus:bg-white rounded-lg px-2.5 py-1.5 text-sm font-bold text-gray-900 w-36 focus:outline-none focus:ring-2 focus:ring-blue-400/30 transition"
+              className="border border-transparent hover:border-gray-200 focus:border-blue-400 focus:bg-white rounded-lg px-2.5 py-1.5 text-sm font-bold text-gray-900 w-36 focus:outline-none focus:ring-2 focus:ring-blue-400/30 transition disabled:bg-gray-50 disabled:text-gray-600 disabled:cursor-not-allowed"
             />
           </div>
 
@@ -284,10 +298,11 @@ const PositionCard: React.FC<PositionCardProps> = ({
             <input
               type="number"
               value={position.headcount}
+              disabled={readOnly}
               onChange={(e) =>
                 onUpdate({ headcount: parseInt(e.target.value) || 0 })
               }
-              className="w-14 text-sm font-semibold text-gray-900 bg-transparent focus:outline-none tabular-nums"
+              className="w-14 text-sm font-semibold text-gray-900 bg-transparent focus:outline-none tabular-nums disabled:cursor-not-allowed"
             />
           </div>
 
@@ -314,13 +329,15 @@ const PositionCard: React.FC<PositionCardProps> = ({
               <>
                 <input
                   type="number"
-                  value={position.performanceTarget}
+                  value={resolvedTarget}
+                  disabled={!canEditTarget}
                   onChange={(e) =>
                     onUpdate({
                       performanceTarget: parseInt(e.target.value) || 0,
                     })
                   }
-                  className="w-24 text-sm font-semibold text-emerald-800 bg-transparent focus:outline-none tabular-nums"
+                  title={!canEditTarget ? '无权限：业绩目标设置' : undefined}
+                  className="w-24 text-sm font-semibold text-emerald-800 bg-transparent focus:outline-none tabular-nums disabled:cursor-not-allowed"
                 />
                 <span className="text-[11px] text-emerald-500">元</span>
               </>
@@ -343,11 +360,12 @@ const PositionCard: React.FC<PositionCardProps> = ({
             <input
               type="text"
               value={position.extraNote || ''}
+              disabled={readOnly}
               onChange={(e) => onUpdate({ extraNote: e.target.value })}
               placeholder="如：店长兼任、上一休一…"
-              className="w-40 text-xs text-amber-800 bg-transparent focus:outline-none placeholder:text-amber-300"
+              className="w-40 text-xs text-amber-800 bg-transparent focus:outline-none placeholder:text-amber-300 disabled:cursor-not-allowed"
             />
-            {position.extraNote && (
+            {!readOnly && position.extraNote && (
               <button
                 onClick={() => onUpdate({ extraNote: '' })}
                 className="text-amber-400 hover:text-amber-600 transition"
@@ -358,22 +376,56 @@ const PositionCard: React.FC<PositionCardProps> = ({
             )}
           </div>
 
+          {isManager && !isStore && !isOps && (
+            <label
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition ${
+                position.managerAggregateByDept
+                  ? 'bg-violet-50 text-violet-700 border-violet-200'
+                  : 'bg-white text-gray-500 border-gray-200'
+              } ${
+                !canEditTarget
+                  ? 'cursor-not-allowed opacity-70'
+                  : 'cursor-pointer'
+              }`}
+              title={
+                !canEditTarget
+                  ? '无权限：业绩目标设置'
+                  : '打开：该经理业绩及目标 = 本部门其他职位总和；关闭：用自己的值'
+              }
+            >
+              <input
+                type="checkbox"
+                checked={position.managerAggregateByDept ?? false}
+                disabled={!canEditTarget}
+                onChange={(e) =>
+                  onUpdate({ managerAggregateByDept: e.target.checked })
+                }
+                className="accent-violet-600 disabled:cursor-not-allowed"
+              />
+              <span className="whitespace-nowrap">业绩=部门总和</span>
+            </label>
+          )}
+
           <div className="flex-1" />
 
-          <button
-            onClick={onRemove}
-            className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition opacity-0 group-hover:opacity-100"
-            title="删除职位"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {!readOnly && (
+            <button
+              onClick={onRemove}
+              className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition opacity-0 group-hover:opacity-100"
+              title="删除职位"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* 计算项开关 */}
-      <PositionCalcFlagsRow position={position} onUpdate={onUpdate} />
+      <PositionCalcFlagsRow
+        position={position}
+        readOnly={readOnly}
+        onUpdate={onUpdate}
+      />
 
-      {/* 店长：业绩包含部门 */}
       {isStore && (
         <div className="px-5 py-3 bg-violet-50/60 border-b border-violet-100">
           <div className="flex flex-wrap items-center gap-3">
@@ -392,11 +444,12 @@ const PositionCard: React.FC<PositionCardProps> = ({
                 <button
                   key={dept}
                   onClick={() => toggleDept(dept)}
+                  disabled={readOnly}
                   className={`px-3 py-1 rounded-lg text-xs font-medium border transition ${
                     active
                       ? 'bg-violet-600 text-white border-violet-600 shadow-sm'
                       : 'bg-white text-gray-500 border-gray-200 hover:border-violet-300'
-                  }`}
+                  } disabled:cursor-not-allowed disabled:opacity-60`}
                 >
                   {dept}
                 </button>
@@ -407,8 +460,9 @@ const PositionCard: React.FC<PositionCardProps> = ({
               <input
                 type="checkbox"
                 checked={position.includeSelf ?? false}
+                disabled={readOnly}
                 onChange={(e) => onUpdate({ includeSelf: e.target.checked })}
-                className="accent-violet-600"
+                className="accent-violet-600 disabled:cursor-not-allowed"
               />
               含自己业绩
             </label>
@@ -420,39 +474,45 @@ const PositionCard: React.FC<PositionCardProps> = ({
         </div>
       )}
 
-      {/* 阶梯区 */}
       <div className="p-5 grid grid-cols-1 lg:grid-cols-2 gap-5">
         <TierEditor
           mode="commission"
+          readOnly={readOnly}
           commissionTiers={position.commissionTiers}
           onAddCommission={addCommissionTier}
           onUpdateCommission={updateCommissionTier}
           onRemoveCommission={removeCommissionTier}
           showClassCommission={showClassCommission}
           defaultClassMode={defaultClassMode}
+          tiered={position.commissionTiered !== false}
+          onTieredChange={(t) => onUpdate({ commissionTiered: t })}
         />
 
         {isSwimCoach ? (
           <GenderTierEditor
             tiers={position.genderSalaryTiers || []}
+            readOnly={readOnly}
             onChange={updateGenderTiers}
           />
         ) : (
           <TierEditor
             mode="base"
+            readOnly={readOnly}
             baseSalaryTiers={position.baseSalaryTiers}
             onAddBase={addBaseTier}
             onUpdateBase={updateBaseTier}
             onRemoveBase={removeBaseTier}
+            tiered={position.baseSalaryTiered !== false}
+            onTieredChange={(t) => onUpdate({ baseSalaryTiered: t })}
           />
         )}
       </div>
 
-      {/* 课程课提 */}
       {showCourseCommission && (
         <div className="px-5 pb-5">
           <CourseCommissionEditor
             courses={position.courseCommissions || []}
+            readOnly={readOnly}
             onChange={updateCourseCommissions}
             cardOptions={cardOptions}
             loadingCards={loadingCards}

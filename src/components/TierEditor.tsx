@@ -10,6 +10,8 @@ type Mode = 'commission' | 'base';
 
 interface TierEditorProps {
   mode: Mode;
+  /** ⭐ 只读模式 */
+  readOnly?: boolean;
   commissionTiers?: CommissionTier[];
   baseSalaryTiers?: BaseSalaryTier[];
   tiered?: boolean;
@@ -25,7 +27,7 @@ interface TierEditorProps {
 }
 
 const TierEditor: React.FC<TierEditorProps> = (props) => {
-  const { mode } = props;
+  const { mode, readOnly = false } = props;
   const isCommission = mode === 'commission';
   const showClass = isCommission && props.showClassCommission;
   const tiered = props.tiered !== false;
@@ -56,12 +58,13 @@ const TierEditor: React.FC<TierEditorProps> = (props) => {
   const list = tiered ? allList : allList.slice(0, 1);
 
   React.useEffect(() => {
+    if (readOnly) return;
     if (!tiered && allList.length === 0) {
       if (isCommission) props.onAddCommission?.();
       else props.onAddBase?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tiered, allList.length]);
+  }, [tiered, allList.length, readOnly]);
 
   const onAdd = isCommission ? props.onAddCommission : props.onAddBase;
 
@@ -81,30 +84,34 @@ const TierEditor: React.FC<TierEditorProps> = (props) => {
             )}
           </h3>
 
-          <button
-            onClick={() => props.onTieredChange?.(!tiered)}
-            className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md border transition ${
-              tiered
-                ? 'bg-white/80 border-gray-200 text-gray-500 hover:border-gray-300'
-                : 'bg-amber-50 border-amber-200 text-amber-600 hover:border-amber-300'
-            }`}
-            title={
-              tiered ? '当前按阶梯，点击切换为统一值' : '当前统一值，点击切换为阶梯'
-            }
-          >
-            {tiered ? (
-              <>
-                <Layers className="w-3 h-3" /> 按阶梯
-              </>
-            ) : (
-              <>
-                <Minus className="w-3 h-3" /> 统一值
-              </>
-            )}
-          </button>
+          {/* ⭐ 按阶梯/统一值切换：只读时隐藏 */}
+          {!readOnly && (
+            <button
+              onClick={() => props.onTieredChange?.(!tiered)}
+              className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md border transition ${
+                tiered
+                  ? 'bg-white/80 border-gray-200 text-gray-500 hover:border-gray-300'
+                  : 'bg-amber-50 border-amber-200 text-amber-600 hover:border-amber-300'
+              }`}
+              title={
+                tiered ? '当前按阶梯，点击切换为统一值' : '当前统一值，点击切换为阶梯'
+              }
+            >
+              {tiered ? (
+                <>
+                  <Layers className="w-3 h-3" /> 按阶梯
+                </>
+              ) : (
+                <>
+                  <Minus className="w-3 h-3" /> 统一值
+                </>
+              )}
+            </button>
+          )}
         </div>
 
-        {tiered && (
+        {/* ⭐ 添加按钮：只读时隐藏 */}
+        {tiered && !readOnly && (
           <button
             onClick={onAdd}
             className={`text-xs font-medium ${theme.btn} px-2.5 py-1 rounded-lg transition flex items-center gap-1`}
@@ -117,7 +124,8 @@ const TierEditor: React.FC<TierEditorProps> = (props) => {
       {list.length === 0 ? (
         <div className="text-center py-6 border-2 border-dashed border-white/60 rounded-xl">
           <p className="text-xs text-gray-400">
-            暂无{theme.label}，点击右上角添加
+            暂无{theme.label}
+            {!readOnly && '，点击右上角添加'}
           </p>
         </div>
       ) : (
@@ -134,6 +142,7 @@ const TierEditor: React.FC<TierEditorProps> = (props) => {
                   key={t.id}
                   ring={theme.ring}
                   tier={t}
+                  readOnly={readOnly}
                   showClass={!!showClass}
                   defaultClassMode={props.defaultClassMode || 'percent'}
                   showDelete={tiered}
@@ -146,6 +155,7 @@ const TierEditor: React.FC<TierEditorProps> = (props) => {
                   key={t.id}
                   ring={theme.ring}
                   tier={t}
+                  readOnly={readOnly}
                   showDelete={tiered}
                   onUpdate={(u) => props.onUpdateBase?.(t.id, u)}
                   onRemove={() => props.onRemoveBase?.(t.id)}
@@ -160,6 +170,7 @@ const TierEditor: React.FC<TierEditorProps> = (props) => {
 interface CommissionRowProps {
   ring: string;
   tier: CommissionTier;
+  readOnly: boolean;
   showClass: boolean;
   defaultClassMode: ClassCommissionMode;
   showDelete: boolean;
@@ -170,6 +181,7 @@ interface CommissionRowProps {
 const CommissionRow: React.FC<CommissionRowProps> = ({
   ring,
   tier,
+  readOnly,
   showClass,
   defaultClassMode,
   showDelete,
@@ -179,6 +191,7 @@ const CommissionRow: React.FC<CommissionRowProps> = ({
   const mode: ClassCommissionMode = tier.classMode || defaultClassMode;
 
   const setMode = (m: ClassCommissionMode) => {
+    if (readOnly) return;
     let nextValue = tier.classRate ?? 0;
     if (m === 'fixed' && mode === 'percent') nextValue = nextValue * 100;
     else if (m === 'percent' && mode === 'fixed') nextValue = nextValue / 100;
@@ -191,18 +204,20 @@ const CommissionRow: React.FC<CommissionRowProps> = ({
       <input
         type="number"
         value={tier.threshold}
+        disabled={readOnly}
         onChange={(e) => onUpdate({ threshold: parseInt(e.target.value) || 0 })}
-        className={`w-20 text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition`}
+        className={`w-20 text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition disabled:cursor-not-allowed`}
       />
       <span className="text-[11px] text-gray-400 font-medium">销提</span>
       <input
         type="number"
         step="0.1"
         value={(tier.rate * 100).toFixed(1)}
+        disabled={readOnly}
         onChange={(e) =>
           onUpdate({ rate: (parseFloat(e.target.value) || 0) / 100 })
         }
-        className={`w-14 text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition`}
+        className={`w-14 text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition disabled:cursor-not-allowed`}
       />
       <span className="text-[11px] text-gray-400">%</span>
 
@@ -217,6 +232,7 @@ const CommissionRow: React.FC<CommissionRowProps> = ({
                 ? ((tier.classRate ?? 0) * 100).toFixed(1)
                 : tier.classRate ?? 0
             }
+            disabled={readOnly}
             onChange={(e) => {
               const v = parseFloat(e.target.value) || 0;
               onUpdate({
@@ -224,12 +240,13 @@ const CommissionRow: React.FC<CommissionRowProps> = ({
                 classMode: mode,
               });
             }}
-            className="w-16 text-xs bg-sky-50/60 border border-sky-100 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40 focus:border-sky-400 transition"
+            className="w-16 text-xs bg-sky-50/60 border border-sky-100 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40 focus:border-sky-400 transition disabled:cursor-not-allowed"
           />
           <div className="inline-flex p-0.5 bg-sky-50/70 rounded-lg border border-sky-100">
             <button
               onClick={() => setMode('percent')}
-              className={`flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium transition ${
+              disabled={readOnly}
+              className={`flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium transition disabled:cursor-not-allowed ${
                 mode === 'percent'
                   ? 'bg-sky-500 text-white shadow-sm'
                   : 'text-sky-600 hover:bg-sky-100'
@@ -240,7 +257,8 @@ const CommissionRow: React.FC<CommissionRowProps> = ({
             </button>
             <button
               onClick={() => setMode('fixed')}
-              className={`flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium transition ${
+              disabled={readOnly}
+              className={`flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium transition disabled:cursor-not-allowed ${
                 mode === 'fixed'
                   ? 'bg-sky-500 text-white shadow-sm'
                   : 'text-sky-600 hover:bg-sky-100'
@@ -258,11 +276,12 @@ const CommissionRow: React.FC<CommissionRowProps> = ({
 
       <input
         value={tier.note || ''}
+        disabled={readOnly}
         onChange={(e) => onUpdate({ note: e.target.value })}
         placeholder="备注"
-        className={`flex-1 min-w-[80px] text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition placeholder:text-gray-300`}
+        className={`flex-1 min-w-[80px] text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition placeholder:text-gray-300 disabled:cursor-not-allowed`}
       />
-      {showDelete && (
+      {showDelete && !readOnly && (
         <button
           onClick={onRemove}
           className="p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition opacity-0 group-hover:opacity-100"
@@ -277,6 +296,7 @@ const CommissionRow: React.FC<CommissionRowProps> = ({
 interface BaseRowProps {
   ring: string;
   tier: BaseSalaryTier;
+  readOnly: boolean;
   showDelete: boolean;
   onUpdate: (u: Partial<BaseSalaryTier>) => void;
   onRemove: () => void;
@@ -285,6 +305,7 @@ interface BaseRowProps {
 const BaseRow: React.FC<BaseRowProps> = ({
   ring,
   tier,
+  readOnly,
   showDelete,
   onUpdate,
   onRemove,
@@ -294,23 +315,26 @@ const BaseRow: React.FC<BaseRowProps> = ({
     <input
       type="number"
       value={tier.threshold}
+      disabled={readOnly}
       onChange={(e) => onUpdate({ threshold: parseInt(e.target.value) || 0 })}
-      className={`w-20 text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition`}
+      className={`w-20 text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition disabled:cursor-not-allowed`}
     />
     <span className="text-[11px] text-gray-400 font-medium">底薪</span>
     <input
       type="number"
       value={tier.amount}
+      disabled={readOnly}
       onChange={(e) => onUpdate({ amount: parseInt(e.target.value) || 0 })}
-      className={`w-20 text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition`}
+      className={`w-20 text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition disabled:cursor-not-allowed`}
     />
     <input
       value={tier.note || ''}
+      disabled={readOnly}
       onChange={(e) => onUpdate({ note: e.target.value })}
       placeholder="备注"
-      className={`flex-1 min-w-[80px] text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition placeholder:text-gray-300`}
+      className={`flex-1 min-w-[80px] text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition placeholder:text-gray-300 disabled:cursor-not-allowed`}
     />
-    {showDelete && (
+    {showDelete && !readOnly && (
       <button
         onClick={onRemove}
         className="p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition opacity-0 group-hover:opacity-100"

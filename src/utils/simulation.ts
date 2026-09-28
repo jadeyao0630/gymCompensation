@@ -37,9 +37,6 @@ const isManagerTitle = (title: string) =>
 const isStoreTitle = (title: string) =>
   title.includes('店长') || title.includes('门店经理');
 
-/* ============================================================
- * 固定成本（含 水费、网络费）
- * ============================================================ */
 export function calcFixedCost(input: SimulationInput): number {
   return (
     (input.propertyFee || 0) +
@@ -51,9 +48,6 @@ export function calcFixedCost(input: SimulationInput): number {
   );
 }
 
-/* ============================================================
- * 底薪按性别人数加权（默认全男）
- * ============================================================ */
 function calcWeightedBaseSalary(
   p: PositionConfig,
   genderCounts?: GenderCountConfig
@@ -79,16 +73,19 @@ function calcWeightedBaseSalary(
     }
   }
 
-  const baseTier = [...(p.baseSalaryTiers || [])].sort(
+  /* ⭐ 按 tiered 过滤 */
+  const baseTiers =
+    p.baseSalaryTiered === false
+      ? (p.baseSalaryTiers || []).slice(0, 1)
+      : p.baseSalaryTiers || [];
+
+  const baseTier = [...baseTiers].sort(
     (a, b) => a.threshold - b.threshold
   )[0];
   const amount = baseTier?.amount ?? 0;
   return amount * headcount;
 }
 
-/* ============================================================
- * 课提测算明细
- * ============================================================ */
 export function calcCourseBreakdown(
   courseInputs: CourseCommissionInputs | undefined,
   positions: PositionConfig[]
@@ -98,10 +95,14 @@ export function calcCourseBreakdown(
   const result: SimulationCourseBreakdown[] = [];
 
   Object.values(courseInputs).forEach((c) => {
-    const pos = positions.find(
-      (p) =>
-        p.title.includes(c.positionKeyword) && !p.title.includes('经理')
-    );
+    const pos =
+      positions.find((p) => p.title === c.positionTitle) ||
+      positions.find(
+        (p) =>
+          c.positionTitle &&
+          p.title.includes(c.positionTitle) &&
+          !p.title.includes('经理')
+      );
     if (!pos) return;
 
     const flags = resolveCalcFlags(pos);
@@ -114,7 +115,7 @@ export function calcCourseBreakdown(
         : c.classCount * info.value;
 
     result.push({
-      courseName: c.courseName,
+      courseName: c.note || pos.title,
       averagePrice: c.averagePrice,
       classCount: c.classCount,
       headcount: pos.headcount || 0,
@@ -127,9 +128,6 @@ export function calcCourseBreakdown(
   return result;
 }
 
-/* ============================================================
- * 业绩分摊权重
- * ============================================================ */
 export function buildShareWeights(
   positions: PositionConfig[],
   shareConfig?: RevenueShareConfig
@@ -161,16 +159,14 @@ export function buildShareWeights(
   return weights;
 }
 
-/* ============================================================
- * 计算总成本
- * ============================================================ */
 function calcTotalCost(
   revenue: number,
   positions: PositionConfig[],
   input: SimulationInput,
   courseInputs?: CourseCommissionInputs,
   shareConfig?: RevenueShareConfig,
-  genderCounts?: GenderCountConfig
+  genderCounts?: GenderCountConfig,
+  opsViewEnabled = true
 ) {
   const fixedCost = calcFixedCost(input);
   const weights = buildShareWeights(positions, shareConfig);
@@ -182,18 +178,23 @@ function calcTotalCost(
     运营: 0,
   };
 
-  const shareablePositions = positions.filter((p) => {
+  positions.forEach((p) => {
+    if (!opsViewEnabled && p.title === '运营主管') return;
     const flags = resolveCalcFlags(p);
-    if (!flags.includePerformance) return false;
-    if (isManagerTitle(p.title)) return false;
-    if (isStoreTitle(p.title)) return false;
-    return true;
-  });
+    if (!flags.includePerformance) return;
+    if (isStoreTitle(p.title)) return;
+    const dept = getDepartmentOf(p.title);
+    if (dept === '运营') return;
 
-  shareablePositions.forEach((p) => {
     const share = weights[p.title] ?? 0;
     const allocatedRevenue = revenue * share;
-    const dept = getDepartmentOf(p.title);
+
+    if (isManagerTitle(p.title)) {
+      if (p.managerAggregateByDept) return;
+      deptSales[dept] += allocatedRevenue;
+      return;
+    }
+
     deptSales[dept] += allocatedRevenue;
   });
 
@@ -201,31 +202,59 @@ function calcTotalCost(
   let totalBaseSalary = 0;
   let totalSalesCommission = 0;
 
-  positions.forEach((p) => {
-    const flags = resolveCalcFlags(p);
+  /* ⭐ 先算店长分摊业绩，供运营主管复用 */
+  let storeAllocated = 0;
+  const storePos = positions.find((x) => isStoreTitle(x.title));
+  if (storePos) {
+    const included: DepartmentKey[] =
+      storePos.includedDepartments ?? ['会籍', '私教', '泳教'];
+    storeAllocated = included.reduce(
+      (s, d) => s + (deptSales[d as Department] || 0),
+      0
+    );
+  }
 
+  positions.forEach((p) => {
+    if (!opsViewEnabled && p.title === '运营主管') return;
+
+    const flags = resolveCalcFlags(p);
     let allocatedRevenue = 0;
 
     if (isStoreTitle(p.title)) {
-      const included: DepartmentKey[] =
-        p.includedDepartments ?? ['会籍', '私教', '泳教'];
-      allocatedRevenue = included.reduce(
-        (s, d) => s + (deptSales[d as Department] || 0),
-        0
-      );
+      allocatedRevenue = storeAllocated;
     } else if (isManagerTitle(p.title)) {
-      const keyword = p.title.replace('经理', '');
-      const source = positions.find(
-        (x) =>
-          x.id !== p.id &&
-          !isManagerTitle(x.title) &&
-          !isStoreTitle(x.title) &&
-          x.title.includes(keyword)
-      );
-      if (source) {
-        const share = weights[source.title] ?? 0;
-        allocatedRevenue = revenue * share;
+      const dept = getDepartmentOf(p.title);
+      if (p.managerAggregateByDept && dept !== '运营') {
+        allocatedRevenue = positions
+          .filter((x) => {
+            if (x.id === p.id) return false;
+            if (isManagerTitle(x.title)) return false;
+            if (isStoreTitle(x.title)) return false;
+            if (getDepartmentOf(x.title) !== dept) return false;
+            const fx = resolveCalcFlags(x);
+            return fx.includePerformance;
+          })
+          .reduce((sum, x) => {
+            const share = weights[x.title] ?? 0;
+            return sum + revenue * share;
+          }, 0);
+      } else {
+        const keyword = p.title.replace('经理', '');
+        const source = positions.find(
+          (x) =>
+            x.id !== p.id &&
+            !isManagerTitle(x.title) &&
+            !isStoreTitle(x.title) &&
+            x.title.includes(keyword)
+        );
+        if (source) {
+          const share = weights[source.title] ?? 0;
+          allocatedRevenue = revenue * share;
+        }
       }
+    } else if (p.title === '运营主管') {
+      /* ⭐ 运营主管：分摊业绩 = 店长分摊业绩 */
+      allocatedRevenue = storeAllocated;
     } else {
       const share = weights[p.title] ?? 0;
       allocatedRevenue = revenue * share;
@@ -235,10 +264,18 @@ function calcTotalCost(
       ? calcWeightedBaseSalary(p, genderCounts)
       : 0;
 
-    const rate = getCommissionRate(p, positions, allocatedRevenue);
-    const commission = flags.includeSalesCommission
-      ? allocatedRevenue * rate
-      : 0;
+    /* ⭐ 运营主管佣金：按 commissionTiers[0].rate 算 */
+    let rate = 0;
+    let commission = 0;
+    if (p.title === '运营主管') {
+      rate = p.commissionTiers?.[0]?.rate ?? 0.03;
+      commission = allocatedRevenue * rate;
+    } else {
+      rate = getCommissionRate(p, positions, allocatedRevenue);
+      commission = flags.includeSalesCommission
+        ? allocatedRevenue * rate
+        : 0;
+    }
 
     totalBaseSalary += baseSalary;
     totalSalesCommission += commission;
@@ -273,15 +310,13 @@ function calcTotalCost(
   };
 }
 
-/* ============================================================
- * 反推所需业绩
- * ============================================================ */
 export function calcSimulation(
   positions: PositionConfig[],
   input: SimulationInput,
   courseInputs?: CourseCommissionInputs,
   shareConfig?: RevenueShareConfig,
-  genderCounts?: GenderCountConfig
+  genderCounts?: GenderCountConfig,
+  opsViewEnabled = true
 ): SimulationResult {
   const fixedCost = calcFixedCost(input);
 
@@ -298,13 +333,11 @@ export function calcSimulation(
       input,
       courseInputs,
       shareConfig,
-      genderCounts
+      genderCounts,
+      opsViewEnabled
     );
-    if (totalCost < mid) {
-      hi = mid;
-    } else {
-      lo = mid;
-    }
+    if (totalCost < mid) hi = mid;
+    else lo = mid;
   }
 
   const requiredRevenue = (lo + hi) / 2;
@@ -314,7 +347,8 @@ export function calcSimulation(
     input,
     courseInputs,
     shareConfig,
-    genderCounts
+    genderCounts,
+    opsViewEnabled
   );
 
   return {
