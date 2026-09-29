@@ -128,7 +128,6 @@ const PayrollPage: React.FC = () => {
   const { storeId } = useStore();
   const { hasPermission } = useAuth();
 
-  /* ⭐ 查看运营主管权限 */
   const opsViewEnabled = hasPermission('ops:view', storeId);
 
   const [fullStore, setFullStore] = useState<FullStore>({});
@@ -324,7 +323,6 @@ const PayrollPage: React.FC = () => {
     });
   };
 
-  /* ⭐ 根据 classMemberDetail 重算该员工的课提 */
   const recomputeClassCommission = (
     r: PayrollResult,
     members: ClassMemberDetail[]
@@ -351,7 +349,6 @@ const PayrollPage: React.FC = () => {
     return { classCommission: total, classCommissionDetail: detail };
   };
 
-  /* ⭐ 更新某会员某条消课记录的课提方式 */
   const handleUpdateMemberCommission = useCallback(
     (
       staffId: string,
@@ -391,7 +388,6 @@ const PayrollPage: React.FC = () => {
     [storeId]
   );
 
-  /* 保存职位覆盖 + 立即重算 */
   const handleSavePosition = (staffId: string, newTitle: string) => {
     const nextOverrides = { ...overrides, [staffId]: newTitle };
     setOverridesByStore((prev) => {
@@ -441,7 +437,6 @@ const PayrollPage: React.FC = () => {
     });
   };
 
-  /* ⭐ handleRun：传入 opsViewEnabled */
   const handleRun = async () => {
     if (!currentPlan || !selectedMonth) {
       alert('请先选择月份，并确保该月已有配置');
@@ -455,7 +450,6 @@ const PayrollPage: React.FC = () => {
         opsViewEnabled
       );
 
-      /* ⭐ 无 ops:view 时，过滤运营主管结果 */
       const filteredResults = opsViewEnabled
         ? res.results
         : res.results.filter((r) => r.positionTitle !== '运营主管');
@@ -601,6 +595,7 @@ const PayrollPage: React.FC = () => {
 
           <PayrollSummary summary={summary} />
 
+          {/* ⭐ 全部员工表：传 storeId */}
           {allResults.length > 0 && viewMode === 'all' && (
             <PayrollAllTable
               results={allResults}
@@ -608,6 +603,7 @@ const PayrollPage: React.FC = () => {
               overrides={overrides}
               plan={currentPlan}
               month={selectedMonth}
+              storeId={storeId}
               summary={summary}
               hideExcluded={hideExcluded}
               canExportPersonal={hasPermission('export:personal', storeId)}
@@ -617,6 +613,7 @@ const PayrollPage: React.FC = () => {
             />
           )}
 
+          {/* ⭐ 按部门列表：传 storeId */}
           {allResults.length > 0 && viewMode === 'department' && (
             <PayrollDeptList
               allResults={allResults}
@@ -624,6 +621,7 @@ const PayrollPage: React.FC = () => {
               overrides={overrides}
               plan={currentPlan}
               month={selectedMonth}
+              storeId={storeId}
               expanded={expanded}
               hideExcluded={hideExcluded}
               canExportPersonal={hasPermission('export:personal', storeId)}

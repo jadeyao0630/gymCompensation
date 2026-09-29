@@ -108,6 +108,13 @@ export function getDepartmentOf(title: string): Department {
   return '运营';
 }
 
+/* ⭐ 会籍 / 私教部门的职员，sale_id 需要加 "c" 前缀 */
+export function needsSaleIdPrefix(positionTitle: string): boolean {
+  if (!positionTitle) return false;
+  const dept = getDepartmentOf(positionTitle);
+  return dept === '会籍' || dept === '私教' || dept === '泳教';
+}
+
 function sortByThreshold<T extends { threshold: number }>(tiers: T[]): T[] {
   return [...tiers].sort((a, b) => a.threshold - b.threshold);
 }
@@ -183,7 +190,6 @@ function parseClassList(record: AnyRecord): ClassSummary {
     members: [],
   };
 
-  /* ⭐ 字段兜底：不同接口可能叫不同名字 */
   const classList: AnyRecord[] =
     record.class_list ??
     record.classList ??

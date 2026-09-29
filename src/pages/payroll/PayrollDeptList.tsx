@@ -24,6 +24,7 @@ import {
   DEPT_DETAIL_FIELDS,
 } from './PayrollBadges';
 import ClassMemberDetailRow from './ClassMemberDetailRow';
+import SalesDetailRow from '../../components/SalesDetailRow';
 
 interface Props {
   allResults: PayrollResult[];
@@ -31,9 +32,9 @@ interface Props {
   overrides: Record<string, string>;
   plan?: MonthlyCompensationPlan;
   month: string;
+  storeId: string;
   expanded: Record<Department, boolean>;
   hideExcluded: boolean;
-  /** ⭐ 个人导出权限（无权限时整列隐藏） */
   canExportPersonal: boolean;
   onToggleDept: (d: Department) => void;
   onToggleExclude: (staffId: string) => void;
@@ -136,6 +137,7 @@ export const PayrollDeptList: React.FC<Props> = ({
   overrides,
   plan,
   month,
+  storeId,
   expanded,
   hideExcluded,
   canExportPersonal,
@@ -150,6 +152,18 @@ export const PayrollDeptList: React.FC<Props> = ({
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const toggleExpand = (key: string) => {
     setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const [expandedSalesKeys, setExpandedSalesKeys] = useState<Set<string>>(
+    new Set()
+  );
+  const toggleSalesExpand = (key: string) => {
+    setExpandedSalesKeys((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -201,7 +215,7 @@ export const PayrollDeptList: React.FC<Props> = ({
             : 'sm:grid-cols-2';
         const showPositionBadge = d.department === '运营';
 
-        /* ⭐ 列数：有导出权限时多 1 列（明细列去掉，用 colSpan） */
+        /* ⭐ 明细列已删，所以 colCount 比之前少 1 */
         const colCount =
           5 +
           (detailFields.salesAmount ? 1 : 0) +
@@ -209,8 +223,7 @@ export const PayrollDeptList: React.FC<Props> = ({
           1 +
           (detailFields.salesCommission ? 1 : 0) +
           (detailFields.classCommission ? 1 : 0) +
-          (canExportPersonal ? 1 : 0) +  // ⭐ 导出列
-          1;                              // 明细列
+          (canExportPersonal ? 1 : 0);
 
         return (
           <div
@@ -346,15 +359,11 @@ export const PayrollDeptList: React.FC<Props> = ({
                           <th className="px-4 py-2 text-right font-medium">
                             合计
                           </th>
-                          {/* ⭐ 导出列：有权限才显示 */}
                           {canExportPersonal && (
                             <th className="px-4 py-2 text-center font-medium">
                               导出
                             </th>
                           )}
-                          <th className="px-3 py-2 text-center font-medium w-10">
-                            明细
-                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
@@ -365,6 +374,9 @@ export const PayrollDeptList: React.FC<Props> = ({
                           const isExpanded = expandedKeys.has(rowKey);
                           const hasDetails =
                             (r.classMemberDetail || []).length > 0;
+                          const isSalesExpanded =
+                            expandedSalesKeys.has(rowKey);
+                          const canClickClass = hasDetails;
 
                           return (
                             <React.Fragment key={rowKey}>
@@ -450,21 +462,84 @@ export const PayrollDeptList: React.FC<Props> = ({
                                     )}
                                   </div>
                                 </td>
+
+                                {/* 销售金额 */}
                                 {detailFields.salesAmount && (
                                   <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">
-                                    {fmtMoney(r.salesAmount)}
+                                    {r.salesAmount > 0 ? (
+                                      <button
+                                        onClick={() =>
+                                          toggleSalesExpand(rowKey)
+                                        }
+                                        title="点击查看销售明细"
+                                        className={`font-medium transition hover:underline ${
+                                          isSalesExpanded
+                                            ? 'text-sky-800'
+                                            : 'text-sky-600 hover:text-sky-800'
+                                        }`}
+                                      >
+                                        {fmtMoney(r.salesAmount)}
+                                      </button>
+                                    ) : (
+                                      fmtMoney(r.salesAmount)
+                                    )}
                                   </td>
                                 )}
+
+                                {/* ⭐ 消课节数：可点击 */}
                                 {detailFields.classAmount && (
                                   <>
                                     <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">
-                                      {fmtNumber(r.classCount)}
+                                      {canClickClass ? (
+                                        <button
+                                          onClick={() =>
+                                            toggleExpand(rowKey)
+                                          }
+                                          title={
+                                            isExpanded
+                                              ? '收起消课明细'
+                                              : `展开消课明细（${(r.classMemberDetail || []).length} 条）`
+                                          }
+                                          className={`font-medium transition hover:underline ${
+                                            isExpanded
+                                              ? 'text-purple-800'
+                                              : 'text-gray-700 hover:text-purple-700'
+                                          }`}
+                                        >
+                                          {fmtNumber(r.classCount)}
+                                        </button>
+                                      ) : (
+                                        fmtNumber(r.classCount)
+                                      )}
                                     </td>
+
+                                    {/* ⭐ 消课金额：可点击 */}
                                     <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">
-                                      {fmtMoney(r.classAmount)}
+                                      {canClickClass ? (
+                                        <button
+                                          onClick={() =>
+                                            toggleExpand(rowKey)
+                                          }
+                                          title={
+                                            isExpanded
+                                              ? '收起消课明细'
+                                              : `展开消课明细（${(r.classMemberDetail || []).length} 条）`
+                                          }
+                                          className={`font-medium transition hover:underline ${
+                                            isExpanded
+                                              ? 'text-purple-800'
+                                              : 'text-gray-700 hover:text-purple-700'
+                                          }`}
+                                        >
+                                          {fmtMoney(r.classAmount)}
+                                        </button>
+                                      ) : (
+                                        fmtMoney(r.classAmount)
+                                      )}
                                     </td>
                                   </>
                                 )}
+
                                 <td className="px-4 py-2.5 text-right tabular-nums text-gray-700">
                                   <div>{fmtMoney(r.baseSalary)}</div>
                                   {r.hitCommissionRate > 0 && (
@@ -486,21 +561,44 @@ export const PayrollDeptList: React.FC<Props> = ({
                                       </div>
                                     )}
                                 </td>
+
                                 {detailFields.salesCommission && (
                                   <td className="px-4 py-2.5 text-right tabular-nums text-sky-600">
                                     {fmtMoney(r.salesCommission)}
                                   </td>
                                 )}
+
+                                {/* ⭐ 课提：可点击 */}
                                 {detailFields.classCommission && (
                                   <td className="px-4 py-2.5 text-right tabular-nums text-violet-600">
-                                    {fmtMoney(r.classCommission)}
+                                    {canClickClass ? (
+                                      <button
+                                        onClick={() =>
+                                          toggleExpand(rowKey)
+                                        }
+                                        title={
+                                          isExpanded
+                                            ? '收起消课明细'
+                                            : `展开消课明细（${(r.classMemberDetail || []).length} 条）`
+                                        }
+                                        className={`font-medium transition hover:underline ${
+                                          isExpanded
+                                            ? 'text-violet-900'
+                                            : 'text-violet-600 hover:text-violet-800'
+                                        }`}
+                                      >
+                                        {fmtMoney(r.classCommission)}
+                                      </button>
+                                    ) : (
+                                      fmtMoney(r.classCommission)
+                                    )}
                                   </td>
                                 )}
+
                                 <td className="px-4 py-2.5 text-right tabular-nums font-bold text-emerald-700">
                                   {fmtMoney(r.total)}
                                 </td>
 
-                                {/* ⭐ 导出列：有权限才渲染 */}
                                 {canExportPersonal && (
                                   <td className="px-4 py-2.5 text-center">
                                     <button
@@ -520,33 +618,19 @@ export const PayrollDeptList: React.FC<Props> = ({
                                     </button>
                                   </td>
                                 )}
-
-                                <td className="px-3 py-2.5 text-center">
-                                  <button
-                                    onClick={() => toggleExpand(rowKey)}
-                                    disabled={!hasDetails}
-                                    title={
-                                      hasDetails
-                                        ? isExpanded
-                                          ? '收起消课明细'
-                                          : `展开消课明细（${(r.classMemberDetail || []).length} 条）`
-                                        : '无消课明细'
-                                    }
-                                    className={`inline-flex items-center justify-center w-6 h-6 rounded-md transition ${
-                                      hasDetails
-                                        ? 'text-purple-600 hover:bg-purple-50'
-                                        : 'text-gray-300 cursor-not-allowed'
-                                    }`}
-                                  >
-                                    {isExpanded ? (
-                                      <ChevronDown className="w-4 h-4" />
-                                    ) : (
-                                      <ChevronRight className="w-4 h-4" />
-                                    )}
-                                  </button>
-                                </td>
                               </tr>
 
+                              {/* 销售明细展开行 */}
+                              {isSalesExpanded && (
+                                <SalesDetailRow
+                                  result={r}
+                                  storeId={storeId}
+                                  month={month}
+                                  colSpan={colCount}
+                                />
+                              )}
+
+                              {/* 消课明细展开行 */}
                               {isExpanded && hasDetails && (
                                 <ClassMemberDetailRow
                                   result={r}
@@ -597,9 +681,7 @@ export const PayrollDeptList: React.FC<Props> = ({
                           <td className="px-4 py-2.5 text-right tabular-nums text-emerald-700">
                             {fmtMoney(d.total)}
                           </td>
-                          {/* ⭐ 导出列空占位 */}
                           {canExportPersonal && <td />}
-                          <td />
                         </tr>
                       </tfoot>
                     </table>
