@@ -14,6 +14,8 @@ export interface CommissionTier {
   rate: number;
   classRate?: number;
   classMode?: ClassCommissionMode;
+  /** ⭐ 销提方式（默认 percent） */
+  salesMode?: ClassCommissionMode;
   note?: string;
 }
 
@@ -86,13 +88,7 @@ export interface PositionConfig {
   calcFlags?: PositionCalcFlags;
 
   disabled?: boolean;
-
   managerAggregateByDept?: boolean;
-
-  /** ⭐ 佣金是否按阶梯（false = 统一值，只用第一条） */
-  commissionTiered?: boolean;
-  /** ⭐ 底薪是否按阶梯（false = 统一值，只用第一条） */
-  baseSalaryTiered?: boolean;
 }
 
 export interface MonthlyCompensationPlan {

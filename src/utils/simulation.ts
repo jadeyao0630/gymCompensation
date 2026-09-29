@@ -73,13 +73,7 @@ function calcWeightedBaseSalary(
     }
   }
 
-  /* ⭐ 按 tiered 过滤 */
-  const baseTiers =
-    p.baseSalaryTiered === false
-      ? (p.baseSalaryTiers || []).slice(0, 1)
-      : p.baseSalaryTiers || [];
-
-  const baseTier = [...baseTiers].sort(
+  const baseTier = [...(p.baseSalaryTiers || [])].sort(
     (a, b) => a.threshold - b.threshold
   )[0];
   const amount = baseTier?.amount ?? 0;
@@ -202,7 +196,7 @@ function calcTotalCost(
   let totalBaseSalary = 0;
   let totalSalesCommission = 0;
 
-  /* ⭐ 先算店长分摊业绩，供运营主管复用 */
+  /* 先算店长分摊业绩，供运营主管复用 */
   let storeAllocated = 0;
   const storePos = positions.find((x) => isStoreTitle(x.title));
   if (storePos) {
@@ -253,7 +247,6 @@ function calcTotalCost(
         }
       }
     } else if (p.title === '运营主管') {
-      /* ⭐ 运营主管：分摊业绩 = 店长分摊业绩 */
       allocatedRevenue = storeAllocated;
     } else {
       const share = weights[p.title] ?? 0;
@@ -264,7 +257,6 @@ function calcTotalCost(
       ? calcWeightedBaseSalary(p, genderCounts)
       : 0;
 
-    /* ⭐ 运营主管佣金：按 commissionTiers[0].rate 算 */
     let rate = 0;
     let commission = 0;
     if (p.title === '运营主管') {

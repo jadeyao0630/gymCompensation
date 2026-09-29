@@ -212,6 +212,7 @@ const PositionCard: React.FC<PositionCardProps> = ({
           rate: 0,
           classRate: showClassCommission ? 0 : undefined,
           classMode: showClassCommission ? defaultClassMode : undefined,
+          salesMode: 'percent',
         },
       ],
     });
@@ -484,8 +485,6 @@ const PositionCard: React.FC<PositionCardProps> = ({
           onRemoveCommission={removeCommissionTier}
           showClassCommission={showClassCommission}
           defaultClassMode={defaultClassMode}
-          tiered={position.commissionTiered !== false}
-          onTieredChange={(t) => onUpdate({ commissionTiered: t })}
         />
 
         {isSwimCoach ? (
@@ -502,8 +501,6 @@ const PositionCard: React.FC<PositionCardProps> = ({
             onAddBase={addBaseTier}
             onUpdateBase={updateBaseTier}
             onRemoveBase={removeBaseTier}
-            tiered={position.baseSalaryTiered !== false}
-            onTieredChange={(t) => onUpdate({ baseSalaryTiered: t })}
           />
         )}
       </div>

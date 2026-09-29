@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Trash2, Percent, Hash, Layers, Minus } from 'lucide-react';
+import { Plus, Trash2, Percent, Hash } from 'lucide-react';
 import type {
   CommissionTier,
   BaseSalaryTier,
@@ -10,12 +10,9 @@ type Mode = 'commission' | 'base';
 
 interface TierEditorProps {
   mode: Mode;
-  /** ⭐ 只读模式 */
   readOnly?: boolean;
   commissionTiers?: CommissionTier[];
   baseSalaryTiers?: BaseSalaryTier[];
-  tiered?: boolean;
-  onTieredChange?: (tiered: boolean) => void;
   onAddCommission?: () => void;
   onUpdateCommission?: (id: string, u: Partial<CommissionTier>) => void;
   onRemoveCommission?: (id: string) => void;
@@ -30,7 +27,6 @@ const TierEditor: React.FC<TierEditorProps> = (props) => {
   const { mode, readOnly = false } = props;
   const isCommission = mode === 'commission';
   const showClass = isCommission && props.showClassCommission;
-  const tiered = props.tiered !== false;
 
   const theme = isCommission
     ? {
@@ -51,20 +47,9 @@ const TierEditor: React.FC<TierEditorProps> = (props) => {
         label: '底薪阶梯',
       };
 
-  const allList = isCommission
+  const list = isCommission
     ? props.commissionTiers || []
     : props.baseSalaryTiers || [];
-
-  const list = tiered ? allList : allList.slice(0, 1);
-
-  React.useEffect(() => {
-    if (readOnly) return;
-    if (!tiered && allList.length === 0) {
-      if (isCommission) props.onAddCommission?.();
-      else props.onAddBase?.();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tiered, allList.length, readOnly]);
 
   const onAdd = isCommission ? props.onAddCommission : props.onAddBase;
 
@@ -83,35 +68,9 @@ const TierEditor: React.FC<TierEditorProps> = (props) => {
               </span>
             )}
           </h3>
-
-          {/* ⭐ 按阶梯/统一值切换：只读时隐藏 */}
-          {!readOnly && (
-            <button
-              onClick={() => props.onTieredChange?.(!tiered)}
-              className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md border transition ${
-                tiered
-                  ? 'bg-white/80 border-gray-200 text-gray-500 hover:border-gray-300'
-                  : 'bg-amber-50 border-amber-200 text-amber-600 hover:border-amber-300'
-              }`}
-              title={
-                tiered ? '当前按阶梯，点击切换为统一值' : '当前统一值，点击切换为阶梯'
-              }
-            >
-              {tiered ? (
-                <>
-                  <Layers className="w-3 h-3" /> 按阶梯
-                </>
-              ) : (
-                <>
-                  <Minus className="w-3 h-3" /> 统一值
-                </>
-              )}
-            </button>
-          )}
         </div>
 
-        {/* ⭐ 添加按钮：只读时隐藏 */}
-        {tiered && !readOnly && (
+        {!readOnly && (
           <button
             onClick={onAdd}
             className={`text-xs font-medium ${theme.btn} px-2.5 py-1 rounded-lg transition flex items-center gap-1`}
@@ -130,12 +89,6 @@ const TierEditor: React.FC<TierEditorProps> = (props) => {
         </div>
       ) : (
         <div className="space-y-2">
-          {!tiered && (
-            <p className="text-[11px] text-amber-600 bg-amber-50/70 border border-amber-100 rounded-lg px-2.5 py-1">
-              统一值模式：忽略业绩门槛，所有业绩都按这条计算
-            </p>
-          )}
-
           {isCommission
             ? (list as CommissionTier[]).map((t) => (
                 <CommissionRow
@@ -145,7 +98,6 @@ const TierEditor: React.FC<TierEditorProps> = (props) => {
                   readOnly={readOnly}
                   showClass={!!showClass}
                   defaultClassMode={props.defaultClassMode || 'percent'}
-                  showDelete={tiered}
                   onUpdate={(u) => props.onUpdateCommission?.(t.id, u)}
                   onRemove={() => props.onRemoveCommission?.(t.id)}
                 />
@@ -156,7 +108,6 @@ const TierEditor: React.FC<TierEditorProps> = (props) => {
                   ring={theme.ring}
                   tier={t}
                   readOnly={readOnly}
-                  showDelete={tiered}
                   onUpdate={(u) => props.onUpdateBase?.(t.id, u)}
                   onRemove={() => props.onRemoveBase?.(t.id)}
                 />
@@ -173,7 +124,6 @@ interface CommissionRowProps {
   readOnly: boolean;
   showClass: boolean;
   defaultClassMode: ClassCommissionMode;
-  showDelete: boolean;
   onUpdate: (u: Partial<CommissionTier>) => void;
   onRemove: () => void;
 }
@@ -184,18 +134,26 @@ const CommissionRow: React.FC<CommissionRowProps> = ({
   readOnly,
   showClass,
   defaultClassMode,
-  showDelete,
   onUpdate,
   onRemove,
 }) => {
-  const mode: ClassCommissionMode = tier.classMode || defaultClassMode;
+  const classMode: ClassCommissionMode = tier.classMode || defaultClassMode;
+  const salesMode: ClassCommissionMode = tier.salesMode || 'percent';
 
-  const setMode = (m: ClassCommissionMode) => {
+  const setClassMode = (m: ClassCommissionMode) => {
     if (readOnly) return;
     let nextValue = tier.classRate ?? 0;
-    if (m === 'fixed' && mode === 'percent') nextValue = nextValue * 100;
-    else if (m === 'percent' && mode === 'fixed') nextValue = nextValue / 100;
+    if (m === 'fixed' && classMode === 'percent') nextValue = nextValue * 100;
+    else if (m === 'percent' && classMode === 'fixed') nextValue = nextValue / 100;
     onUpdate({ classMode: m, classRate: nextValue });
+  };
+
+  const setSalesMode = (m: ClassCommissionMode) => {
+    if (readOnly) return;
+    let nextValue = tier.rate ?? 0;
+    if (m === 'fixed' && salesMode === 'percent') nextValue = nextValue * 100;
+    else if (m === 'percent' && salesMode === 'fixed') nextValue = nextValue / 100;
+    onUpdate({ salesMode: m, rate: nextValue });
   };
 
   return (
@@ -209,26 +167,65 @@ const CommissionRow: React.FC<CommissionRowProps> = ({
         className={`w-20 text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition disabled:cursor-not-allowed`}
       />
       <span className="text-[11px] text-gray-400 font-medium">销提</span>
+
       <input
         type="number"
-        step="0.1"
-        value={(tier.rate * 100).toFixed(1)}
-        disabled={readOnly}
-        onChange={(e) =>
-          onUpdate({ rate: (parseFloat(e.target.value) || 0) / 100 })
+        step={salesMode === 'percent' ? '0.1' : '0.01'}
+        value={
+          salesMode === 'percent'
+            ? (tier.rate * 100).toFixed(1)
+            : tier.rate
         }
-        className={`w-14 text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition disabled:cursor-not-allowed`}
+        disabled={readOnly}
+        onChange={(e) => {
+          const v = parseFloat(e.target.value) || 0;
+          onUpdate({
+            rate: salesMode === 'percent' ? v / 100 : v,
+            salesMode,
+          });
+        }}
+        className={`w-20 text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition disabled:cursor-not-allowed`}
       />
-      <span className="text-[11px] text-gray-400">%</span>
+
+      {/* 销提方式切换 */}
+      <div className="inline-flex p-0.5 bg-gray-50/70 rounded-lg border border-gray-200">
+        <button
+          onClick={() => setSalesMode('percent')}
+          disabled={readOnly}
+          className={`flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium transition disabled:cursor-not-allowed ${
+            salesMode === 'percent'
+              ? 'bg-sky-500 text-white shadow-sm'
+              : 'text-sky-600 hover:bg-sky-100'
+          }`}
+          title="按百分比"
+        >
+          <Percent className="w-3 h-3" />
+        </button>
+        <button
+          onClick={() => setSalesMode('fixed')}
+          disabled={readOnly}
+          className={`flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium transition disabled:cursor-not-allowed ${
+            salesMode === 'fixed'
+              ? 'bg-sky-500 text-white shadow-sm'
+              : 'text-sky-600 hover:bg-sky-100'
+          }`}
+          title="按固定金额（元/元）"
+        >
+          <Hash className="w-3 h-3" />
+        </button>
+      </div>
+      <span className="text-[11px] text-sky-500">
+        {salesMode === 'percent' ? '%' : '元/元'}
+      </span>
 
       {showClass && (
         <>
           <span className="text-[11px] text-sky-500 font-medium ml-1">课提</span>
           <input
             type="number"
-            step={mode === 'percent' ? '0.1' : '1'}
+            step={classMode === 'percent' ? '0.1' : '1'}
             value={
-              mode === 'percent'
+              classMode === 'percent'
                 ? ((tier.classRate ?? 0) * 100).toFixed(1)
                 : tier.classRate ?? 0
             }
@@ -236,18 +233,18 @@ const CommissionRow: React.FC<CommissionRowProps> = ({
             onChange={(e) => {
               const v = parseFloat(e.target.value) || 0;
               onUpdate({
-                classRate: mode === 'percent' ? v / 100 : v,
-                classMode: mode,
+                classRate: classMode === 'percent' ? v / 100 : v,
+                classMode,
               });
             }}
             className="w-16 text-xs bg-sky-50/60 border border-sky-100 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-400/40 focus:border-sky-400 transition disabled:cursor-not-allowed"
           />
           <div className="inline-flex p-0.5 bg-sky-50/70 rounded-lg border border-sky-100">
             <button
-              onClick={() => setMode('percent')}
+              onClick={() => setClassMode('percent')}
               disabled={readOnly}
               className={`flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium transition disabled:cursor-not-allowed ${
-                mode === 'percent'
+                classMode === 'percent'
                   ? 'bg-sky-500 text-white shadow-sm'
                   : 'text-sky-600 hover:bg-sky-100'
               }`}
@@ -256,10 +253,10 @@ const CommissionRow: React.FC<CommissionRowProps> = ({
               <Percent className="w-3 h-3" />
             </button>
             <button
-              onClick={() => setMode('fixed')}
+              onClick={() => setClassMode('fixed')}
               disabled={readOnly}
               className={`flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium transition disabled:cursor-not-allowed ${
-                mode === 'fixed'
+                classMode === 'fixed'
                   ? 'bg-sky-500 text-white shadow-sm'
                   : 'text-sky-600 hover:bg-sky-100'
               }`}
@@ -269,7 +266,7 @@ const CommissionRow: React.FC<CommissionRowProps> = ({
             </button>
           </div>
           <span className="text-[11px] text-sky-500">
-            {mode === 'percent' ? '%' : '元/节'}
+            {classMode === 'percent' ? '%' : '元/节'}
           </span>
         </>
       )}
@@ -281,7 +278,7 @@ const CommissionRow: React.FC<CommissionRowProps> = ({
         placeholder="备注"
         className={`flex-1 min-w-[80px] text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition placeholder:text-gray-300 disabled:cursor-not-allowed`}
       />
-      {showDelete && !readOnly && (
+      {!readOnly && (
         <button
           onClick={onRemove}
           className="p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition opacity-0 group-hover:opacity-100"
@@ -297,7 +294,6 @@ interface BaseRowProps {
   ring: string;
   tier: BaseSalaryTier;
   readOnly: boolean;
-  showDelete: boolean;
   onUpdate: (u: Partial<BaseSalaryTier>) => void;
   onRemove: () => void;
 }
@@ -306,7 +302,6 @@ const BaseRow: React.FC<BaseRowProps> = ({
   ring,
   tier,
   readOnly,
-  showDelete,
   onUpdate,
   onRemove,
 }) => (
@@ -334,7 +329,7 @@ const BaseRow: React.FC<BaseRowProps> = ({
       placeholder="备注"
       className={`flex-1 min-w-[80px] text-xs bg-gray-50/80 border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 ${ring} transition placeholder:text-gray-300 disabled:cursor-not-allowed`}
     />
-    {showDelete && !readOnly && (
+    {!readOnly && (
       <button
         onClick={onRemove}
         className="p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition opacity-0 group-hover:opacity-100"

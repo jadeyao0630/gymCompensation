@@ -491,19 +491,8 @@ export function calcEmployeePayroll(
 
   const flags = resolveCalcFlags(position);
 
-  /* ⭐ 按 tiered 过滤 */
-  const commissionTiers =
-    position.commissionTiered === false
-      ? position.commissionTiers.slice(0, 1)
-      : position.commissionTiers;
-
-  const baseSalaryTiers =
-    position.baseSalaryTiered === false
-      ? position.baseSalaryTiers.slice(0, 1)
-      : position.baseSalaryTiers;
-
   const isSwimCoach = position.title.includes('泳教');
-  const hitCommissionTier = findHitTier(commissionTiers, perf.salesAmount);
+  const hitCommissionTier = findHitTier(position.commissionTiers, perf.salesAmount);
 
   let hitBaseSalary = 0;
   if (flags.includeBaseSalary) {
@@ -511,8 +500,8 @@ export function calcEmployeePayroll(
       const hit = findHitTier(position.genderSalaryTiers, perf.salesAmount);
       if (hit) hitBaseSalary = resolveGenderBase(perf.gender, hit);
     }
-    if (hitBaseSalary === 0 && baseSalaryTiers.length) {
-      const hit = findHitTier(baseSalaryTiers, perf.salesAmount);
+    if (hitBaseSalary === 0 && position.baseSalaryTiers.length) {
+      const hit = findHitTier(position.baseSalaryTiers, perf.salesAmount);
       if (hit) hitBaseSalary = hit.amount;
     }
   }
@@ -630,7 +619,11 @@ export function calcEmployeePayroll(
     classCount: perf.classCount,
     classAmount: perf.classAmount,
     hitCommissionRate,
-    hitCommissionNote: hitCommissionTier?.note,
+    hitCommissionNote: hitCommissionTier
+      ? hitCommissionTier.salesMode === 'fixed'
+        ? `${hitCommissionTier.rate.toFixed(2)} 元/元`
+        : hitCommissionTier.note
+      : undefined,
     hitBaseSalary,
     baseSalary,
     salesCommission,

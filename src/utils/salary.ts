@@ -22,30 +22,17 @@ function findHitTier<T extends { threshold: number }>(
   return hit;
 }
 
-/* ⭐ 按 tiered 过滤阶梯 */
-function effectiveCommissionTiers(position: PositionConfig) {
-  return position.commissionTiered === false
-    ? position.commissionTiers.slice(0, 1)
-    : position.commissionTiers;
-}
-function effectiveBaseTiers(position: PositionConfig) {
-  return position.baseSalaryTiered === false
-    ? position.baseSalaryTiers.slice(0, 1)
-    : position.baseSalaryTiers;
-}
-
 export function calcBaseSalary(
   position: PositionConfig,
   allPositions: PositionConfig[],
   overridePerformance?: number
 ): number {
-  const tiers = effectiveBaseTiers(position);
-  if (!tiers.length) return 0;
+  if (!position.baseSalaryTiers.length) return 0;
   const target =
     overridePerformance !== undefined
       ? overridePerformance
       : resolvePerformanceTarget(position, allPositions);
-  const hit = findHitTier(tiers, target);
+  const hit = findHitTier(position.baseSalaryTiers, target);
   if (!hit) return 0;
   return hit.amount * position.headcount;
 }
@@ -83,12 +70,11 @@ export function getCommissionRate(
   allPositions: PositionConfig[],
   overridePerformance?: number
 ): number {
-  const tiers = effectiveCommissionTiers(position);
   const target =
     overridePerformance !== undefined
       ? overridePerformance
       : resolvePerformanceTarget(position, allPositions);
-  const hit = findHitTier(tiers, target);
+  const hit = findHitTier(position.commissionTiers, target);
   return hit ? hit.rate : 0;
 }
 
@@ -96,9 +82,8 @@ export function getClassCommission(
   position: PositionConfig,
   allPositions: PositionConfig[]
 ): { mode: ClassCommissionMode; value: number } {
-  const tiers = effectiveCommissionTiers(position);
   const target = resolvePerformanceTarget(position, allPositions);
-  const hit = findHitTier(tiers, target);
+  const hit = findHitTier(position.commissionTiers, target);
 
   if (hit?.classRate !== undefined) {
     return {
