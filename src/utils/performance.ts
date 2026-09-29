@@ -8,7 +8,6 @@ export function isStoreManager(pos: PositionConfig): boolean {
   return pos.title.includes('店长');
 }
 
-/* ⭐ 从 title 推断部门 */
 function getDeptOf(title: string): '会籍' | '私教' | '泳教' | '运营' {
   if (!title) return '运营';
   if (title.includes('会籍')) return '会籍';
@@ -34,7 +33,7 @@ export function resolvePerformanceTarget(
   if (position.managerAggregateByDept) {
     const dept = getDeptOf(position.title);
     if (dept !== '运营') {
-      return allPositions
+      const deptSum = allPositions
         .filter((p) => {
           if (p.id === position.id) return false;
           if (p.title.includes('经理')) return false;
@@ -47,6 +46,13 @@ export function resolvePerformanceTarget(
           (sum, p) => sum + resolvePerformanceTarget(p, allPositions),
           0
         );
+
+      /* ⭐ 含自己业绩时，加上自己的 performanceTarget */
+      const selfTarget = position.managerIncludeSelf
+        ? position.performanceTarget || 0
+        : 0;
+
+      return deptSum + selfTarget;
     }
   }
 
@@ -55,7 +61,6 @@ export function resolvePerformanceTarget(
   }
 
   if (source === 'members') {
-    /* 会籍经理的 members 逻辑：本 category 非经理、非店长 */
     const members = allPositions.filter(
       (p) =>
         p.id !== position.id &&
@@ -69,23 +74,19 @@ export function resolvePerformanceTarget(
     );
   }
 
-  /* ⭐ 店长：按 includedDepartments 过滤，排除已勾选 managerAggregateByDept 的经理 */
   if (source === 'aggregate') {
-    const included = position.includedDepartments ?? ['会籍', '私教', '泳教'];
-
-    const targets = allPositions.filter((p) => {
+    const managers = allPositions.filter((p) => {
       if (p.id === position.id) return false;
+      if (!isManager(p)) return false;
       if (p.disabled) return false;
-      if (isStoreManager(p)) return false;   // 排除其他店长
-
-      const dept = getDeptOf(p.title);
-      if (!included.includes(dept)) return false;   // ⭐ 按 includedDepartments 过滤
-
-      /* ⭐ 已勾选「业绩=部门总和」的经理 → 排除（避免重复） */
-      if (isManager(p) && p.managerAggregateByDept) return false;
-
+      if (p.managerAggregateByDept) return false;
       return true;
     });
+
+    const targets =
+      managers.length > 0
+        ? managers
+        : allPositions.filter((p) => p.id !== position.id && !p.disabled);
 
     return targets.reduce(
       (sum, p) => sum + resolvePerformanceTarget(p, allPositions),

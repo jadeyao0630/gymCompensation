@@ -182,33 +182,52 @@ function parseClassList(record: AnyRecord): ClassSummary {
     byCourse: {},
     members: [],
   };
+
+  /* ⭐ 字段兜底：不同接口可能叫不同名字 */
   const classList: AnyRecord[] =
-    record.class_list ?? record.classList ?? record.classes ?? [];
+    record.class_list ??
+    record.classList ??
+    record.classes ??
+    record.detail_list ??
+    record.detailList ??
+    record.list ??
+    [];
+
   if (!Array.isArray(classList)) return summary;
 
   classList.forEach((cls) => {
     const cardName = String(
-      cls.card_name ?? cls.cardName ?? cls.course_name ?? '未命名课程'
+      cls.card_name ??
+        cls.cardName ??
+        cls.course_name ??
+        cls.courseName ??
+        '未命名课程'
     );
-    const classCount = Number(cls.class_count ?? cls.classCount ?? cls.count ?? 0);
+    const classCount = Number(
+      cls.class_count ?? cls.classCount ?? cls.count ?? 0
+    );
     summary.totalCount += classCount || 0;
     if (!summary.byCourse[cardName]) {
       summary.byCourse[cardName] = { count: 0, amount: 0 };
     }
     summary.byCourse[cardName].count += classCount || 0;
 
-    const userList: AnyRecord[] = cls.user_list ?? cls.userList ?? [];
+    const userList: AnyRecord[] =
+      cls.user_list ?? cls.userList ?? cls.users ?? [];
     let courseAmount = 0;
 
     if (Array.isArray(userList) && userList.length > 0) {
       userList.forEach((u) => {
-        const memberName = String(u.username ?? u.name ?? u.user_name ?? '').trim();
+        const memberName = String(
+          u.username ?? u.name ?? u.user_name ?? u.userName ?? ''
+        ).trim();
         const memberId = String(u.user_id ?? u.userId ?? '').trim();
-        const cardUserList: AnyRecord[] = u.card_user_list ?? u.cardUserList ?? [];
+        const cardUserList: AnyRecord[] =
+          u.card_user_list ?? u.cardUserList ?? [];
         if (!Array.isArray(cardUserList)) return;
         cardUserList.forEach((cu) => {
-          const price = Number(cu.price ?? 0);
-          const signNum = Number(cu.sign_num ?? cu.signNum ?? 0);
+          const price = Number(cu.price ?? cu.unit_price ?? cu.unitPrice ?? 0);
+          const signNum = Number(cu.sign_num ?? cu.signNum ?? cu.count ?? 0);
           const amount = signNum * price;
           courseAmount += amount;
 
@@ -225,7 +244,13 @@ function parseClassList(record: AnyRecord): ClassSummary {
         });
       });
     } else {
-      const sp = cls.sign_price ?? cls.signPrice ?? cls.class_price ?? cls.classPrice;
+      const sp =
+        cls.sign_price ??
+        cls.signPrice ??
+        cls.class_price ??
+        cls.classPrice ??
+        cls.price ??
+        cls.amount;
       if (sp !== undefined && sp !== null && sp !== '') {
         courseAmount = Number(sp) || 0;
       }
@@ -237,7 +262,11 @@ function parseClassList(record: AnyRecord): ClassSummary {
 
   if (summary.totalAmount === 0) {
     const topSp =
-      record.sign_price ?? record.signPrice ?? record.class_price ?? record.classPrice;
+      record.sign_price ??
+      record.signPrice ??
+      record.class_price ??
+      record.classPrice ??
+      record.amount;
     if (topSp !== undefined && topSp !== null && topSp !== '') {
       summary.totalAmount = Number(topSp) || 0;
     }
@@ -416,7 +445,8 @@ export function applyManagerPerformance(
       const dept = getDepartmentOf(title);
 
       if (pos?.managerAggregateByDept && dept !== '运营') {
-        return { ...perf, salesAmount: deptSales[dept] };
+        const selfSales = pos.managerIncludeSelf ? perf.salesAmount : 0;
+        return { ...perf, salesAmount: deptSales[dept] + selfSales };
       }
 
       return perf;

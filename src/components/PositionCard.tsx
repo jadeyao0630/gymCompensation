@@ -378,33 +378,65 @@ const PositionCard: React.FC<PositionCardProps> = ({
           </div>
 
           {isManager && !isStore && !isOps && (
-            <label
-              className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition ${
-                position.managerAggregateByDept
-                  ? 'bg-violet-50 text-violet-700 border-violet-200'
-                  : 'bg-white text-gray-500 border-gray-200'
-              } ${
-                !canEditTarget
-                  ? 'cursor-not-allowed opacity-70'
-                  : 'cursor-pointer'
-              }`}
-              title={
-                !canEditTarget
-                  ? '无权限：业绩目标设置'
-                  : '打开：该经理业绩及目标 = 本部门其他职位总和；关闭：用自己的值'
-              }
-            >
-              <input
-                type="checkbox"
-                checked={position.managerAggregateByDept ?? false}
-                disabled={!canEditTarget}
-                onChange={(e) =>
-                  onUpdate({ managerAggregateByDept: e.target.checked })
+            <>
+              <label
+                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition ${
+                  position.managerAggregateByDept
+                    ? 'bg-violet-50 text-violet-700 border-violet-200'
+                    : 'bg-white text-gray-500 border-gray-200'
+                } ${
+                  !canEditTarget
+                    ? 'cursor-not-allowed opacity-70'
+                    : 'cursor-pointer'
+                }`}
+                title={
+                  !canEditTarget
+                    ? '无权限：业绩目标设置'
+                    : '打开：该经理业绩及目标 = 本部门其他职位总和；关闭：用自己的值'
                 }
-                className="accent-violet-600 disabled:cursor-not-allowed"
-              />
-              <span className="whitespace-nowrap">业绩=部门总和</span>
-            </label>
+              >
+                <input
+                  type="checkbox"
+                  checked={position.managerAggregateByDept ?? false}
+                  disabled={!canEditTarget}
+                  onChange={(e) =>
+                    onUpdate({ managerAggregateByDept: e.target.checked })
+                  }
+                  className="accent-violet-600 disabled:cursor-not-allowed"
+                />
+                <span className="whitespace-nowrap">业绩=部门总和</span>
+              </label>
+
+              {position.managerAggregateByDept && (
+                <label
+                  className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition ${
+                    position.managerIncludeSelf
+                      ? 'bg-violet-50 text-violet-700 border-violet-200'
+                      : 'bg-white text-gray-500 border-gray-200'
+                  } ${
+                    !canEditTarget
+                      ? 'cursor-not-allowed opacity-70'
+                      : 'cursor-pointer'
+                  }`}
+                  title={
+                    !canEditTarget
+                      ? '无权限：业绩目标设置'
+                      : '打开：部门总和 + 自己的业绩；关闭：仅部门总和'
+                  }
+                >
+                  <input
+                    type="checkbox"
+                    checked={position.managerIncludeSelf ?? false}
+                    disabled={!canEditTarget}
+                    onChange={(e) =>
+                      onUpdate({ managerIncludeSelf: e.target.checked })
+                    }
+                    className="accent-violet-600 disabled:cursor-not-allowed"
+                  />
+                  <span className="whitespace-nowrap">含自己业绩</span>
+                </label>
+              )}
+            </>
           )}
 
           <div className="flex-1" />

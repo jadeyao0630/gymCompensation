@@ -88,7 +88,11 @@ export interface PositionConfig {
   calcFlags?: PositionCalcFlags;
 
   disabled?: boolean;
+
+  /** ⭐ 经理业绩 = 本部门其他职位业绩总和（不含运营） */
   managerAggregateByDept?: boolean;
+  /** ⭐ 经理业绩=部门总和时，是否额外加上自己的业绩 */
+  managerIncludeSelf?: boolean;
 }
 
 export interface MonthlyCompensationPlan {

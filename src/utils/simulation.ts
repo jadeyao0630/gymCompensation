@@ -219,7 +219,7 @@ function calcTotalCost(
     } else if (isManagerTitle(p.title)) {
       const dept = getDepartmentOf(p.title);
       if (p.managerAggregateByDept && dept !== '运营') {
-        allocatedRevenue = positions
+        const deptSum = positions
           .filter((x) => {
             if (x.id === p.id) return false;
             if (isManagerTitle(x.title)) return false;
@@ -232,6 +232,12 @@ function calcTotalCost(
             const share = weights[x.title] ?? 0;
             return sum + revenue * share;
           }, 0);
+
+        /* ⭐ 含自己业绩时，加自己分摊（经理不参与权重，通常为 0） */
+        const selfShare = weights[p.title] ?? 0;
+        const selfRevenue = p.managerIncludeSelf ? revenue * selfShare : 0;
+
+        allocatedRevenue = deptSum + selfRevenue;
       } else {
         const keyword = p.title.replace('经理', '');
         const source = positions.find(
