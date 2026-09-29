@@ -93,7 +93,7 @@ const CompensationPlanPage: React.FC = () => {
   /* 权限 */
   const canEditPlan = hasPermission('plan:edit', storeId);
   const canEditTarget = hasPermission('target:edit', storeId);
-  const opsViewEnabled = hasPermission('ops:view', storeId);   // ⭐
+  const opsViewEnabled = hasPermission('ops:view', storeId);
 
   const persistToLocalStorage = useCallback((nextFullStore: FullStore) => {
     try {
@@ -350,7 +350,16 @@ const CompensationPlanPage: React.FC = () => {
 
   const currentPlan = selectedMonth ? store[selectedMonth] : undefined;
 
-  /* ⭐ 过滤运营主管（无 ops:view 时） */
+  /* ⭐ 职位总览用：含禁用职位，仅按 ops:view 过滤运营主管 */
+  const overviewPositions = useMemo(() => {
+    const all = currentPlan?.positions || [];
+    if (!opsViewEnabled) {
+      return all.filter((p) => p.title !== '运营主管');
+    }
+    return all;
+  }, [currentPlan, opsViewEnabled]);
+
+  /* ⭐ 分类卡片/统计用：过滤掉禁用 + 运营主管 */
   const visiblePositions = useMemo(() => {
     const all = currentPlan?.positions.filter((p) => !p.disabled) || [];
     if (!opsViewEnabled) {
@@ -900,14 +909,16 @@ const CompensationPlanPage: React.FC = () => {
               />
             </div>
 
+            {/* ⭐ 职位总览：传含禁用的 overviewPositions */}
             <PositionOverview
-              positions={visiblePositions}
+              positions={overviewPositions}
               canEdit={canEditPlan}
               onGoTo={(cat) => setActiveTab(cat)}
               onToggleDisabled={handleToggleDisabled}
             />
 
             <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+              {/* ⭐ CategoryTabs 传过滤禁用的 visiblePositions */}
               <CategoryTabs
                 positions={visiblePositions}
                 active={activeTab}
