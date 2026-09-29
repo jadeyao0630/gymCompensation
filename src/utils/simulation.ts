@@ -3,6 +3,7 @@ import type {
   SimulationInput,
   SimulationResult,
   SimulationPositionBreakdown,
+  SimulationEmployeeBreakdown,
   SimulationCourseBreakdown,
   CourseCommissionInputs,
   RevenueShareConfig,
@@ -46,6 +47,107 @@ export function calcFixedCost(input: SimulationInput): number {
     (input.networkFee || 0) +
     (input.otherFee || 0)
   );
+}
+
+/* ⭐ 等差递增分摊：N 人，总业绩 R，返回每人分摊数组 */
+function splitByArithmetic(total: number, n: number): number[] {
+  if (n <= 0) return [];
+  if (n === 1) return [total];
+
+  const d = (total / n) * 0.3;
+  let a1 = (total - (d * (n * (n - 1))) / 2) / n;
+  if (a1 < 0) a1 = 0;
+
+  const arr: number[] = [];
+  for (let i = 0; i < n; i++) {
+    arr.push(Math.max(0, a1 + i * d));
+  }
+
+  /* 微调总和让 arr 合计等于 total */
+  const sum = arr.reduce((s, x) => s + x, 0);
+  if (sum > 0) {
+    const scale = total / sum;
+    for (let i = 0; i < arr.length; i++) {
+      arr[i] = arr[i] * scale;
+    }
+  }
+  return arr;
+}
+
+/* ⭐ 命中档位工具 */
+function hitTier<T extends { threshold: number }>(
+  tiers: T[],
+  perf: number
+): T | undefined {
+  if (!tiers || tiers.length === 0) return undefined;
+  const sorted = [...tiers].sort((a, b) => a.threshold - b.threshold);
+  let hit: T = sorted[0];
+  for (const t of sorted) {
+    if (perf >= t.threshold) hit = t;
+    else break;
+  }
+  return hit;
+}
+
+/* ⭐ 单人底薪：按性别取值（该人分摊业绩决定命中档位） */
+function perEmployeeBaseSalaryForGender(
+  p: PositionConfig,
+  allocated: number,
+  gender: 'male' | 'female' | 'newbie'
+): { value: number; hitThreshold?: number } {
+  /* 泳教：性别底薪阶梯 */
+  if (p.genderSalaryTiers?.length) {
+    const hit = hitTier(p.genderSalaryTiers, allocated);
+    if (!hit) return { value: 0 };
+    let v = 0;
+    if (gender === 'male') v = hit.male;
+    else if (gender === 'female') v = hit.female;
+    else v = hit.newbie;
+    return { value: v, hitThreshold: hit.threshold };
+  }
+
+  /* 普通：底薪阶梯（不分性别） */
+  const hit = hitTier(p.baseSalaryTiers, allocated);
+  if (!hit) return { value: 0 };
+  return { value: hit.amount, hitThreshold: hit.threshold };
+}
+
+/* ⭐ 按单人分摊业绩，计算单人销提 */
+function perEmployeeCommission(
+  p: PositionConfig,
+  allocated: number
+): { value: number; rate: number; hitThreshold?: number } {
+  const hit = hitTier(p.commissionTiers, allocated);
+  if (!hit) return { value: 0, rate: 0 };
+  const rate = hit.rate ?? 0;
+  return { value: allocated * rate, rate, hitThreshold: hit.threshold };
+}
+
+/* ⭐ 按顺序分配性别（male → female → newbie） */
+function buildGenderList(
+  headcount: number,
+  genderCounts?: GenderCountConfig,
+  title?: string
+): ('male' | 'female' | 'newbie')[] {
+  const counts = title && genderCounts ? genderCounts[title] : undefined;
+  const maleCount = counts?.maleCount ?? 0;
+  const femaleCount = counts?.femaleCount ?? 0;
+  const newbieCount = counts?.newbieCount ?? 0;
+  const totalCount = maleCount + femaleCount + newbieCount;
+
+  const list: ('male' | 'female' | 'newbie')[] = [];
+
+  if (totalCount > 0) {
+    for (let i = 0; i < maleCount; i++) list.push('male');
+    for (let i = 0; i < femaleCount; i++) list.push('female');
+    for (let i = 0; i < newbieCount; i++) list.push('newbie');
+    /* 人数不足时用 male 补 */
+    while (list.length < headcount) list.push('male');
+  } else {
+    for (let i = 0; i < headcount; i++) list.push('male');
+  }
+
+  return list.slice(0, headcount);
 }
 
 function calcWeightedBaseSalary(
@@ -153,16 +255,14 @@ export function buildShareWeights(
   return weights;
 }
 
-function calcTotalCost(
+/* ⭐ 根据当前 revenue，计算各职位分摊业绩 + 每人明细 */
+export function calcSimulationBreakdown(
   revenue: number,
   positions: PositionConfig[],
-  input: SimulationInput,
-  courseInputs?: CourseCommissionInputs,
   shareConfig?: RevenueShareConfig,
   genderCounts?: GenderCountConfig,
   opsViewEnabled = true
-) {
-  const fixedCost = calcFixedCost(input);
+): SimulationPositionBreakdown[] {
   const weights = buildShareWeights(positions, shareConfig);
 
   const deptSales: Record<Department, number> = {
@@ -192,11 +292,7 @@ function calcTotalCost(
     deptSales[dept] += allocatedRevenue;
   });
 
-  const breakdown: SimulationPositionBreakdown[] = [];
-  let totalBaseSalary = 0;
-  let totalSalesCommission = 0;
-
-  /* 先算店长分摊业绩，供运营主管复用 */
+  /* 店长分摊业绩 */
   let storeAllocated = 0;
   const storePos = positions.find((x) => isStoreTitle(x.title));
   if (storePos) {
@@ -207,6 +303,27 @@ function calcTotalCost(
       0
     );
   }
+
+  /* 经理自己业绩权重 */
+  const selfWeight = (p: PositionConfig): number => {
+    const raw = shareConfig?.[p.title];
+    const w = raw !== undefined && raw > 0 ? raw : p.headcount || 0;
+    const totalShareable = positions
+      .filter((x) => {
+        const fx = resolveCalcFlags(x);
+        if (!fx.includePerformance) return false;
+        if (isManagerTitle(x.title)) return false;
+        if (isStoreTitle(x.title)) return false;
+        return true;
+      })
+      .reduce((s, x) => {
+        const r = shareConfig?.[x.title];
+        return s + (r !== undefined && r > 0 ? r : x.headcount || 0);
+      }, 0);
+    return totalShareable > 0 ? w / totalShareable : 0;
+  };
+
+  const breakdown: SimulationPositionBreakdown[] = [];
 
   positions.forEach((p) => {
     if (!opsViewEnabled && p.title === '运营主管') return;
@@ -219,7 +336,7 @@ function calcTotalCost(
     } else if (isManagerTitle(p.title)) {
       const dept = getDepartmentOf(p.title);
       if (p.managerAggregateByDept && dept !== '运营') {
-        const deptSum = positions
+        const deptRevenue = positions
           .filter((x) => {
             if (x.id === p.id) return false;
             if (isManagerTitle(x.title)) return false;
@@ -232,12 +349,10 @@ function calcTotalCost(
             const share = weights[x.title] ?? 0;
             return sum + revenue * share;
           }, 0);
-
-        /* ⭐ 含自己业绩时，加自己分摊（经理不参与权重，通常为 0） */
-        const selfShare = weights[p.title] ?? 0;
-        const selfRevenue = p.managerIncludeSelf ? revenue * selfShare : 0;
-
-        allocatedRevenue = deptSum + selfRevenue;
+        const selfRevenue = p.managerIncludeSelf
+          ? revenue * selfWeight(p)
+          : 0;
+        allocatedRevenue = deptRevenue + selfRevenue;
       } else {
         const keyword = p.title.replace('经理', '');
         const source = positions.find(
@@ -259,35 +374,102 @@ function calcTotalCost(
       allocatedRevenue = revenue * share;
     }
 
-    const baseSalary = flags.includeBaseSalary
-      ? calcWeightedBaseSalary(p, genderCounts)
-      : 0;
+    const headcount = p.headcount || 0;
 
-    let rate = 0;
+    let baseSalary = 0;
     let commission = 0;
-    if (p.title === '运营主管') {
+    let rate = 0;
+    let perEmployee: SimulationEmployeeBreakdown[] | undefined;
+
+    if (
+      headcount > 1 &&
+      !isStoreTitle(p.title) &&
+      !isManagerTitle(p.title) &&
+      p.title !== '运营主管'
+    ) {
+      const shares = splitByArithmetic(allocatedRevenue, headcount);
+
+      /* ⭐ 按顺序分配性别 */
+      const genderList = buildGenderList(headcount, genderCounts, p.title);
+
+      perEmployee = shares.map((alloc, idx) => {
+        const gender = genderList[idx] ?? 'male';
+
+        const baseInfo = flags.includeBaseSalary
+          ? perEmployeeBaseSalaryForGender(p, alloc, gender)
+          : { value: 0, hitThreshold: undefined };
+
+        const empCommission = flags.includeSalesCommission
+          ? perEmployeeCommission(p, alloc)
+          : { value: 0, rate: 0, hitThreshold: undefined };
+
+        return {
+          index: idx + 1,
+          allocatedRevenue: alloc,
+          hitBaseThreshold: baseInfo.hitThreshold,
+          baseSalary: baseInfo.value,
+          hitCommissionThreshold: empCommission.hitThreshold,
+          commissionRate: empCommission.rate,
+          commission: empCommission.value,
+        };
+      });
+
+      baseSalary = perEmployee.reduce((s, x) => s + x.baseSalary, 0);
+      commission = perEmployee.reduce((s, x) => s + x.commission, 0);
+      rate = allocatedRevenue > 0 ? commission / allocatedRevenue : 0;
+    } else if (p.title === '运营主管') {
+      baseSalary = flags.includeBaseSalary
+        ? calcWeightedBaseSalary(p, genderCounts)
+        : 0;
       rate = p.commissionTiers?.[0]?.rate ?? 0.03;
       commission = allocatedRevenue * rate;
     } else {
+      baseSalary = flags.includeBaseSalary
+        ? calcWeightedBaseSalary(p, genderCounts)
+        : 0;
       rate = getCommissionRate(p, positions, allocatedRevenue);
       commission = flags.includeSalesCommission
         ? allocatedRevenue * rate
         : 0;
     }
 
-    totalBaseSalary += baseSalary;
-    totalSalesCommission += commission;
-
     breakdown.push({
       positionId: p.id,
       title: p.title,
-      headcount: p.headcount || 0,
+      headcount,
       baseSalary,
       allocatedRevenue,
       commissionRate: rate,
       commission,
+      perEmployee,
     });
   });
+
+  return breakdown;
+}
+
+function calcTotalCost(
+  revenue: number,
+  positions: PositionConfig[],
+  input: SimulationInput,
+  courseInputs?: CourseCommissionInputs,
+  shareConfig?: RevenueShareConfig,
+  genderCounts?: GenderCountConfig,
+  opsViewEnabled = true
+) {
+  const fixedCost = calcFixedCost(input);
+
+  /* ⭐ 调用统一的分摊函数 */
+  const breakdown = calcSimulationBreakdown(
+    revenue,
+    positions,
+    shareConfig,
+    genderCounts,
+    opsViewEnabled
+  );
+
+  const totalBaseSalary = breakdown.reduce((s, x) => s + x.baseSalary, 0);
+  const totalSalesCommission = breakdown.reduce((s, x) => s + x.commission, 0);
 
   const courseBreakdown = calcCourseBreakdown(courseInputs, positions);
   const totalClassCommission = courseBreakdown.reduce(

@@ -8,6 +8,7 @@ export function isStoreManager(pos: PositionConfig): boolean {
   return pos.title.includes('店长');
 }
 
+/* ⭐ 从 title 推断部门 */
 function getDeptOf(title: string): '会籍' | '私教' | '泳教' | '运营' {
   if (!title) return '运营';
   if (title.includes('会籍')) return '会籍';
@@ -29,11 +30,11 @@ export function resolvePerformanceTarget(
 ): number {
   const source = position.performanceSource || 'self';
 
-  /* ⭐ 经理 + 勾选「业绩=部门总和」→ 本部门非经理、非店长目标之和 */
+  /* ⭐ 经理 + 勾选「业绩=部门总和」→ 本部门非经理、非店长目标之和（+ 可选自己） */
   if (position.managerAggregateByDept) {
     const dept = getDeptOf(position.title);
     if (dept !== '运营') {
-      const deptSum = allPositions
+      const deptTarget = allPositions
         .filter((p) => {
           if (p.id === position.id) return false;
           if (p.title.includes('经理')) return false;
@@ -47,12 +48,11 @@ export function resolvePerformanceTarget(
           0
         );
 
-      /* ⭐ 含自己业绩时，加上自己的 performanceTarget */
       const selfTarget = position.managerIncludeSelf
         ? position.performanceTarget || 0
         : 0;
 
-      return deptSum + selfTarget;
+      return deptTarget + selfTarget;
     }
   }
 

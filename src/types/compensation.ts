@@ -93,6 +93,11 @@ export interface PositionConfig {
   managerAggregateByDept?: boolean;
   /** ⭐ 经理业绩=部门总和时，是否额外加上自己的业绩 */
   managerIncludeSelf?: boolean;
+
+  /** ⭐ 佣金是否按阶梯（false = 统一值，只用第一条） */
+  commissionTiered?: boolean;
+  /** ⭐ 底薪是否按阶梯（false = 统一值，只用第一条） */
+  baseSalaryTiered?: boolean;
 }
 
 export interface MonthlyCompensationPlan {
@@ -106,9 +111,11 @@ export interface MonthlyCompensationPlan {
 export type CompensationStore = Record<string, MonthlyCompensationPlan>;
 
 export interface CourseCommissionInput {
+  /** ⭐ 备注（原 courseName，改为备注） */
   note: string;
   averagePrice: number;
   classCount: number;
+  /** ⭐ 关联职位（用职位 title 作为值） */
   positionTitle: string;
 }
 
@@ -175,4 +182,29 @@ export function resolveCalcFlags(
     includeClassAmount: f.includeClassAmount ?? true,
     includeClassCommission: f.includeClassCommission ?? true,
   };
+}
+
+/** ⭐ 单人分摊业绩明细 */
+export interface SimulationEmployeeBreakdown {
+  index: number;
+  allocatedRevenue: number;
+  /** 命中的底薪门槛 */
+  hitBaseThreshold?: number;
+  baseSalary: number;
+  /** 命中的销提门槛 */
+  hitCommissionThreshold?: number;
+  commissionRate: number;
+  commission: number;
+}
+
+export interface SimulationPositionBreakdown {
+  positionId: string;
+  title: string;
+  headcount: number;
+  baseSalary: number;
+  allocatedRevenue: number;
+  commissionRate: number;
+  commission: number;
+  /** ⭐ 单人分摊明细 */
+  perEmployee?: SimulationEmployeeBreakdown[];
 }

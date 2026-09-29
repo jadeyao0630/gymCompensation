@@ -179,12 +179,17 @@ const PositionCard: React.FC<PositionCardProps> = ({
   const isSwimOrPersonal =
     position.title.includes('泳教') || position.title.includes('私教');
 
-  /* ⭐ 私教部门下所有职位都显示课提 */
-  const showClassCommission =
-    position.category === 'personalTraining' || isSwimOrPersonal;
-
   const isStore =
     position.title.includes('店长') || position.title.includes('门店经理');
+
+  const isOpsManager = position.title === '运营主管';
+
+  /* ⭐ 显示课提：私教部门 + 泳教 + 店长 + 运营主管 */
+  const showClassCommission =
+    position.category === 'personalTraining' ||
+    isSwimOrPersonal ||
+    isStore ||
+    isOpsManager;
 
   const isManager =
     position.title.includes('经理') && !position.title.includes('店长');
@@ -379,34 +384,68 @@ const PositionCard: React.FC<PositionCardProps> = ({
             )}
           </div>
 
+          {/* ⭐ 经理业绩汇总开关：需要 plan:edit 权限 */}
           {isManager && !isStore && !isOps && (
-            <label
-              className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition ${
-                position.managerAggregateByDept
-                  ? 'bg-violet-50 text-violet-700 border-violet-200'
-                  : 'bg-white text-gray-500 border-gray-200'
-              } ${
-                !canEditTarget
-                  ? 'cursor-not-allowed opacity-70'
-                  : 'cursor-pointer'
-              }`}
-              title={
-                !canEditTarget
-                  ? '无权限：业绩目标设置'
-                  : '打开：该经理业绩及目标 = 本部门其他职位总和；关闭：用自己的值'
-              }
-            >
-              <input
-                type="checkbox"
-                checked={position.managerAggregateByDept ?? false}
-                disabled={!canEditTarget}
-                onChange={(e) =>
-                  onUpdate({ managerAggregateByDept: e.target.checked })
+            <>
+              <label
+                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition ${
+                  position.managerAggregateByDept
+                    ? 'bg-violet-50 text-violet-700 border-violet-200'
+                    : 'bg-white text-gray-500 border-gray-200'
+                } ${
+                  readOnly
+                    ? 'cursor-not-allowed opacity-70'
+                    : 'cursor-pointer'
+                }`}
+                title={
+                  readOnly
+                    ? '无权限：设置方案'
+                    : '打开：该经理业绩及目标 = 本部门其他职位总和；关闭：用自己的值'
                 }
-                className="accent-violet-600 disabled:cursor-not-allowed"
-              />
-              <span className="whitespace-nowrap">业绩=部门总和</span>
-            </label>
+              >
+                <input
+                  type="checkbox"
+                  checked={position.managerAggregateByDept ?? false}
+                  disabled={readOnly}
+                  onChange={(e) =>
+                    onUpdate({ managerAggregateByDept: e.target.checked })
+                  }
+                  className="accent-violet-600 disabled:cursor-not-allowed"
+                />
+                <span className="whitespace-nowrap">业绩=部门总和</span>
+              </label>
+
+              {/* ⭐ 勾选后显示：含自己业绩 */}
+              {position.managerAggregateByDept && (
+                <label
+                  className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition ${
+                    position.managerIncludeSelf
+                      ? 'bg-violet-50 text-violet-700 border-violet-200'
+                      : 'bg-white text-gray-500 border-gray-200'
+                  } ${
+                    readOnly
+                      ? 'cursor-not-allowed opacity-70'
+                      : 'cursor-pointer'
+                  }`}
+                  title={
+                    readOnly
+                      ? '无权限：设置方案'
+                      : '打开：业绩 = 本部门其他职位总和 + 自己的业绩'
+                  }
+                >
+                  <input
+                    type="checkbox"
+                    checked={position.managerIncludeSelf ?? false}
+                    disabled={readOnly}
+                    onChange={(e) =>
+                      onUpdate({ managerIncludeSelf: e.target.checked })
+                    }
+                    className="accent-violet-600 disabled:cursor-not-allowed"
+                  />
+                  <span className="whitespace-nowrap">含自己业绩</span>
+                </label>
+              )}
+            </>
           )}
 
           <div className="flex-1" />
@@ -478,7 +517,6 @@ const PositionCard: React.FC<PositionCardProps> = ({
       )}
 
       <div className="p-5 grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* ⭐ 佣金阶梯：去掉 tiered / onTieredChange */}
         <TierEditor
           mode="commission"
           readOnly={readOnly}
@@ -497,7 +535,6 @@ const PositionCard: React.FC<PositionCardProps> = ({
             onChange={updateGenderTiers}
           />
         ) : (
-          /* ⭐ 底薪阶梯：去掉 tiered / onTieredChange */
           <TierEditor
             mode="base"
             readOnly={readOnly}

@@ -1,13 +1,27 @@
 import * as XLSX from 'xlsx';
 import type { PayrollResult } from './payroll';
 import type { MonthlyCompensationPlan } from '../types/compensation';
-import { getDepartmentOf } from './payroll';
+import { getDepartmentOf, needsSaleIdPrefix } from './payroll';
+import { getCardOrderList } from '../api/stats';
 
-export function exportEmployeePayrollToExcel(
+/** 'YYYY-MM' → { begin_date: 'YYYY-MM-01', end_date: 'YYYY-MM-月末' } */
+function getMonthRange(month: string): { begin_date: string; end_date: string } {
+  const [y, m] = month.split('-').map(Number);
+  const first = new Date(y, m - 1, 1);
+  const last = new Date(y, m, 0);
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+      d.getDate()
+    ).padStart(2, '0')}`;
+  return { begin_date: fmt(first), end_date: fmt(last) };
+}
+
+export async function exportEmployeePayrollToExcel(
   result: PayrollResult,
   plan: MonthlyCompensationPlan,
-  month: string
-) {
+  month: string,
+  storeId: string
+): Promise<void> {
   const wb = XLSX.utils.book_new();
   const dept = getDepartmentOf(result.positionTitle);
   const isCoach = dept === '泳教' || dept === '私教';
@@ -51,13 +65,12 @@ export function exportEmployeePayrollToExcel(
   ws1['!cols'] = [{ wch: 18 }, { wch: 18 }];
   XLSX.utils.book_append_sheet(wb, ws1, '汇总');
 
-  /* ============== Sheet 2：消课明细（按课程分组 + 课提信息） ============== */
+  /* ============== Sheet 2：消课明细 ============== */
   const details = result.classMemberDetail || [];
   if (details.length > 0) {
     const rates = result.courseCommissionRates || {};
     const classCommissionDetail = result.classCommissionDetail || {};
 
-    /* 按课程分组，同时记录原始全局索引（与 updateMemberCommission 对应） */
     const grouped: Record<
       string,
       Array<{
@@ -126,7 +139,6 @@ export function exportEmployeePayrollToExcel(
         ]);
       });
 
-      /* 课程小计 */
       detailRows.push([
         `${course} 小计`,
         '',
@@ -140,14 +152,13 @@ export function exportEmployeePayrollToExcel(
         ),
         '',
       ]);
-      detailRows.push([]); // 组间空行
+      detailRows.push([]);
 
       grandCount += groupCount;
       grandAmount += groupAmount;
       grandCommission += classCommissionDetail[course] ?? groupCommission;
     });
 
-    /* 总计 */
     detailRows.push([
       '总计',
       '',
@@ -162,20 +173,78 @@ export function exportEmployeePayrollToExcel(
 
     const ws2 = XLSX.utils.aoa_to_sheet(detailRows);
     ws2['!cols'] = [
-      { wch: 22 }, // 课程名称
-      { wch: 14 }, // 会员姓名
-      { wch: 14 }, // 会员ID
-      { wch: 10 }, // 消课节数
-      { wch: 10 }, // 单价
-      { wch: 12 }, // 金额
-      { wch: 14 }, // 课提方式
-      { wch: 12 }, // 课提金额
-      { wch: 12 }, // 是否自定义
+      { wch: 22 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 12 },
+      { wch: 14 },
+      { wch: 12 },
+      { wch: 12 },
     ];
     XLSX.utils.book_append_sheet(wb, ws2, '消课明细');
   }
 
-  /* ============== Sheet 3：课提汇总（保留原来的按课程汇总） ============== */
+  /* ============== Sheet 3：销售明细（⭐ 新增） ============== */
+  try {
+    const { begin_date, end_date } = getMonthRange(month);
+    const saleId = needsSaleIdPrefix(result.positionTitle)
+      ? `c${result.staffId}`
+      : result.staffId;
+
+    const { list } = await getCardOrderList({
+      bus_id: storeId,
+      sale_id: saleId,
+      begin_date,
+      end_date,
+      page_no: 1,
+      page_size: 1000,
+    });
+
+    if (list.length > 0) {
+      const myName = (result.staffName || '').trim();
+      const rows: any[][] = [
+        ['会员名', '卡种', '占比', '卡金额', '业绩金额', '日期'],
+      ];
+
+      let totalAmount = 0;
+      list.forEach((item) => {
+        const hit = item.marketers_detail?.find(
+          (m) => (m.name || '').trim() === myName
+        );
+        const percent = hit?.percent || '';
+        const performanceAmount = hit?.amount ? Number(hit.amount) : 0;
+        totalAmount += performanceAmount;
+
+        rows.push([
+          item.username || '',
+          item.card_name || '',
+          percent,
+          Number(item.amount || 0),
+          performanceAmount,
+          item.deal_time || '',
+        ]);
+      });
+
+      rows.push(['合计', '', '', '', Number(totalAmount.toFixed(2)), '']);
+
+      const wsSales = XLSX.utils.aoa_to_sheet(rows);
+      wsSales['!cols'] = [
+        { wch: 14 },
+        { wch: 20 },
+        { wch: 10 },
+        { wch: 12 },
+        { wch: 12 },
+        { wch: 18 },
+      ];
+      XLSX.utils.book_append_sheet(wb, wsSales, '销售明细');
+    }
+  } catch (e) {
+    console.warn('[export] 拉销售明细失败，跳过', e);
+  }
+
+  /* ============== Sheet 4：课提汇总 ============== */
   if (
     result.classCommissionDetail &&
     Object.keys(result.classCommissionDetail).length > 0
@@ -190,7 +259,7 @@ export function exportEmployeePayrollToExcel(
     XLSX.utils.book_append_sheet(wb, ws3, '课提汇总');
   }
 
-  /* ============== Sheet 4：岗位配置 ============== */
+  /* ============== Sheet 5：岗位配置 ============== */
   const pos = plan.positions.find((p) => p.title === result.positionTitle);
   if (pos) {
     const cfgRows: any[][] = [['配置项', '值']];

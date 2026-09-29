@@ -671,11 +671,10 @@ const CompensationPlanPage: React.FC = () => {
     if (!currentPlan) return;
     const target = currentPlan.positions.find((p) => p.id === posId);
 
+    /* ⭐ 只有 performanceTarget 归 target:edit；managerAggregateByDept 归 plan:edit */
     const keys = Object.keys(updates);
     const onlyTarget =
-      keys.length === 1 &&
-      (keys[0] === 'performanceTarget' ||
-        keys[0] === 'managerAggregateByDept');
+      keys.length === 1 && keys[0] === 'performanceTarget';
 
     updatePlan(
       {
@@ -909,7 +908,6 @@ const CompensationPlanPage: React.FC = () => {
               />
             </div>
 
-            {/* ⭐ 职位总览：传含禁用的 overviewPositions */}
             <PositionOverview
               positions={overviewPositions}
               canEdit={canEditPlan}
@@ -918,7 +916,6 @@ const CompensationPlanPage: React.FC = () => {
             />
 
             <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-              {/* ⭐ CategoryTabs 传过滤禁用的 visiblePositions */}
               <CategoryTabs
                 positions={visiblePositions}
                 active={activeTab}

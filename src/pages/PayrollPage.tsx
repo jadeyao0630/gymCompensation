@@ -35,6 +35,7 @@ import { PayrollActionsProvider } from './payroll/PayrollActionsContext';
 
 const STORAGE_KEY = 'gym_compensation_store_v2';
 const OVERRIDES_KEY = 'gym_position_overrides_v1';
+const NEWBIE_KEY = 'gym_newbie_staff_v1';
 type FullStore = Record<string, CompensationStore>;
 type ViewMode = 'all' | 'department';
 
@@ -157,12 +158,16 @@ const PayrollPage: React.FC = () => {
   const [overridesByStore, setOverridesByStore] = useState<
     Record<string, Record<string, string>>
   >({});
+  const [newbieByStore, setNewbieByStore] = useState<
+    Record<string, Set<string>>
+  >({});
   const [editingStaff, setEditingStaff] = useState<PayrollResult | null>(null);
 
   const store: CompensationStore = fullStore[storeId] || {};
   const allResults: PayrollResult[] = resultsByStore[storeId] || [];
   const excludedSet: Set<string> = excludedByStore[storeId] || new Set();
   const overrides: Record<string, string> = overridesByStore[storeId] || {};
+  const newbieSet: Set<string> = newbieByStore[storeId] || new Set();
 
   /* 加载本地存储 */
   useEffect(() => {
@@ -182,7 +187,32 @@ const PayrollPage: React.FC = () => {
         console.error('[PayrollPage] 覆盖表解析失败', e);
       }
     }
+    const savedNewbie = localStorage.getItem(NEWBIE_KEY);
+    if (savedNewbie) {
+      try {
+        const raw = JSON.parse(savedNewbie) as Record<string, string[]>;
+        const next: Record<string, Set<string>> = {};
+        Object.entries(raw).forEach(([sid, ids]) => {
+          next[sid] = new Set(ids);
+        });
+        setNewbieByStore(next);
+      } catch (e) {
+        console.error('[PayrollPage] 新人表解析失败', e);
+      }
+    }
   }, []);
+
+  const persistNewbie = (next: Record<string, Set<string>>) => {
+    try {
+      const raw: Record<string, string[]> = {};
+      Object.entries(next).forEach(([sid, set]) => {
+        raw[sid] = Array.from(set);
+      });
+      localStorage.setItem(NEWBIE_KEY, JSON.stringify(raw));
+    } catch (e) {
+      console.error('[PayrollPage] 写新人表失败', e);
+    }
+  };
 
   const username = import.meta.env.VITE_TEST_USERNAME || '';
   const password = import.meta.env.VITE_TEST_PASSWORD || '';
@@ -210,7 +240,6 @@ const PayrollPage: React.FC = () => {
     if (m) setSelectedMonth(m);
   }, [searchParams]);
 
-  /* 切月份时从 API 拉方案 */
   useEffect(() => {
     if (!storeId || !selectedMonth) return;
     let cancelled = false;
@@ -287,6 +316,46 @@ const PayrollPage: React.FC = () => {
       if (cur.has(staffId)) cur.delete(staffId);
       else cur.add(staffId);
       return { ...prev, [storeId]: cur };
+    });
+  };
+
+  /* ⭐ 切换新人 */
+  const toggleNewbie = (staffId: string) => {
+    setNewbieByStore((prev) => {
+      const cur = new Set(prev[storeId] || []);
+      const willBeNewbie = !cur.has(staffId);
+
+      if (willBeNewbie) cur.add(staffId);
+      else cur.delete(staffId);
+
+      const next = { ...prev, [storeId]: cur };
+      persistNewbie(next);
+
+      /* 立即重算该员工 */
+      const perfs = performancesByStore[storeId] || [];
+      const perf = perfs.find((p) => p.staffId === staffId);
+      if (perf && currentPlan) {
+        const position = findPositionByTitle(
+          currentPlan.positions,
+          perf.positionTitle
+        );
+        if (position) {
+          const newResult = calcEmployeePayroll(
+            position,
+            perf,
+            willBeNewbie
+          );
+          setResultsByStore((rPrev) => {
+            const list = rPrev[storeId] || [];
+            const nextList = list.map((r) =>
+              r.staffId === staffId ? newResult : r
+            );
+            return { ...rPrev, [storeId]: nextList };
+          });
+        }
+      }
+
+      return next;
     });
   };
 
@@ -429,7 +498,11 @@ const PayrollPage: React.FC = () => {
       nextPerf.managerSalesBase = storePerf?.salesAmount ?? 0;
     }
 
-    const newResult = calcEmployeePayroll(effectivePosition, nextPerf);
+    const newResult = calcEmployeePayroll(
+      effectivePosition,
+      nextPerf,
+      newbieSet.has(staffId)
+    );
     setResultsByStore((prev) => {
       const list = prev[storeId] || [];
       const next = list.map((r) => (r.staffId === staffId ? newResult : r));
@@ -447,7 +520,8 @@ const PayrollPage: React.FC = () => {
         selectedMonth,
         currentPlan,
         overrides,
-        opsViewEnabled
+        opsViewEnabled,
+        newbieSet
       );
 
       const filteredResults = opsViewEnabled
@@ -517,7 +591,8 @@ const PayrollPage: React.FC = () => {
         selectedMonth,
         nextPlan,
         overrides,
-        opsViewEnabled
+        opsViewEnabled,
+        newbieSet
       );
       const filteredResults = opsViewEnabled
         ? res.results
@@ -595,7 +670,7 @@ const PayrollPage: React.FC = () => {
 
           <PayrollSummary summary={summary} />
 
-          {/* ⭐ 全部员工表：传 storeId */}
+          {/* ⭐ 全部员工表 */}
           {allResults.length > 0 && viewMode === 'all' && (
             <PayrollAllTable
               results={allResults}
@@ -607,13 +682,15 @@ const PayrollPage: React.FC = () => {
               summary={summary}
               hideExcluded={hideExcluded}
               canExportPersonal={hasPermission('export:personal', storeId)}
+              newbieSet={newbieSet}
+              onToggleNewbie={toggleNewbie}
               onToggleExclude={toggleExclude}
               onEditPosition={setEditingStaff}
               onUpdateAttendance={updateAttendance}
             />
           )}
 
-          {/* ⭐ 按部门列表：传 storeId */}
+          {/* ⭐ 按部门列表 */}
           {allResults.length > 0 && viewMode === 'department' && (
             <PayrollDeptList
               allResults={allResults}
@@ -625,6 +702,8 @@ const PayrollPage: React.FC = () => {
               expanded={expanded}
               hideExcluded={hideExcluded}
               canExportPersonal={hasPermission('export:personal', storeId)}
+              newbieSet={newbieSet}
+              onToggleNewbie={toggleNewbie}
               onToggleDept={toggleDept}
               onToggleExclude={toggleExclude}
               onEditPosition={setEditingStaff}

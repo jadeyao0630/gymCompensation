@@ -108,11 +108,11 @@ export function getDepartmentOf(title: string): Department {
   return '运营';
 }
 
-/* ⭐ 会籍 / 私教部门的职员，sale_id 需要加 "c" 前缀 */
+/* ⭐ 会籍 / 私教 / 泳教部门的职员，sale_id 需要加 "c" 前缀 */
 export function needsSaleIdPrefix(positionTitle: string): boolean {
   if (!positionTitle) return false;
   const dept = getDepartmentOf(positionTitle);
-  return dept === '会籍' || dept === '私教' || dept === '泳教';
+  return dept === '私教' || dept === '泳教';
 }
 
 function sortByThreshold<T extends { threshold: number }>(tiers: T[]): T[] {
@@ -473,7 +473,8 @@ function resolveGenderBase(gender: Gender | undefined, hit: GenderSalaryTier): n
 
 export function calcEmployeePayroll(
   position: PositionConfig,
-  perf: EmployeePerformance
+  perf: EmployeePerformance,
+  isNewbie = false
 ): PayrollResult {
   /* 运营主管 */
   if (position.title === '运营主管') {
@@ -503,7 +504,7 @@ export function calcEmployeePayroll(
       staffPhone: perf.staffPhone,
       positionTitle: position.title,
       gender,
-      isNewbie: gender === 'newbie',
+      isNewbie: false,
       isManager: false,
       isStore: false,
       salesAmount: managerSalesBase,
@@ -528,17 +529,34 @@ export function calcEmployeePayroll(
   const flags = resolveCalcFlags(position);
 
   const isSwimCoach = position.title.includes('泳教');
-  const hitCommissionTier = findHitTier(position.commissionTiers, perf.salesAmount);
+
+  /* ⭐ 新人：底薪 / 销提 / 课提取第一档（门槛最低） */
+  const sortedCommissionTiers = sortByThreshold(position.commissionTiers);
+  const sortedBaseTiers = sortByThreshold(position.baseSalaryTiers);
+  const sortedGenderTiers = sortByThreshold(position.genderSalaryTiers || []);
+
+  const hitCommissionTier = isNewbie
+    ? sortedCommissionTiers[0]
+    : findHitTier(position.commissionTiers, perf.salesAmount);
 
   let hitBaseSalary = 0;
   if (flags.includeBaseSalary) {
-    if (isSwimCoach && position.genderSalaryTiers?.length) {
-      const hit = findHitTier(position.genderSalaryTiers, perf.salesAmount);
-      if (hit) hitBaseSalary = resolveGenderBase(perf.gender, hit);
-    }
-    if (hitBaseSalary === 0 && position.baseSalaryTiers.length) {
-      const hit = findHitTier(position.baseSalaryTiers, perf.salesAmount);
-      if (hit) hitBaseSalary = hit.amount;
+    if (isNewbie) {
+      if (isSwimCoach && sortedGenderTiers.length > 0) {
+        hitBaseSalary = sortedGenderTiers[0].newbie || 0;
+      }
+      if (hitBaseSalary === 0 && sortedBaseTiers.length > 0) {
+        hitBaseSalary = sortedBaseTiers[0].amount || 0;
+      }
+    } else {
+      if (isSwimCoach && position.genderSalaryTiers?.length) {
+        const hit = findHitTier(position.genderSalaryTiers, perf.salesAmount);
+        if (hit) hitBaseSalary = resolveGenderBase(perf.gender, hit);
+      }
+      if (hitBaseSalary === 0 && position.baseSalaryTiers.length) {
+        const hit = findHitTier(position.baseSalaryTiers, perf.salesAmount);
+        if (hit) hitBaseSalary = hit.amount;
+      }
     }
   }
   const baseSalary = hitBaseSalary;
@@ -636,8 +654,9 @@ export function calcEmployeePayroll(
       ? (baseSalary / 30) * absentDays
       : 0;
 
+  /* ⭐ gender 保持原值，不再改成 'newbie' */
   const gender: Gender = perf.gender ?? 'male';
-  const isNewbie = gender === 'newbie';
+  const isNewbieOut = isNewbie;
   const isManager = isManagerTitle(position.title);
   const isStore =
     position.title.includes('店长') || position.title.includes('门店经理');
@@ -648,7 +667,7 @@ export function calcEmployeePayroll(
     staffPhone: perf.staffPhone,
     positionTitle: position.title,
     gender,
-    isNewbie,
+    isNewbie: isNewbieOut,
     isManager,
     isStore,
     salesAmount: perf.salesAmount,
@@ -734,7 +753,8 @@ function makeEmptyPosition(title: string): PositionConfig {
 export function calcPayrollForAll(
   plan: MonthlyCompensationPlan,
   performances: EmployeePerformance[],
-  opsViewEnabled = true
+  opsViewEnabled = true,
+  newbieIds: Set<string> = new Set()
 ): PayrollResult[] {
   const results: PayrollResult[] = [];
 
@@ -771,14 +791,18 @@ export function calcPayrollForAll(
     if (!position) position = makeEmptyPosition(title);
 
     results.push(
-      calcEmployeePayroll(position, {
-        ...perf,
-        salesAmount,
-        classCount,
-        classAmount,
-        fullAttendance: perf.fullAttendance ?? true,
-        absentDays: perf.absentDays ?? 0,
-      })
+      calcEmployeePayroll(
+        position,
+        {
+          ...perf,
+          salesAmount,
+          classCount,
+          classAmount,
+          fullAttendance: perf.fullAttendance ?? true,
+          absentDays: perf.absentDays ?? 0,
+        },
+        newbieIds.has(perf.staffId)
+      )
     );
   }
 

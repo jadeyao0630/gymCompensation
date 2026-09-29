@@ -121,7 +121,8 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
       month: string,
       plan: MonthlyCompensationPlan,
       overrides?: Record<string, string>,
-      opsViewEnabled = true
+      opsViewEnabled = true,
+      newbieIds: Set<string> = new Set()
     ): Promise<RunResult> => {
       console.log('[usePayroll] === 开始 ===');
       console.log('[usePayroll] busId:', busId, 'month:', month, 'opsViewEnabled:', opsViewEnabled);

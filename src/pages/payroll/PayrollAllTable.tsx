@@ -5,6 +5,7 @@ import {
   Sparkles,
   UserCheck,
   UserX,
+  UserPlus,
 } from 'lucide-react';
 import type { PayrollResult } from '../../utils/payroll';
 import type { MonthlyCompensationPlan } from '../../types/compensation';
@@ -35,6 +36,10 @@ interface Props {
   } | null;
   hideExcluded: boolean;
   canExportPersonal: boolean;
+  /** ⭐ 新人集合 */
+  newbieSet: Set<string>;
+  /** ⭐ 切换新人 */
+  onToggleNewbie: (staffId: string) => void;
   onToggleExclude: (staffId: string) => void;
   onEditPosition: (r: PayrollResult) => void;
   onUpdateAttendance: (
@@ -63,6 +68,31 @@ const IncludeIconButton: React.FC<{
       <UserCheck className="w-3.5 h-3.5" />
     ) : (
       <UserX className="w-3.5 h-3.5" />
+    )}
+  </button>
+);
+
+/* ⭐ 新人切换按钮 */
+const NewbieIconButton: React.FC<{
+  isNewbie: boolean;
+  onToggle: () => void;
+}> = ({ isNewbie, onToggle }) => (
+  <button
+    onClick={(e) => {
+      e.stopPropagation();
+      onToggle();
+    }}
+    title={isNewbie ? '点击取消新人' : '点击设为新人'}
+    className={`inline-flex items-center justify-center w-7 h-7 rounded-full border transition ${
+      isNewbie
+        ? 'bg-violet-50 text-violet-600 border-violet-200 hover:bg-violet-100'
+        : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'
+    }`}
+  >
+    {isNewbie ? (
+      <Sparkles className="w-3.5 h-3.5" />
+    ) : (
+      <UserPlus className="w-3.5 h-3.5" />
     )}
   </button>
 );
@@ -119,6 +149,8 @@ export const PayrollAllTable: React.FC<Props> = ({
   summary,
   hideExcluded,
   canExportPersonal,
+  newbieSet,
+  onToggleNewbie,
   onToggleExclude,
   onEditPosition,
   onUpdateAttendance,
@@ -153,8 +185,8 @@ export const PayrollAllTable: React.FC<Props> = ({
     });
   };
 
-  /* ⭐ 列数：明细列已删除，所以比之前少 1 */
-  const COLS = canExportPersonal ? 13 : 12;
+  /* ⭐ 列数：新人列 +1 */
+  const COLS = canExportPersonal ? 14 : 13;
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -176,6 +208,7 @@ export const PayrollAllTable: React.FC<Props> = ({
           <thead className="bg-gray-50 text-gray-600">
             <tr>
               <th className="px-3 py-3 text-center font-medium w-12">计入</th>
+              <th className="px-3 py-3 text-center font-medium w-12">新人</th>
               <th className="px-4 py-3 text-left font-medium">员工</th>
               <th className="px-4 py-3 text-center font-medium">职位设置</th>
               <th className="px-4 py-3 text-center font-medium">
@@ -214,6 +247,7 @@ export const PayrollAllTable: React.FC<Props> = ({
                 const isExpanded = expandedKeys.has(rowKey);
                 const hasDetails = (r.classMemberDetail || []).length > 0;
                 const isSalesExpanded = expandedSalesKeys.has(rowKey);
+                const isNewbie = newbieSet.has(r.staffId);
 
                 const canClickClass = hasDetails;
 
@@ -230,6 +264,15 @@ export const PayrollAllTable: React.FC<Props> = ({
                           onToggle={() => onToggleExclude(r.staffId)}
                         />
                       </td>
+
+                      {/* ⭐ 新人按钮 */}
+                      <td className="px-3 py-3 text-center">
+                        <NewbieIconButton
+                          isNewbie={isNewbie}
+                          onToggle={() => onToggleNewbie(r.staffId)}
+                        />
+                      </td>
+
                       <td className="px-4 py-3">
                         <div
                           className={`font-medium ${
@@ -294,7 +337,6 @@ export const PayrollAllTable: React.FC<Props> = ({
                         </div>
                       </td>
 
-                      {/* 销售金额：可点击展开销售明细 */}
                       <td className="px-4 py-3 text-right tabular-nums">
                         {r.salesAmount > 0 ? (
                           <button
@@ -313,7 +355,6 @@ export const PayrollAllTable: React.FC<Props> = ({
                         )}
                       </td>
 
-                      {/* ⭐ 消课节数：可点击展开 */}
                       <td className="px-4 py-3 text-right tabular-nums">
                         {canClickClass ? (
                           <button
@@ -336,7 +377,6 @@ export const PayrollAllTable: React.FC<Props> = ({
                         )}
                       </td>
 
-                      {/* ⭐ 消课金额：可点击展开 */}
                       <td className="px-4 py-3 text-right tabular-nums">
                         {canClickClass ? (
                           <button
@@ -377,7 +417,6 @@ export const PayrollAllTable: React.FC<Props> = ({
                         {fmtMoney(r.salesCommission)}
                       </td>
 
-                      {/* ⭐ 课提：可点击展开 */}
                       <td className="px-4 py-3 text-right tabular-nums text-violet-600">
                         {canClickClass ? (
                           <button
@@ -408,10 +447,15 @@ export const PayrollAllTable: React.FC<Props> = ({
                         <td className="px-4 py-3 text-center">
                           <button
                             disabled={!plan}
-                            onClick={(e) => {
+                            onClick={async (e) => {
                               e.stopPropagation();
                               if (!plan) return;
-                              exportEmployeePayrollToExcel(r, plan, month);
+                              await exportEmployeePayrollToExcel(
+                                r,
+                                plan,
+                                month,
+                                storeId
+                              );
                             }}
                             className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-[11px] font-medium transition disabled:opacity-50"
                           >
@@ -421,7 +465,6 @@ export const PayrollAllTable: React.FC<Props> = ({
                       )}
                     </tr>
 
-                    {/* 销售明细展开行 */}
                     {isSalesExpanded && (
                       <SalesDetailRow
                         result={r}
@@ -431,7 +474,6 @@ export const PayrollAllTable: React.FC<Props> = ({
                       />
                     )}
 
-                    {/* 消课明细展开行 */}
                     {isExpanded && hasDetails && (
                       <ClassMemberDetailRow result={r} colSpan={COLS} />
                     )}
@@ -443,7 +485,7 @@ export const PayrollAllTable: React.FC<Props> = ({
 
           <tfoot className="bg-gray-50 font-semibold text-gray-800">
             <tr>
-              <td className="px-4 py-3" colSpan={8}>
+              <td className="px-4 py-3" colSpan={9}>
                 合计（计入 {summary?.headcount || 0} 人
                 {excludedCount > 0 ? ` · 已排除 ${excludedCount} 人` : ''}）
               </td>

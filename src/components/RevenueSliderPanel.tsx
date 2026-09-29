@@ -9,6 +9,8 @@ import {
   BookOpen,
   Percent,
   Hash,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import type {
   PositionConfig,
@@ -16,9 +18,15 @@ import type {
   RevenueShareConfig,
   CourseCommissionInputs,
   GenderCountConfig,
+  SimulationEmployeeBreakdown,
 } from '../types/compensation';
 import { resolveCalcFlags } from '../types/compensation';
-import { calcSimulation, buildShareWeights } from '../utils/simulation';
+import {
+  calcSimulation,
+  buildShareWeights,
+  calcSimulationBreakdown,
+} from '../utils/simulation';
+
 
 interface RevenueSliderPanelProps {
   positions: PositionConfig[];
@@ -27,7 +35,6 @@ interface RevenueSliderPanelProps {
   shareConfig: RevenueShareConfig;
   courseCommissions?: CourseCommissionInputs;
   genderCounts?: GenderCountConfig;
-  /** ⭐ 是否展示运营主管 */
   opsViewEnabled?: boolean;
 }
 
@@ -70,6 +77,16 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
   );
 
   const [revenue, setRevenue] = useState(requiredRevenue || maxRevenue / 2);
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+
+  const toggleExpand = (key: string) => {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const lastRequiredRef = useRef(requiredRevenue);
   useEffect(() => {
@@ -104,109 +121,35 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
   ]);
 
   const positionRows = useMemo(() => {
-    if (!result) return [];
+  if (!positions.length) return [];
 
-    const rows = result.breakdown.map((b) => {
-      const pos = positions.find((p) => p.id === b.positionId);
-      if (!pos) return b;
+  /* ⭐ 直接根据当前 revenue 重算 breakdown */
+  const breakdown = calcSimulationBreakdown(
+    revenue,
+    positions,
+    shareConfig,
+    genderCounts,
+    opsViewEnabled
+  );
 
-      let allocatedRevenue = b.allocatedRevenue;
+  return breakdown.map((b) => {
+    const pos = positions.find((p) => p.id === b.positionId);
+    if (!pos) return b;
 
-      if (isStoreManager(pos)) {
-        const included = pos.includedDepartments ?? ['会籍', '私教', '泳教'];
-        const deptSales: Record<string, number> = {
-          会籍: 0,
-          私教: 0,
-          泳教: 0,
-          运营: 0,
-        };
-        positions.forEach((p) => {
-          if (isManager(p) || isStoreManager(p)) return;
-          const flags = resolveCalcFlags(p);
-          if (!flags.includePerformance) return;
-          const share = weights[p.title] ?? 0;
-          const dept =
-            p.title.includes('会籍')
-              ? '会籍'
-              : p.title.includes('私教') ||
-                p.title.includes('瑜伽') ||
-                p.title.includes('舞蹈') ||
-                p.title.includes('团操')
-              ? '私教'
-              : p.title.includes('泳教') || p.title.includes('游泳')
-              ? '泳教'
-              : '运营';
-          deptSales[dept] += revenue * share;
-        });
-        allocatedRevenue = included.reduce(
-          (s, d) => s + (deptSales[d] || 0),
-          0
-        );
-      } else if (isManager(pos)) {
-        const keyword = pos.title.replace('经理', '');
-        const source = positions.find(
-          (x) =>
-            x.id !== pos.id &&
-            !isManager(x) &&
-            !isStoreManager(x) &&
-            x.title.includes(keyword)
-        );
-        if (source) {
-          const share = weights[source.title] ?? 0;
-          allocatedRevenue = revenue * share;
-        }
-      } else if (pos.title === '运营主管') {
-        /* ⭐ 运营主管：分摊业绩 = 店长分摊业绩 */
-        const storePos = positions.find((x) => isStoreManager(x));
-        if (storePos) {
-          const included = storePos.includedDepartments ?? ['会籍', '私教', '泳教'];
-          const deptSales: Record<string, number> = {
-            会籍: 0, 私教: 0, 泳教: 0, 运营: 0,
-          };
-          positions.forEach((p) => {
-            if (isManager(p) || isStoreManager(p) || p.title === '运营主管') return;
-            const flags = resolveCalcFlags(p);
-            if (!flags.includePerformance) return;
-            const share = weights[p.title] ?? 0;
-            const dept =
-              p.title.includes('会籍') ? '会籍'
-              : p.title.includes('私教') || p.title.includes('瑜伽') || p.title.includes('舞蹈') || p.title.includes('团操') ? '私教'
-              : p.title.includes('泳教') || p.title.includes('游泳') ? '泳教'
-              : '运营';
-            deptSales[dept] += revenue * share;
-          });
-          allocatedRevenue = included.reduce(
-            (s, d) => s + (deptSales[d] || 0),
-            0
-          );
-        }
-      } else {
-        const share = weights[pos.title] ?? 0;
-        allocatedRevenue = revenue * share;
-      }
+    const flags = resolveCalcFlags(pos);
 
-      const flags = resolveCalcFlags(pos);
-      const rate = b.commissionRate;
-      const commission = flags.includeSalesCommission
-        ? allocatedRevenue * rate
-        : 0;
-
-      const baseSalary = flags.includeBaseSalary ? b.baseSalary : 0;
-
-      return {
-        ...b,
-        baseSalary,
-        allocatedRevenue,
-        commission,
-      };
-    });
-
-    /* ⭐ 无 ops:view 时过滤运营主管 */
-    if (!opsViewEnabled) {
-      return rows.filter((r) => r.title !== '运营主管');
+    /* 无 ops:view 时过滤运营主管 */
+    if (!opsViewEnabled && b.title === '运营主管') {
+      return { ...b, baseSalary: 0, commission: 0 };
     }
-    return rows;
-  }, [result, positions, revenue, weights, opsViewEnabled]);
+
+    return {
+      ...b,
+      baseSalary: flags.includeBaseSalary ? b.baseSalary : 0,
+      commission: flags.includeSalesCommission ? b.commission : 0,
+    };
+  }).filter((r) => opsViewEnabled || r.title !== '运营主管');
+}, [positions, revenue, shareConfig, genderCounts, opsViewEnabled]);
 
   const courseRows = useMemo(
     () =>
@@ -435,6 +378,7 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                 <th className="text-right px-3 py-2 font-medium">销提</th>
                 <th className="text-right px-3 py-2 font-medium">课提比例</th>
                 <th className="text-right px-3 py-2 font-medium">课提</th>
+                <th className="text-center px-3 py-2 font-medium w-10">明细</th>
               </tr>
             </thead>
             <tbody>
@@ -445,58 +389,195 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                 const isOps = pos ? pos.title === '运营主管' : false;
                 const noCommission = pos ? !hasCommission(pos) : false;
 
+                const perEmployee = (b as any).perEmployee as
+                  | SimulationEmployeeBreakdown[]
+                  | undefined;
+                const hasPerEmployee =
+                  perEmployee && perEmployee.length > 0;
+                const rowKey = b.positionId;
+                const isExpanded = expandedKeys.has(rowKey);
+
                 return (
-                  <tr
-                    key={b.positionId}
-                    className={`border-b border-gray-100 last:border-0 hover:bg-white/80 ${
-                      noCommission ? 'opacity-60' : ''
-                    }`}
-                  >
-                    <td className="px-3 py-2 text-gray-700 font-medium">
-                      {b.title}
-                      {isMgr && (
-                        <span className="ml-1 text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
-                          经理
-                        </span>
-                      )}
-                      {isStore && (
-                        <span className="ml-1 text-[10px] text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded">
-                          汇总
-                        </span>
-                      )}
-                      {isOps && (
-                        <span className="ml-1 text-[10px] text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded">
-                          运营
-                        </span>
-                      )}
-                      {noCommission && (
-                        <span className="ml-1 text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
-                          无佣金
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right text-gray-500 tabular-nums">
-                      {b.headcount || '—'}
-                    </td>
-                    <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
-                      {b.baseSalary > 0 ? formatMoney(b.baseSalary) : '—'}
-                    </td>
-                    <td className="px-3 py-2 text-right text-gray-700 tabular-nums">
-                      {b.allocatedRevenue > 0
-                        ? formatMoney(b.allocatedRevenue)
-                        : '—'}
-                    </td>
-                    <td className="px-3 py-2 text-right text-sky-600 tabular-nums">
-                      {b.commissionRate > 0
-                        ? `${(b.commissionRate * 100).toFixed(1)}%`
-                        : '—'}
-                    </td>
-                    <td className="px-3 py-2 text-right text-amber-600 tabular-nums">
-                      {b.commission > 0 ? formatMoney(b.commission) : '—'}
-                    </td>
-                    <td className="px-3 py-2 text-right text-gray-300">—</td>
-                    <td className="px-3 py-2 text-right text-gray-300">—</td>
-                  </tr>
+                  <React.Fragment key={b.positionId}>
+                    <tr
+                      className={`border-b border-gray-100 last:border-0 hover:bg-white/80 ${
+                        noCommission ? 'opacity-60' : ''
+                      }`}
+                    >
+                      <td className="px-3 py-2 text-gray-700 font-medium">
+                        {b.title}
+                        {isMgr && (
+                          <span className="ml-1 text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
+                            经理
+                          </span>
+                        )}
+                        {isStore && (
+                          <span className="ml-1 text-[10px] text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded">
+                            汇总
+                          </span>
+                        )}
+                        {isOps && (
+                          <span className="ml-1 text-[10px] text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded">
+                            运营
+                          </span>
+                        )}
+                        {noCommission && (
+                          <span className="ml-1 text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                            无佣金
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-500 tabular-nums">
+                        {b.headcount || '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
+                        {b.baseSalary > 0 ? formatMoney(b.baseSalary) : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-700 tabular-nums">
+                        {b.allocatedRevenue > 0
+                          ? formatMoney(b.allocatedRevenue)
+                          : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right text-sky-600 tabular-nums">
+                        {b.commissionRate > 0
+                          ? `${(b.commissionRate * 100).toFixed(1)}%`
+                          : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right text-amber-600 tabular-nums">
+                        {b.commission > 0 ? formatMoney(b.commission) : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-300">—</td>
+                      <td className="px-3 py-2 text-right text-gray-300">—</td>
+                      <td className="px-3 py-2 text-center">
+                        {hasPerEmployee ? (
+                          <button
+                            onClick={() => toggleExpand(rowKey)}
+                            title={
+                              isExpanded
+                                ? '收起分摊明细'
+                                : `展开 ${perEmployee!.length} 人分摊明细`
+                            }
+                            className={`inline-flex items-center justify-center w-5 h-5 rounded-md transition ${
+                              isExpanded
+                                ? 'text-purple-700 bg-purple-50'
+                                : 'text-purple-500 hover:bg-purple-50'
+                            }`}
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            ) : (
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                    </tr>
+
+                    {/* ⭐ 分摊明细展开 */}
+                    {isExpanded && hasPerEmployee && (
+                      <tr className="bg-slate-50/60">
+                        <td colSpan={9} className="px-3 py-2">
+                          <div className="ml-6 border-l-2 border-purple-200 pl-4">
+                            <div className="text-xs font-semibold text-purple-700 mb-2">
+                              {b.title} · 单人分摊明细（{perEmployee!.length} 人）
+                            </div>
+                            <div className="bg-white rounded-lg border border-gray-100 overflow-hidden">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-gray-500 border-b border-gray-100 bg-gray-50/60">
+                                    <th className="px-3 py-1.5 text-left font-medium">
+                                      序号
+                                    </th>
+                                    <th className="px-3 py-1.5 text-right font-medium">
+                                      销售金额
+                                    </th>
+                                    <th className="px-3 py-1.5 text-right font-medium">
+                                      底薪档位
+                                    </th>
+                                    <th className="px-3 py-1.5 text-right font-medium">
+                                      底薪
+                                    </th>
+                                    <th className="px-3 py-1.5 text-right font-medium">
+                                      销提档位
+                                    </th>
+                                    <th className="px-3 py-1.5 text-right font-medium">
+                                      销提提点
+                                    </th>
+                                    <th className="px-3 py-1.5 text-right font-medium">
+                                      销提金额
+                                    </th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                  {perEmployee!.map((emp) => (
+                                    <tr
+                                      key={emp.index}
+                                      className="hover:bg-gray-50/50"
+                                    >
+                                      <td className="px-3 py-1.5 text-gray-600">
+                                        {emp.index}
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right tabular-nums text-gray-700">
+                                        ¥{Math.round(emp.allocatedRevenue).toLocaleString()}
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right tabular-nums text-gray-500">
+                                        {emp.hitBaseThreshold !== undefined
+                                          ? `≥${emp.hitBaseThreshold}`
+                                          : '—'}
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right tabular-nums text-gray-700">
+                                        ¥{Math.round(emp.baseSalary).toLocaleString()}
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right tabular-nums text-gray-500">
+                                        {emp.hitCommissionThreshold !== undefined
+                                          ? `≥${emp.hitCommissionThreshold}`
+                                          : '—'}
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right tabular-nums text-sky-600">
+                                        {(emp.commissionRate * 100).toFixed(1)}%
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right tabular-nums font-medium text-amber-600">
+                                        ¥{Math.round(emp.commission).toLocaleString()}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                                <tfoot className="bg-gray-50/60 font-medium text-gray-700">
+                                  <tr className="border-t border-gray-100">
+                                    <td className="px-3 py-1.5" colSpan={3}>
+                                      小计
+                                    </td>
+                                    <td className="px-3 py-1.5 text-right tabular-nums">
+                                      ¥
+                                      {Math.round(
+                                        perEmployee!.reduce(
+                                          (s, x) => s + x.baseSalary,
+                                          0
+                                        )
+                                      ).toLocaleString()}
+                                    </td>
+                                    <td className="px-3 py-1.5" />
+                                    <td className="px-3 py-1.5" />
+                                    <td className="px-3 py-1.5 text-right tabular-nums text-amber-700">
+                                      ¥
+                                      {Math.round(
+                                        perEmployee!.reduce(
+                                          (s, x) => s + x.commission,
+                                          0
+                                        )
+                                      ).toLocaleString()}
+                                    </td>
+                                  </tr>
+                                </tfoot>
+                              </table>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 );
               })}
 
@@ -534,6 +615,7 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                   <td className="px-3 py-2 text-right text-purple-700 font-semibold tabular-nums">
                     {formatMoney(c.classCommission || 0)}
                   </td>
+                  <td className="px-3 py-2 text-center text-gray-300">—</td>
                 </tr>
               ))}
             </tbody>
@@ -556,9 +638,10 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                 <td className="px-3 py-2 text-right text-purple-700 tabular-nums">
                   {formatMoney(totalClassCommission)}
                 </td>
+                <td className="px-3 py-2" />
               </tr>
               <tr className="bg-gray-50 font-semibold text-gray-700">
-                <td className="px-3 py-2" colSpan={7}>
+                <td className="px-3 py-2" colSpan={8}>
                   总佣金（销提 + 课提）
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-indigo-700">

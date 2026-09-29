@@ -380,6 +380,15 @@ const FIXED_ONLY_FLAGS = {
   includeClassCommission: false,
 };
 
+/* ⭐ 店长 / 运营主管：不参与业绩，但销提照算 */
+const STORE_AND_OPS_FLAGS = {
+  includePerformance: false,
+  includeSalesCommission: true,
+  includeBaseSalary: true,
+  includeClassAmount: true,
+  includeClassCommission: true,
+};
+
 export function parseCompensationExcel(
   file: File,
   month: string,
@@ -404,7 +413,7 @@ export function parseCompensationExcel(
 
         const positions: PositionConfig[] = [];
 
-        /* 店长：底薪门槛复用佣金门槛 */
+        /* 店长：底薪门槛复用佣金门槛；业绩不参与计算 */
         if (String(get(2, 0)).includes('店长')) {
           const block = sliceBlock(rows, 2, 3, 8, 1);
           const commissionTiers = parseCommissionTiers(block.commissionText);
@@ -421,10 +430,11 @@ export function parseCompensationExcel(
             baseSalaryTiers: parseBaseSalaryTiers(block.baseText, {
               thresholds: commissionThresholds,
             }),
+            calcFlags: { ...STORE_AND_OPS_FLAGS },
           });
         }
 
-        /* 会籍经理：performanceSource: 'self'，默认勾选业绩=部门总和 */
+        /* 会籍经理 */
         if (String(get(3, 0)).includes('会籍经理')) {
           const block = sliceBlock(rows, 3, 3, 8, 1);
           positions.push({
@@ -442,7 +452,7 @@ export function parseCompensationExcel(
           });
         }
 
-        /* 会籍：底薪门槛复用佣金门槛 */
+        /* 会籍 */
         if (String(get(4, 0)).includes('会籍')) {
           const block = sliceBlock(rows, 4, 3, 8, 12);
           const commissionTiers = parseCommissionTiers(block.commissionText);
@@ -462,7 +472,7 @@ export function parseCompensationExcel(
           });
         }
 
-        /* 泳教经理：performanceSource: 'self'，默认勾选业绩=部门总和 */
+        /* 泳教经理 */
         if (String(get(10, 0)).includes('泳教经理')) {
           const block = sliceBlock(rows, 10, 3, 8, 6);
           const commissionTiers = parseCommissionTiers(block.commissionText);
@@ -540,7 +550,7 @@ export function parseCompensationExcel(
           }
         }
 
-        /* ⭐ 运营主管：从 Excel 读，读不到就用默认 3% / 20000 */
+        /* ⭐ 运营主管：从 Excel 读，读不到就用默认 3% / 20000；业绩不参与计算 */
         {
           let found = false;
           for (let r = 0; r < rows.length; r++) {
@@ -565,6 +575,7 @@ export function parseCompensationExcel(
                 ],
                 baseSalaryTiers: buildFixedSalaryTier(amount || 20000),
                 extraNote: `佣金 = 店长销售 × ${(rate * 100).toFixed(1)}%`,
+                calcFlags: { ...STORE_AND_OPS_FLAGS },
               });
               found = true;
               break;
@@ -584,6 +595,7 @@ export function parseCompensationExcel(
               ],
               baseSalaryTiers: buildFixedSalaryTier(20000),
               extraNote: '佣金 = 店长销售 × 3%',
+              calcFlags: { ...STORE_AND_OPS_FLAGS },
             });
           }
         }
@@ -633,6 +645,9 @@ export function parseCompensationExcel(
             const isFixedOnly =
               def.title.includes('前台') || def.title.includes('保洁');
 
+            const isStoreOrOps =
+              def.title.includes('店长') || def.title === '运营主管';
+
             positions.push({
               id: uid(),
               title: def.title,
@@ -647,7 +662,11 @@ export function parseCompensationExcel(
               extraNote: def.isManager ? '经理职位' : '',
               courseCommissions: [],
               managerAggregateByDept: isMgr ? true : undefined,
-              calcFlags: isFixedOnly ? { ...FIXED_ONLY_FLAGS } : undefined,
+              calcFlags: isFixedOnly
+                ? { ...FIXED_ONLY_FLAGS }
+                : isStoreOrOps
+                ? { ...STORE_AND_OPS_FLAGS }
+                : undefined,
             });
           }
         });

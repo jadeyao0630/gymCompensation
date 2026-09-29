@@ -8,6 +8,7 @@ import {
   Sparkles,
   UserCheck,
   UserX,
+  UserPlus,
 } from 'lucide-react';
 import type { PayrollResult, Department } from '../../utils/payroll';
 import type { MonthlyCompensationPlan } from '../../types/compensation';
@@ -36,6 +37,10 @@ interface Props {
   expanded: Record<Department, boolean>;
   hideExcluded: boolean;
   canExportPersonal: boolean;
+  /** ⭐ 新人集合 */
+  newbieSet: Set<string>;
+  /** ⭐ 切换新人 */
+  onToggleNewbie: (staffId: string) => void;
   onToggleDept: (d: Department) => void;
   onToggleExclude: (staffId: string) => void;
   onEditPosition: (r: PayrollResult) => void;
@@ -65,6 +70,30 @@ const IncludeIconButton: React.FC<{
       <UserCheck className="w-3.5 h-3.5" />
     ) : (
       <UserX className="w-3.5 h-3.5" />
+    )}
+  </button>
+);
+
+const NewbieIconButton: React.FC<{
+  isNewbie: boolean;
+  onToggle: () => void;
+}> = ({ isNewbie, onToggle }) => (
+  <button
+    onClick={(e) => {
+      e.stopPropagation();
+      onToggle();
+    }}
+    title={isNewbie ? '点击取消新人' : '点击设为新人'}
+    className={`inline-flex items-center justify-center w-7 h-7 rounded-full border transition ${
+      isNewbie
+        ? 'bg-violet-50 text-violet-600 border-violet-200 hover:bg-violet-100'
+        : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'
+    }`}
+  >
+    {isNewbie ? (
+      <Sparkles className="w-3.5 h-3.5" />
+    ) : (
+      <UserPlus className="w-3.5 h-3.5" />
     )}
   </button>
 );
@@ -141,6 +170,8 @@ export const PayrollDeptList: React.FC<Props> = ({
   expanded,
   hideExcluded,
   canExportPersonal,
+  newbieSet,
+  onToggleNewbie,
   onToggleDept,
   onToggleExclude,
   onEditPosition,
@@ -215,9 +246,9 @@ export const PayrollDeptList: React.FC<Props> = ({
             : 'sm:grid-cols-2';
         const showPositionBadge = d.department === '运营';
 
-        /* ⭐ 明细列已删，所以 colCount 比之前少 1 */
+        /* ⭐ 新人列 +1 */
         const colCount =
-          5 +
+          6 +
           (detailFields.salesAmount ? 1 : 0) +
           (detailFields.classAmount ? 2 : 0) +
           1 +
@@ -316,6 +347,9 @@ export const PayrollDeptList: React.FC<Props> = ({
                           <th className="px-3 py-2 text-center font-medium w-12">
                             计入
                           </th>
+                          <th className="px-3 py-2 text-center font-medium w-12">
+                            新人
+                          </th>
                           <th className="px-4 py-2 text-left font-medium">
                             员工
                           </th>
@@ -376,6 +410,7 @@ export const PayrollDeptList: React.FC<Props> = ({
                             (r.classMemberDetail || []).length > 0;
                           const isSalesExpanded =
                             expandedSalesKeys.has(rowKey);
+                          const isNewbie = newbieSet.has(r.staffId);
                           const canClickClass = hasDetails;
 
                           return (
@@ -395,6 +430,17 @@ export const PayrollDeptList: React.FC<Props> = ({
                                     }
                                   />
                                 </td>
+
+                                {/* ⭐ 新人按钮 */}
+                                <td className="px-3 py-2.5 text-center">
+                                  <NewbieIconButton
+                                    isNewbie={isNewbie}
+                                    onToggle={() =>
+                                      onToggleNewbie(r.staffId)
+                                    }
+                                  />
+                                </td>
+
                                 <td className="px-4 py-2.5">
                                   <div
                                     className={`font-medium ${
@@ -463,7 +509,6 @@ export const PayrollDeptList: React.FC<Props> = ({
                                   </div>
                                 </td>
 
-                                {/* 销售金额 */}
                                 {detailFields.salesAmount && (
                                   <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">
                                     {r.salesAmount > 0 ? (
@@ -486,7 +531,6 @@ export const PayrollDeptList: React.FC<Props> = ({
                                   </td>
                                 )}
 
-                                {/* ⭐ 消课节数：可点击 */}
                                 {detailFields.classAmount && (
                                   <>
                                     <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">
@@ -513,7 +557,6 @@ export const PayrollDeptList: React.FC<Props> = ({
                                       )}
                                     </td>
 
-                                    {/* ⭐ 消课金额：可点击 */}
                                     <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">
                                       {canClickClass ? (
                                         <button
@@ -568,7 +611,6 @@ export const PayrollDeptList: React.FC<Props> = ({
                                   </td>
                                 )}
 
-                                {/* ⭐ 课提：可点击 */}
                                 {detailFields.classCommission && (
                                   <td className="px-4 py-2.5 text-right tabular-nums text-violet-600">
                                     {canClickClass ? (
@@ -603,13 +645,14 @@ export const PayrollDeptList: React.FC<Props> = ({
                                   <td className="px-4 py-2.5 text-center">
                                     <button
                                       disabled={!plan}
-                                      onClick={(e) => {
+                                      onClick={async (e) => {
                                         e.stopPropagation();
                                         if (!plan) return;
-                                        exportEmployeePayrollToExcel(
+                                        await exportEmployeePayrollToExcel(
                                           r,
                                           plan,
-                                          month
+                                          month,
+                                          storeId
                                         );
                                       }}
                                       className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-[11px] font-medium transition disabled:opacity-50"
@@ -620,7 +663,6 @@ export const PayrollDeptList: React.FC<Props> = ({
                                 )}
                               </tr>
 
-                              {/* 销售明细展开行 */}
                               {isSalesExpanded && (
                                 <SalesDetailRow
                                   result={r}
@@ -630,7 +672,6 @@ export const PayrollDeptList: React.FC<Props> = ({
                                 />
                               )}
 
-                              {/* 消课明细展开行 */}
                               {isExpanded && hasDetails && (
                                 <ClassMemberDetailRow
                                   result={r}
@@ -643,7 +684,7 @@ export const PayrollDeptList: React.FC<Props> = ({
                       </tbody>
                       <tfoot className="bg-white/80 font-semibold text-gray-700 text-xs">
                         <tr className="border-t border-gray-100">
-                          <td className="px-4 py-2.5" colSpan={5}>
+                          <td className="px-4 py-2.5" colSpan={6}>
                             合计（计入 {d.headcount} 人
                             {excludedInDept > 0
                               ? ` · 排除 ${excludedInDept} 人`
