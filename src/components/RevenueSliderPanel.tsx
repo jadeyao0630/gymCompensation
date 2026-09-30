@@ -26,7 +26,7 @@ import {
   buildShareWeights,
   calcSimulationBreakdown,
 } from '../utils/simulation';
-
+import PayDetailCell from './PayDetailCell';
 
 interface RevenueSliderPanelProps {
   positions: PositionConfig[];
@@ -121,35 +121,35 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
   ]);
 
   const positionRows = useMemo(() => {
-  if (!positions.length) return [];
+    if (!positions.length) return [];
 
-  /* ⭐ 直接根据当前 revenue 重算 breakdown */
-  const breakdown = calcSimulationBreakdown(
-    revenue,
-    positions,
-    shareConfig,
-    genderCounts,
-    opsViewEnabled
-  );
+    const breakdown = calcSimulationBreakdown(
+      revenue,
+      positions,
+      shareConfig,
+      genderCounts,
+      opsViewEnabled
+    );
 
-  return breakdown.map((b) => {
-    const pos = positions.find((p) => p.id === b.positionId);
-    if (!pos) return b;
+    return breakdown
+      .map((b) => {
+        const pos = positions.find((p) => p.id === b.positionId);
+        if (!pos) return b;
 
-    const flags = resolveCalcFlags(pos);
+        const flags = resolveCalcFlags(pos);
 
-    /* 无 ops:view 时过滤运营主管 */
-    if (!opsViewEnabled && b.title === '运营主管') {
-      return { ...b, baseSalary: 0, commission: 0 };
-    }
+        if (!opsViewEnabled && b.title === '运营主管') {
+          return { ...b, baseSalary: 0, commission: 0 };
+        }
 
-    return {
-      ...b,
-      baseSalary: flags.includeBaseSalary ? b.baseSalary : 0,
-      commission: flags.includeSalesCommission ? b.commission : 0,
-    };
-  }).filter((r) => opsViewEnabled || r.title !== '运营主管');
-}, [positions, revenue, shareConfig, genderCounts, opsViewEnabled]);
+        return {
+          ...b,
+          baseSalary: flags.includeBaseSalary ? b.baseSalary : 0,
+          commission: flags.includeSalesCommission ? b.commission : 0,
+        };
+      })
+      .filter((r) => opsViewEnabled || r.title !== '运营主管');
+  }, [positions, revenue, shareConfig, genderCounts, opsViewEnabled]);
 
   const courseRows = useMemo(
     () =>
@@ -360,9 +360,7 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
             <p className="font-bold text-sm text-indigo-700 tabular-nums">
               {formatMoney(totalCommission)}
             </p>
-            <p className="text-[10px] text-indigo-500 mt-0.5">
-              销提 + 课提
-            </p>
+            <p className="text-[10px] text-indigo-500 mt-0.5">销提 + 课提</p>
           </div>
         </div>
 
@@ -392,8 +390,7 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                 const perEmployee = (b as any).perEmployee as
                   | SimulationEmployeeBreakdown[]
                   | undefined;
-                const hasPerEmployee =
-                  perEmployee && perEmployee.length > 0;
+                const hasPerEmployee = perEmployee && perEmployee.length > 0;
                 const rowKey = b.positionId;
                 const isExpanded = expandedKeys.has(rowKey);
 
@@ -493,6 +490,10 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                                     <th className="px-3 py-1.5 text-right font-medium">
                                       销售金额
                                     </th>
+                                    {/* ⭐ 收款方式列 */}
+                                    <th className="px-3 py-1.5 text-left font-medium">
+                                      收款方式
+                                    </th>
                                     <th className="px-3 py-1.5 text-right font-medium">
                                       底薪档位
                                     </th>
@@ -520,7 +521,16 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                                         {emp.index}
                                       </td>
                                       <td className="px-3 py-1.5 text-right tabular-nums text-gray-700">
-                                        ¥{Math.round(emp.allocatedRevenue).toLocaleString()}
+                                        ¥
+                                        {Math.round(
+                                          emp.allocatedRevenue
+                                        ).toLocaleString()}
+                                      </td>
+                                      {/* ⭐ 收款方式 */}
+                                      <td className="px-3 py-1.5 text-left align-top">
+                                        <PayDetailCell
+                                          payDetail={emp.payDetail}
+                                        />
                                       </td>
                                       <td className="px-3 py-1.5 text-right tabular-nums text-gray-500">
                                         {emp.hitBaseThreshold !== undefined
@@ -528,7 +538,10 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                                           : '—'}
                                       </td>
                                       <td className="px-3 py-1.5 text-right tabular-nums text-gray-700">
-                                        ¥{Math.round(emp.baseSalary).toLocaleString()}
+                                        ¥
+                                        {Math.round(
+                                          emp.baseSalary
+                                        ).toLocaleString()}
                                       </td>
                                       <td className="px-3 py-1.5 text-right tabular-nums text-gray-500">
                                         {emp.hitCommissionThreshold !== undefined
@@ -539,14 +552,17 @@ const RevenueSliderPanel: React.FC<RevenueSliderPanelProps> = ({
                                         {(emp.commissionRate * 100).toFixed(1)}%
                                       </td>
                                       <td className="px-3 py-1.5 text-right tabular-nums font-medium text-amber-600">
-                                        ¥{Math.round(emp.commission).toLocaleString()}
+                                        ¥
+                                        {Math.round(
+                                          emp.commission
+                                        ).toLocaleString()}
                                       </td>
                                     </tr>
                                   ))}
                                 </tbody>
                                 <tfoot className="bg-gray-50/60 font-medium text-gray-700">
                                   <tr className="border-t border-gray-100">
-                                    <td className="px-3 py-1.5" colSpan={3}>
+                                    <td className="px-3 py-1.5" colSpan={4}>
                                       小计
                                     </td>
                                     <td className="px-3 py-1.5 text-right tabular-nums">

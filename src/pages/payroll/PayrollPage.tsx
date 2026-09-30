@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Calculator } from 'lucide-react';
 import type { MonthlyCompensationPlan, CompensationStore } from '../../types/compensation';
@@ -58,6 +58,11 @@ const PayrollPage: React.FC = () => {
   const [excludedByStore, setExcludedByStore] = useState<Record<string, Set<string>>>({});
   const [editingStaff, setEditingStaff] = useState<PayrollResult | null>(null);
 
+  /* ⭐ 防止重复拉取方案详情 */
+  const fetchedKeyRef = useRef<string>('');
+  /* ⭐ 月份初始化只跑一次 */
+  const initializedRef = useRef(false);
+
   // 派生状态
   const store: CompensationStore = fullStore[storeId] || {};
   const allResults: PayrollResult[] = resultsByStore[storeId] || [];
@@ -85,26 +90,72 @@ const PayrollPage: React.FC = () => {
   const password = import.meta.env.VITE_TEST_PASSWORD || '';
   const { run, loading, error } = usePayroll({ username, password, busId: storeId });
 
-  // 月份初始化
+  /* ============================================================
+   * ⭐ 月份初始化：只执行一次
+   *   优先级：URL > 最新月份 > 当前月
+   * ============================================================ */
   useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+
+    const urlMonth = searchParams.get('month');
+    if (urlMonth) {
+      setSelectedMonth(urlMonth);
+      return;
+    }
+
     const months = Object.keys(fullStore[storeId] || {}).sort();
     if (months.length > 0) {
       setSelectedMonth(months[months.length - 1]);
-    } else {
-      const now = new Date();
-      setSelectedMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+      return;
     }
-  }, [storeId]); // eslint-disable-line
 
+    const now = new Date();
+    setSelectedMonth(
+      `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeId]);
+
+  /* ============================================================
+   * ⭐ URL 月份变化时同步（加 m !== selectedMonth 防死循环）
+   * ============================================================ */
   useEffect(() => {
     const m = searchParams.get('month');
-    if (m) setSelectedMonth(m);
+    if (m && m !== selectedMonth) {
+      setSelectedMonth(m);
+      fetchedKeyRef.current = ''; // 允许重新拉取
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  // 远程拉取方案
+  /* ============================================================
+   * ⭐ 门店切换时重置请求标记
+   * ============================================================ */
+  useEffect(() => {
+    fetchedKeyRef.current = '';
+  }, [storeId]);
+
+  /* ============================================================
+   * ⭐ 远程拉取方案（防重复）
+   *   依赖数组不含 fullStore / savePlanToStorage（如果它不稳定）
+   * ============================================================ */
   useEffect(() => {
     if (!storeId || !selectedMonth) return;
+
+    const key = `${storeId}:${selectedMonth}`;
+    if (fetchedKeyRef.current === key) return;
+
+    // 本地已有完整数据 → 直接标记，不请求
+    const localPlan = fullStore[storeId]?.[selectedMonth];
+    if (localPlan && localPlan.positions && localPlan.positions.length > 0) {
+      fetchedKeyRef.current = key;
+      return;
+    }
+
     let cancelled = false;
+    fetchedKeyRef.current = key; // 立即打标记，防 StrictMode 重复
+
     (async () => {
       try {
         const remote = await fetchPlanByMonth(storeId, selectedMonth);
@@ -114,8 +165,10 @@ const PayrollPage: React.FC = () => {
         console.warn('[PayrollPage] API 加载失败，使用本地缓存', e);
       }
     })();
+
     return () => { cancelled = true; };
-  }, [storeId, selectedMonth, savePlanToStorage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeId, selectedMonth]);
 
   // 职位选项
   const positionOptions = useMemo(() => {
@@ -210,7 +263,7 @@ const PayrollPage: React.FC = () => {
     if (!currentPlan || !selectedMonth) return;
     const newPositions = [...currentPlan.positions];
     const existingTitles = new Set(newPositions.map((p) => p.title));
-    
+
     Object.entries(configs).forEach(([missingName, cfg]) => {
       const finalTitle = ((cfg?.title as string) || missingName).trim();
       if (existingTitles.has(finalTitle)) return;
@@ -268,7 +321,11 @@ const PayrollPage: React.FC = () => {
             canExport={allResults.length > 0}
             hasPlan={!!currentPlan}
             canExportPayroll={hasPermission('export:payroll', storeId)}
-            onMonthChange={(m) => { setSelectedMonth(m); navigate(`/payroll?month=${m}`, { replace: true }); }}
+            onMonthChange={(m) => {
+              setSelectedMonth(m);
+              fetchedKeyRef.current = ''; // ⭐ 允许重新拉取
+              navigate(`/payroll?month=${m}`, { replace: true });
+            }}
             onViewModeChange={setViewMode}
             onHideExcludedChange={setHideExcluded}
             onRun={handleRun}

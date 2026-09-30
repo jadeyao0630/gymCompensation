@@ -9,6 +9,7 @@ import type {
   RevenueShareConfig,
   GenderCountConfig,
   DepartmentKey,
+  PayDetailItem,
 } from '../types/compensation';
 import { resolveCalcFlags } from '../types/compensation';
 import { getCommissionRate, getClassCommission } from './salary';
@@ -49,7 +50,6 @@ export function calcFixedCost(input: SimulationInput): number {
   );
 }
 
-/* ⭐ 等差递增分摊：N 人，总业绩 R，返回每人分摊数组 */
 function splitByArithmetic(total: number, n: number): number[] {
   if (n <= 0) return [];
   if (n === 1) return [total];
@@ -63,7 +63,6 @@ function splitByArithmetic(total: number, n: number): number[] {
     arr.push(Math.max(0, a1 + i * d));
   }
 
-  /* 微调总和让 arr 合计等于 total */
   const sum = arr.reduce((s, x) => s + x, 0);
   if (sum > 0) {
     const scale = total / sum;
@@ -74,7 +73,6 @@ function splitByArithmetic(total: number, n: number): number[] {
   return arr;
 }
 
-/* ⭐ 命中档位工具 */
 function hitTier<T extends { threshold: number }>(
   tiers: T[],
   perf: number
@@ -89,13 +87,11 @@ function hitTier<T extends { threshold: number }>(
   return hit;
 }
 
-/* ⭐ 单人底薪：按性别取值（该人分摊业绩决定命中档位） */
 function perEmployeeBaseSalaryForGender(
   p: PositionConfig,
   allocated: number,
   gender: 'male' | 'female' | 'newbie'
 ): { value: number; hitThreshold?: number } {
-  /* 泳教：性别底薪阶梯 */
   if (p.genderSalaryTiers?.length) {
     const hit = hitTier(p.genderSalaryTiers, allocated);
     if (!hit) return { value: 0 };
@@ -106,13 +102,11 @@ function perEmployeeBaseSalaryForGender(
     return { value: v, hitThreshold: hit.threshold };
   }
 
-  /* 普通：底薪阶梯（不分性别） */
   const hit = hitTier(p.baseSalaryTiers, allocated);
   if (!hit) return { value: 0 };
   return { value: hit.amount, hitThreshold: hit.threshold };
 }
 
-/* ⭐ 按单人分摊业绩，计算单人销提 */
 function perEmployeeCommission(
   p: PositionConfig,
   allocated: number
@@ -123,7 +117,6 @@ function perEmployeeCommission(
   return { value: allocated * rate, rate, hitThreshold: hit.threshold };
 }
 
-/* ⭐ 按顺序分配性别（male → female → newbie） */
 function buildGenderList(
   headcount: number,
   genderCounts?: GenderCountConfig,
@@ -141,7 +134,6 @@ function buildGenderList(
     for (let i = 0; i < maleCount; i++) list.push('male');
     for (let i = 0; i < femaleCount; i++) list.push('female');
     for (let i = 0; i < newbieCount; i++) list.push('newbie');
-    /* 人数不足时用 male 补 */
     while (list.length < headcount) list.push('male');
   } else {
     for (let i = 0; i < headcount; i++) list.push('male');
@@ -255,7 +247,6 @@ export function buildShareWeights(
   return weights;
 }
 
-/* ⭐ 根据当前 revenue，计算各职位分摊业绩 + 每人明细 */
 export function calcSimulationBreakdown(
   revenue: number,
   positions: PositionConfig[],
@@ -292,7 +283,6 @@ export function calcSimulationBreakdown(
     deptSales[dept] += allocatedRevenue;
   });
 
-  /* 店长分摊业绩 */
   let storeAllocated = 0;
   const storePos = positions.find((x) => isStoreTitle(x.title));
   if (storePos) {
@@ -304,7 +294,6 @@ export function calcSimulationBreakdown(
     );
   }
 
-  /* 经理自己业绩权重 */
   const selfWeight = (p: PositionConfig): number => {
     const raw = shareConfig?.[p.title];
     const w = raw !== undefined && raw > 0 ? raw : p.headcount || 0;
@@ -388,8 +377,6 @@ export function calcSimulationBreakdown(
       p.title !== '运营主管'
     ) {
       const shares = splitByArithmetic(allocatedRevenue, headcount);
-
-      /* ⭐ 按顺序分配性别 */
       const genderList = buildGenderList(headcount, genderCounts, p.title);
 
       perEmployee = shares.map((alloc, idx) => {
@@ -411,6 +398,8 @@ export function calcSimulationBreakdown(
           hitCommissionThreshold: empCommission.hitThreshold,
           commissionRate: empCommission.rate,
           commission: empCommission.value,
+          /* ⭐ payDetail 在 simulation 里位置层级别，均分到每个员工（或后续由外部注入） */
+          payDetail: undefined,
         };
       });
 
@@ -459,7 +448,6 @@ function calcTotalCost(
 ) {
   const fixedCost = calcFixedCost(input);
 
-  /* ⭐ 调用统一的分摊函数 */
   const breakdown = calcSimulationBreakdown(
     revenue,
     positions,

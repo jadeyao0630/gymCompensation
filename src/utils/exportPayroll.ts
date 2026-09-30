@@ -16,6 +16,34 @@ function getMonthRange(month: string): { begin_date: string; end_date: string } 
   return { begin_date: fmt(first), end_date: fmt(last) };
 }
 
+/* ⭐ 收款方式：格式化为 "微信 ¥2,000 + 现金 ¥3,000" */
+function formatPayDetail(
+  payDetail?: Array<{ pay_type: string; amount: string; pay_type_id: string }>
+): string {
+  if (!payDetail || payDetail.length === 0) return '—';
+  return payDetail
+    .map((p) => `${p.pay_type} ¥${Number(p.amount).toLocaleString()}`)
+    .join(' + ');
+}
+
+/* ⭐ 业绩归属：格式化为多行字符串，每行 "姓名[主/协] 占比 金额" */
+function formatMarketers(
+  marketers?: Array<{
+    name: string;
+    role: string;
+    percent: string;
+    amount: string;
+  }>
+): string {
+  if (!marketers || marketers.length === 0) return '—';
+  return marketers
+    .map(
+      (m) =>
+        `${m.name}[${m.role === '主归属' ? '主' : '协'}] ${m.percent} ¥${m.amount}`
+    )
+    .join('\n');
+}
+
 export async function exportEmployeePayrollToExcel(
   result: PayrollResult,
   plan: MonthlyCompensationPlan,
@@ -186,7 +214,7 @@ export async function exportEmployeePayrollToExcel(
     XLSX.utils.book_append_sheet(wb, ws2, '消课明细');
   }
 
-  /* ============== Sheet 3：销售明细（⭐ 新增） ============== */
+  /* ============== Sheet 3：销售明细（⭐ 含收款方式 + 业绩归属） ============== */
   try {
     const { begin_date, end_date } = getMonthRange(month);
     const saleId = needsSaleIdPrefix(result.positionTitle)
@@ -204,40 +232,113 @@ export async function exportEmployeePayrollToExcel(
 
     if (list.length > 0) {
       const myName = (result.staffName || '').trim();
+
+      /* ⭐ 表头：新增"收款方式"和"业绩归属" */
       const rows: any[][] = [
-        ['会员名', '卡种', '占比', '卡金额', '业绩金额', '日期'],
+        [
+          '会员名',
+          '卡种',
+          '收款方式',
+          '业绩归属',
+          '卡金额',
+          '本人业绩',
+          '日期',
+        ],
       ];
 
       let totalAmount = 0;
+      let totalCardAmount = 0;
+
+      /* ⭐ 收款方式汇总 */
+      const paySummary = new Map<
+        string,
+        { pay_type: string; amount: number }
+      >();
+
       list.forEach((item) => {
         const hit = item.marketers_detail?.find(
           (m) => (m.name || '').trim() === myName
         );
-        const percent = hit?.percent || '';
         const performanceAmount = hit?.amount ? Number(hit.amount) : 0;
         totalAmount += performanceAmount;
+        totalCardAmount += Number(item.amount || 0);
+
+        /* 累计收款方式 */
+        (item.pay_detail || []).forEach((p) => {
+          const key = String(p.pay_type_id || p.pay_type);
+          const cur = paySummary.get(key);
+          const amt = Number(p.amount) || 0;
+          if (cur) cur.amount += amt;
+          else paySummary.set(key, { pay_type: p.pay_type, amount: amt });
+        });
 
         rows.push([
           item.username || '',
           item.card_name || '',
-          percent,
+          /* ⭐ 该笔订单的收款方式 */
+          formatPayDetail(item.pay_detail),
+          /* ⭐ 该笔订单的业绩归属 */
+          formatMarketers(item.marketers_detail),
           Number(item.amount || 0),
           performanceAmount,
           item.deal_time || '',
         ]);
       });
 
-      rows.push(['合计', '', '', '', Number(totalAmount.toFixed(2)), '']);
+      /* 表尾合计行 */
+      rows.push([
+        '合计',
+        '',
+        '',
+        '',
+        Number(totalCardAmount.toFixed(2)),
+        Number(totalAmount.toFixed(2)),
+        '',
+      ]);
+
+      /* ⭐ 收款方式汇总小表（放在最后几行） */
+      rows.push([]);
+      rows.push(['收款方式汇总', '', '', '', '', '', '']);
+      paySummary.forEach((v) => {
+        rows.push([
+          v.pay_type,
+          '',
+          '',
+          '',
+          '',
+          Number(v.amount.toFixed(2)),
+          '',
+        ]);
+      });
 
       const wsSales = XLSX.utils.aoa_to_sheet(rows);
+
+      /* ⭐ 列宽 */
       wsSales['!cols'] = [
-        { wch: 14 },
-        { wch: 20 },
-        { wch: 10 },
-        { wch: 12 },
-        { wch: 12 },
-        { wch: 18 },
+        { wch: 14 },  // 会员名
+        { wch: 20 },  // 卡种
+        { wch: 28 },  // 收款方式
+        { wch: 40 },  // 业绩归属（多人时较宽）
+        { wch: 12 },  // 卡金额
+        { wch: 12 },  // 本人业绩
+        { wch: 18 },  // 日期
       ];
+
+      /* ⭐ 对"收款方式"和"业绩归属"列设置 wrapText，多行正常显示 */
+      const wrapCols = ['C', 'D'];
+      const range = XLSX.utils.decode_range(wsSales['!ref'] || 'A1');
+      for (let R = range.s.r; R <= range.e.r; R++) {
+        wrapCols.forEach((col) => {
+          const addr = `${col}${R + 1}`;
+          const cell = wsSales[addr];
+          if (!cell) return;
+          cell.s = {
+            ...(cell.s || {}),
+            alignment: { wrapText: true, vertical: 'top' },
+          };
+        });
+      }
+
       XLSX.utils.book_append_sheet(wb, wsSales, '销售明细');
     }
   } catch (e) {

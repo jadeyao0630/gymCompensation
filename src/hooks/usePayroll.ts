@@ -7,6 +7,8 @@ import {
   getSwimmingClassStats,
   getCoachClassStats,
   getMarketersList,
+  getCardOrderList,
+  type FinancialFlowItem,
 } from '../api/stats';
 import { getBusCoachList } from '../api/coach';
 import { extractErrorMessage } from '../api/client';
@@ -20,10 +22,12 @@ import {
   applyManagerPerformance,
   collectMissingPositions,
   collectMissingPositionDetails,
+  mergePayDetail,
   type PayrollResult,
   type EmployeePerformance,
   type MergeInput,
   type MissingPositionInfo,
+  type PayDetailItem,
 } from '../utils/payroll';
 
 /* ============================================================
@@ -68,9 +72,6 @@ function splitClassByPosition(records: AnyRecord[]): MergeInput[] {
     .map(([positionTitle, records]) => ({ positionTitle, records }));
 }
 
-/* ============================================================
- * 运营团队职位名映射
- * ============================================================ */
 const MARKETER_POSITION_MAP: Record<string, string> = {
   行政: '保洁',
   保洁: '保洁',
@@ -84,6 +85,36 @@ const MARKETER_POSITION_MAP: Record<string, string> = {
 function normalizeMarketerTitle(title: string): string {
   const t = (title || '').trim();
   return MARKETER_POSITION_MAP[t] || t;
+}
+
+/* ============================================================
+ * ⭐ 按员工名字聚合 pay_detail
+ * ============================================================ */
+function buildPayDetailMap(
+  flowList: FinancialFlowItem[]
+): Map<string, PayDetailItem[]> {
+  const map = new Map<string, PayDetailItem[]>();
+
+  flowList.forEach((flow) => {
+    const name = String(flow.username ?? '').trim();
+    if (!name) return;
+
+    const rawPayDetail = Array.isArray(flow.pay_detail) ? flow.pay_detail : [];
+    if (rawPayDetail.length === 0) return;
+
+    const items: PayDetailItem[] = rawPayDetail.map((p) => ({
+      pay_type: String(p.pay_type ?? '').trim(),
+      amount: String(p.amount ?? '0'),
+      pay_type_id: String(p.pay_type_id ?? ''),
+    })).filter((p) => p.pay_type);
+
+    if (items.length === 0) return;
+
+    const existing = map.get(name);
+    map.set(name, existing ? mergePayDetail(existing, items) : items);
+  });
+
+  return map;
 }
 
 /* ============================================================
@@ -161,7 +192,6 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           console.error('[usePayroll] 拉取运营团队失败:', mkErr);
         }
 
-        /* 2.5) marketers 双重去重 */
         const seenMarketerIds = new Set<string>();
         const seenMarketerNP = new Set<string>();
         const uniqueMarketers: AnyRecord[] = [];
@@ -189,21 +219,45 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           page_size: 1000,
         };
 
-        /* 4) 5 个接口 */
-        const [membership, swimmingCoach, privateCoach, swimClass, coachClass] =
-          await Promise.all([
-            getMembershipStats(payload),
-            getSwimmingCoachStats(payload),
-            getPrivateCoachStats(payload),
-            getSwimmingClassStats(payload),
-            getCoachClassStats(payload),
-          ]);
+        /* 4) 5 个接口 + ⭐ 销售明细 */
+        const [
+          membership,
+          swimmingCoach,
+          privateCoach,
+          swimClass,
+          coachClass,
+          cardOrderRes,
+        ] = await Promise.all([
+          getMembershipStats(payload),
+          getSwimmingCoachStats(payload),
+          getPrivateCoachStats(payload),
+          getSwimmingClassStats(payload),
+          getCoachClassStats(payload),
+          /* ⭐ 拉全店销售明细（sale_id 传空） */
+          getCardOrderList({
+            bus_id: busId,
+            sale_id: '',
+            begin_date: s_date,
+            end_date: e_date,
+            page_no: 1,
+            page_size: 1000,
+          }).catch((e) => {
+            console.warn('[usePayroll] 拉取销售明细失败:', e);
+            return { list: [], totalAmount: 0 };
+          }),
+        ]);
 
         const membershipList = pickArray(membership);
         const swimmingCoachList = pickArray(swimmingCoach);
         const privateCoachList = pickArray(privateCoach);
         const swimClassList = pickArray(swimClass);
         const coachClassList = pickArray(coachClass);
+
+        console.log('[usePayroll] 销售明细条数:', cardOrderRes.list.length);
+
+        /* ⭐ 按员工名聚合收款方式 */
+        const payDetailMap = buildPayDetailMap(cardOrderRes.list);
+        console.log('[usePayroll] 收款方式聚合完成，覆盖员工数:', payDetailMap.size);
 
         /* 5) 分组 */
         const salesGroups: MergeInput[] = [
@@ -218,6 +272,18 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
 
         /* 6) 合并 */
         let performances = mergePerformance(salesGroups, classGroups);
+
+        /* ⭐ 6.1) 应用收款方式：按员工名字匹配 */
+        let payDetailApplied = 0;
+        performances = performances.map((p) => {
+          const name = (p.staffName || '').trim();
+          if (!name) return p;
+          const pd = payDetailMap.get(name);
+          if (!pd || pd.length === 0) return p;
+          payDetailApplied++;
+          return { ...p, payDetail: pd };
+        });
+        console.log('[usePayroll] 收款方式已匹配员工数:', payDetailApplied);
 
         /* 6.5) 应用职位覆盖 */
         if (overrides && Object.keys(overrides).length > 0) {
@@ -291,6 +357,8 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
             classAmount: 0,
             classByCourse: {},
             classMemberDetail: [],
+            /* ⭐ 运营团队也可以匹配收款方式 */
+            payDetail: payDetailMap.get(name) || [],
           });
           perfIndex.set(id, performances.length - 1);
           mkAddedCount++;
@@ -336,13 +404,14 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
             classAmount: 0,
             classByCourse: {},
             classMemberDetail: [],
+            payDetail: payDetailMap.get(name) || [],
           });
           perfIndex.set(coach.id, performances.length - 1);
           addedCount++;
         }
         console.log('[usePayroll] 补全无业绩员工:', addedCount);
 
-        /* 9.5) performances 去重 */
+        /* 9.5) performances 去重（保留 payDetail） */
         const perfMap = new Map<string, EmployeePerformance>();
         const nameTitleIndex = new Map<string, string>();
 
@@ -356,6 +425,10 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
             const cur = perfMap.get(idKey)!;
             if (!cur.staffPhone && p.staffPhone) cur.staffPhone = p.staffPhone;
             if (!cur.staffName && p.staffName) cur.staffName = p.staffName;
+            /* ⭐ 合并收款方式 */
+            if (p.payDetail && p.payDetail.length > 0) {
+              cur.payDetail = mergePayDetail(cur.payDetail, p.payDetail);
+            }
             dupSkipped++;
             return;
           }
@@ -366,6 +439,10 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
             if (cur) {
               if (!cur.staffPhone && p.staffPhone) cur.staffPhone = p.staffPhone;
               if (!cur.staffName && p.staffName) cur.staffName = p.staffName;
+              /* ⭐ 合并收款方式 */
+              if (p.payDetail && p.payDetail.length > 0) {
+                cur.payDetail = mergePayDetail(cur.payDetail, p.payDetail);
+              }
             }
             dupSkipped++;
             return;
@@ -418,7 +495,7 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           plan.positions
         );
 
-        /* 12) 计算（⭐ 传入 opsViewEnabled） */
+        /* 12) 计算（传入 opsViewEnabled） */
         const payroll = calcPayrollForAll(plan, performances, opsViewEnabled);
         setResults(payroll);
 

@@ -111,6 +111,9 @@ interface PositionCardProps {
   allPositions: PositionConfig[];
   readOnly?: boolean;
   canEditTarget?: boolean;
+  canEditHeadcount?: boolean;
+  canDelete?: boolean;
+  canRename?: boolean;   // ⭐ 新增
   onUpdate: (updates: Partial<PositionConfig>) => void;
   onRemove: () => void;
 }
@@ -120,6 +123,9 @@ const PositionCard: React.FC<PositionCardProps> = ({
   allPositions,
   readOnly = false,
   canEditTarget = false,
+  canEditHeadcount = true,
+  canDelete = true,
+  canRename = true,      // ⭐ 默认允许，向下兼容
   onUpdate,
   onRemove,
 }) => {
@@ -184,7 +190,6 @@ const PositionCard: React.FC<PositionCardProps> = ({
 
   const isOpsManager = position.title === '运营主管';
 
-  /* ⭐ 显示课提：私教部门 + 泳教 + 店长 + 运营主管 */
   const showClassCommission =
     position.category === 'personalTraining' ||
     isSwimOrPersonal ||
@@ -286,27 +291,47 @@ const PositionCard: React.FC<PositionCardProps> = ({
     onUpdate({ includedDepartments: next });
   };
 
+  /* ⭐ 各字段独立权限 */
+  const headcountDisabled = readOnly || !canEditHeadcount;
+  const deleteDisabled = readOnly || !canDelete;
+  const renameDisabled = readOnly || !canRename;
+
   return (
     <div className="group bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-lg hover:border-gray-200 transition-all duration-300 overflow-hidden animate-fade-in-up">
       <div className="relative px-5 py-4 bg-gradient-to-r from-gray-50/80 via-white to-white border-b border-gray-100">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
             <span className="w-1 h-6 rounded-full bg-gradient-to-b from-blue-500 to-indigo-500" />
+
+            {/* ⭐ 职位名称：受 position:rename 控制 */}
             <input
               value={position.title}
-              disabled={readOnly}
+              disabled={renameDisabled}
               onChange={(e) => onUpdate({ title: e.target.value })}
-              className="border border-transparent hover:border-gray-200 focus:border-blue-400 focus:bg-white rounded-lg px-2.5 py-1.5 text-sm font-bold text-gray-900 w-36 focus:outline-none focus:ring-2 focus:ring-blue-400/30 transition disabled:bg-gray-50 disabled:text-gray-600 disabled:cursor-not-allowed"
+              title={!canRename ? '无权限：职位名称更改' : undefined}
+              className={`border rounded-lg px-2.5 py-1.5 text-sm font-bold w-36 focus:outline-none focus:ring-2 transition ${
+                renameDisabled
+                  ? 'border-transparent bg-gray-50 text-gray-600 cursor-not-allowed'
+                  : 'border-transparent hover:border-gray-200 focus:border-blue-400 focus:bg-white text-gray-900 focus:ring-blue-400/30'
+              }`}
             />
           </div>
 
-          <div className="flex items-center gap-1.5 text-sm bg-gray-50/80 border border-gray-100 rounded-lg px-2.5 py-1.5 hover:border-gray-200 transition">
+          {/* 人数：受 headcount:edit 控制 */}
+          <div
+            className={`flex items-center gap-1.5 text-sm border rounded-lg px-2.5 py-1.5 transition ${
+              headcountDisabled
+                ? 'bg-gray-100/80 border-gray-200'
+                : 'bg-gray-50/80 border-gray-100 hover:border-gray-200'
+            }`}
+            title={!canEditHeadcount ? '无权限：修改职位人数' : undefined}
+          >
             <Users className="w-3.5 h-3.5 text-gray-400" />
             <span className="text-gray-500 text-xs">人数</span>
             <input
               type="number"
               value={position.headcount}
-              disabled={readOnly}
+              disabled={headcountDisabled}
               onChange={(e) =>
                 onUpdate({ headcount: parseInt(e.target.value) || 0 })
               }
@@ -384,7 +409,6 @@ const PositionCard: React.FC<PositionCardProps> = ({
             )}
           </div>
 
-          {/* ⭐ 经理业绩汇总开关：需要 plan:edit 权限 */}
           {isManager && !isStore && !isOps && (
             <>
               <label
@@ -415,7 +439,6 @@ const PositionCard: React.FC<PositionCardProps> = ({
                 <span className="whitespace-nowrap">业绩=部门总和</span>
               </label>
 
-              {/* ⭐ 勾选后显示：含自己业绩 */}
               {position.managerAggregateByDept && (
                 <label
                   className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition ${
@@ -453,8 +476,13 @@ const PositionCard: React.FC<PositionCardProps> = ({
           {!readOnly && (
             <button
               onClick={onRemove}
-              className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition opacity-0 group-hover:opacity-100"
-              title="删除职位"
+              disabled={deleteDisabled}
+              className={`p-2 rounded-xl transition ${
+                deleteDisabled
+                  ? 'text-gray-300 cursor-not-allowed opacity-50'
+                  : 'text-gray-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100'
+              }`}
+              title={!canDelete ? '无权限：删除职位' : '删除职位'}
             >
               <Trash2 className="w-4 h-4" />
             </button>

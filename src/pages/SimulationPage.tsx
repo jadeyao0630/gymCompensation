@@ -1,64 +1,17 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
-import {
-  ArrowLeft,
-  Sliders,
-  Calculator,
-  Store,
-  Cloud,
-  CloudOff,
-  Loader2,
-  CheckCircle2,
-  Undo2,
-} from 'lucide-react';
-import type {
-  CompensationStore,
-  MonthlyCompensationPlan,
-  CourseCommissionInputs,
-  SimulationInput,
-  SimulationResult,
-  RevenueShareConfig,
-  GenderCountConfig,
-} from '../types/compensation';
+import { Undo2 } from 'lucide-react';
+import type { CompensationStore, MonthlyCompensationPlan, SimulationResult } from '../types/compensation';
 import { calcSimulation } from '../utils/simulation';
 import SimulationSettingsPanel from '../components/SimulationSettingsPanel';
 import RevenueSliderPanel from '../components/RevenueSliderPanel';
 import StoreSwitcher from '../components/StoreSwitcher';
+import { SimulationHeader } from '../components/SimulationHeader';
+import { SimulationEmptyState } from '../components/SimulationEmptyState';
 import { useStore } from '../contexts/StoreContext';
 import { useAuth } from '../contexts/AuthContext';
 import { getStoreById } from '../constants/stores';
-import {
-  fetchSimulationSetting,
-  saveSimulationSetting,
-} from '../api/compensation';
-
-const STORAGE_KEY = 'gym_compensation_store_v2';
-const SIM_KEY = 'gym_course_simulation_inputs';
-const COST_KEY = 'gym_simulation_input';
-const SHARE_KEY = 'gym_revenue_share';
-const GENDER_KEY = 'gym_gender_counts';
-const SAVE_DEBOUNCE_MS = 500;
-const UNDO_LIMIT = 20;
-
-type FullStore = Record<string, CompensationStore>;
-
-const EMPTY_SIM_INPUT: SimulationInput = {
-  propertyFee: 0,
-  electricityFee: 0,
-  rent: 0,
-  waterFee: 0,
-  networkFee: 0,
-  otherFee: 0,
-};
-
-interface SimulationUndoEntry {
-  setting: SimulationInput;
-  shareConfig: RevenueShareConfig;
-  genderCounts: GenderCountConfig;
-  courseInputs: CourseCommissionInputs;
-  label: string;
-  at: number;
-}
+import { useSimulation } from '../hooks/useSimulation';
 
 const SimulationPage: React.FC = () => {
   const navigate = useNavigate();
@@ -66,275 +19,51 @@ const SimulationPage: React.FC = () => {
   const { storeId } = useStore();
   const { hasPermission } = useAuth();
 
-  /* ⭐ 查看运营主管权限 */
   const opsViewEnabled = hasPermission('ops:view', storeId);
+  const [selectedMonth, setSelectedMonth] = useState<string>(searchParams.get('month') || '');
 
-  const [fullStore, setFullStore] = useState<FullStore>({});
-  const [selectedMonth, setSelectedMonth] = useState<string>(
-    searchParams.get('month') || ''
-  );
-
-  const [dbOnline, setDbOnline] = useState(true);
-  const [savingSetting, setSavingSetting] = useState(false);
-  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
-
-  const saveTimerRef = useRef<number | null>(null);
-  const skipNextSaveRef = useRef(false);
-
-  const undoStackRef = useRef<SimulationUndoEntry[]>([]);
-  const [undoDepth, setUndoDepth] = useState(0);
+  // 核心业务 Hook
+  const {
+    fullStore,
+    simInput, shareConfig, genderCounts, courseInputs,
+    handleInputChange, handleShareConfigChange, handleGenderCountsChange, handleCourseInputsChange,
+    dbOnline, savingSetting, lastSavedAt,
+    undoDepth, handleUndo,
+  } = useSimulation(storeId, selectedMonth);
 
   const store: CompensationStore = fullStore[storeId] || {};
+  const currentPlan: MonthlyCompensationPlan | undefined = selectedMonth ? store[selectedMonth] : undefined;
 
-  useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        setFullStore(JSON.parse(saved));
-      } catch (e) {
-        console.error('[SimulationPage] 解析失败', e);
-      }
-    }
-  }, []);
-
+  // 默认选中最新月份
   useEffect(() => {
     const months = Object.keys(fullStore[storeId] || {}).sort();
     if (months.length > 0) {
       setSelectedMonth(months[months.length - 1]);
     } else {
       const now = new Date();
-      const m = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      setSelectedMonth(m);
+      setSelectedMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeId]);
+  }, [storeId]); // eslint-disable-line
 
   useEffect(() => {
     const m = searchParams.get('month');
     if (m) setSelectedMonth(m);
   }, [searchParams]);
 
-  const currentPlan: MonthlyCompensationPlan | undefined = selectedMonth
-    ? store[selectedMonth]
-    : undefined;
-
-  const [courseInputs, setCourseInputs] = useState<CourseCommissionInputs>(() => {
-    const saved = localStorage.getItem(SIM_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {}
-    }
-    return {};
-  });
-
-  useEffect(() => {
-    localStorage.setItem(SIM_KEY, JSON.stringify(courseInputs));
-  }, [courseInputs]);
-
-  const [simInput, setSimInput] = useState<SimulationInput>(() => {
-    const saved = localStorage.getItem(COST_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        return {
-          propertyFee: parsed.propertyFee ?? 0,
-          electricityFee: parsed.electricityFee ?? 0,
-          rent: parsed.rent ?? 0,
-          waterFee: parsed.waterFee ?? 0,
-          networkFee: parsed.networkFee ?? 0,
-          otherFee: parsed.otherFee ?? 0,
-        };
-      } catch {}
-    }
-    return { ...EMPTY_SIM_INPUT };
-  });
-
-  useEffect(() => {
-    localStorage.setItem(COST_KEY, JSON.stringify(simInput));
-  }, [simInput]);
-
-  useEffect(() => {
-    if (!storeId || !selectedMonth) return;
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const remote = await fetchSimulationSetting(storeId, selectedMonth);
-        if (cancelled) return;
-        setDbOnline(true);
-        skipNextSaveRef.current = true;
-        setSimInput(remote);
-        console.log('[SimulationPage] 已从 API 加载测算设置', storeId, selectedMonth, remote);
-      } catch (e) {
-        console.warn('[SimulationPage] API 加载失败，使用本地缓存', e);
-        if (!cancelled) setDbOnline(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [storeId, selectedMonth]);
-
-  useEffect(() => {
-    if (skipNextSaveRef.current) {
-      skipNextSaveRef.current = false;
-      return;
-    }
-    if (!storeId || !selectedMonth) return;
-    if (!dbOnline) {
-      console.warn('[SimulationPage] 数据库离线，暂不保存');
-      return;
-    }
-
-    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = window.setTimeout(async () => {
-      setSavingSetting(true);
-      try {
-        await saveSimulationSetting(storeId, selectedMonth, simInput);
-        setLastSavedAt(new Date());
-        console.log('[SimulationPage] 已保存测算设置', storeId, selectedMonth, simInput);
-      } catch (e) {
-        console.error('[SimulationPage] 保存测算设置失败', e);
-        setDbOnline(false);
-      } finally {
-        setSavingSetting(false);
-      }
-    }, SAVE_DEBOUNCE_MS);
-
-    return () => {
-      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    };
-  }, [simInput, storeId, selectedMonth, dbOnline]);
-
-  const [shareConfig, setShareConfig] = useState<RevenueShareConfig>(() => {
-    const saved = localStorage.getItem(SHARE_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {}
-    }
-    return {};
-  });
-
-  useEffect(() => {
-    localStorage.setItem(SHARE_KEY, JSON.stringify(shareConfig));
-  }, [shareConfig]);
-
-  const [genderCounts, setGenderCounts] = useState<GenderCountConfig>(() => {
-    const saved = localStorage.getItem(GENDER_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {}
-    }
-    return {};
-  });
-
-  useEffect(() => {
-    localStorage.setItem(GENDER_KEY, JSON.stringify(genderCounts));
-  }, [genderCounts]);
-
-  const pushUndo = (label: string) => {
-    const stack = undoStackRef.current;
-    stack.push({
-      setting: JSON.parse(JSON.stringify(simInput)),
-      shareConfig: JSON.parse(JSON.stringify(shareConfig)),
-      genderCounts: JSON.parse(JSON.stringify(genderCounts)),
-      courseInputs: JSON.parse(JSON.stringify(courseInputs)),
-      label,
-      at: Date.now(),
-    });
-    if (stack.length > UNDO_LIMIT) stack.shift();
-    setUndoDepth(stack.length);
-  };
-
-  const handleUndo = () => {
-    const stack = undoStackRef.current;
-    if (stack.length === 0) return;
-    const last = stack.pop()!;
-    setUndoDepth(stack.length);
-
-    setSimInput(last.setting);
-    setShareConfig(last.shareConfig);
-    setGenderCounts(last.genderCounts);
-    setCourseInputs(last.courseInputs);
-
-    console.log('[undo] 已撤销:', last.label, last.setting);
-  };
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
-        if (undoStackRef.current.length > 0) {
-          e.preventDefault();
-          handleUndo();
-        }
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    undoStackRef.current = [];
-    setUndoDepth(0);
-  }, [storeId, selectedMonth]);
-
-  const handleInputChange = (next: SimulationInput) => {
-    pushUndo('修改成本设置');
-    setSimInput(next);
-  };
-
-  const handleShareConfigChange = (next: RevenueShareConfig) => {
-    pushUndo('修改业绩分配比例');
-    setShareConfig(next);
-  };
-
-  const handleGenderCountsChange = (next: GenderCountConfig) => {
-    pushUndo('修改性别人数');
-    setGenderCounts(next);
-  };
-
-  const handleCourseInputsChange = (next: CourseCommissionInputs) => {
-    pushUndo('修改课提设置');
-    setCourseInputs(next);
-  };
-
-  /* ⭐ simResult：传入 opsViewEnabled */
+  // 测算结果（纯计算，依赖入参变化自动更新）
   const simResult: SimulationResult = useMemo(() => {
     if (!currentPlan) {
       return {
-        fixedCost: 0,
-        totalBaseSalary: 0,
-        totalCommission: 0,
-        totalClassCommission: 0,
-        requiredRevenue: 0,
-        iterations: 0,
-        breakdown: [],
-        courseBreakdown: [],
+        fixedCost: 0, totalBaseSalary: 0, totalCommission: 0, totalClassCommission: 0,
+        requiredRevenue: 0, iterations: 0, breakdown: [], courseBreakdown: [],
       };
     }
     return calcSimulation(
-      currentPlan.positions,
-      simInput,
-      courseInputs,
-      shareConfig,
-      genderCounts,
-      opsViewEnabled
+      currentPlan.positions, simInput, courseInputs, shareConfig, genderCounts, opsViewEnabled
     );
-  }, [
-    currentPlan,
-    simInput,
-    courseInputs,
-    shareConfig,
-    genderCounts,
-    opsViewEnabled,
-  ]);
+  }, [currentPlan, simInput, courseInputs, shareConfig, genderCounts, opsViewEnabled]);
 
-  /* 无测算权限：直接跳无权限页 */
+  // 无权限直接跳转
   if (!hasPermission('simulation:access', storeId)) {
     return <Navigate to="/no-permission" replace />;
   }
@@ -345,73 +74,21 @@ const SimulationPage: React.FC = () => {
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50/50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* 头部 */}
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-purple-600 to-fuchsia-600 shadow-2xl shadow-indigo-500/20 p-8 sm:p-10 mb-8 text-white">
-          <div className="absolute -top-24 -right-24 w-72 h-72 rounded-full bg-white/10 blur-3xl pointer-events-none" />
-          <div className="relative flex items-start justify-between flex-wrap gap-6">
-            <div>
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 backdrop-blur-sm border border-white/20 mb-4">
-                <Sliders className="w-3.5 h-3.5" />
-                <span className="text-[11px] font-semibold tracking-widest uppercase">
-                  Payroll Simulation
-                </span>
-              </div>
-              <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
-                薪酬测算
-              </h1>
-              <p className="text-sm text-indigo-100/90 mt-3 max-w-md">
-                设置成本、业绩比例、性别人数，拖动滑块查看利润
-              </p>
-              <div className="mt-3 inline-flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-xl px-3 py-1.5 border border-white/25">
-                <Store className="w-3.5 h-3.5" />
-                <span className="text-sm font-medium">{storeName}</span>
-
-                <span className="ml-2 inline-flex items-center gap-1 text-[10px] bg-white/20 rounded px-1.5 py-0.5">
-                  {!dbOnline ? (
-                    <>
-                      <CloudOff className="w-3 h-3" /> 离线
-                    </>
-                  ) : savingSetting ? (
-                    <>
-                      <Loader2 className="w-3 h-3 animate-spin" /> 保存中
-                    </>
-                  ) : lastSavedAt ? (
-                    <>
-                      <CheckCircle2 className="w-3 h-3" /> 已保存{' '}
-                      {lastSavedAt.toLocaleTimeString('zh-CN', { hour12: false })}
-                    </>
-                  ) : (
-                    <>
-                      <Cloud className="w-3 h-3" /> 已连接
-                    </>
-                  )}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => navigate(`/payroll?month=${selectedMonth}`)}
-                className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-2.5 border border-white/25 shadow-lg hover:bg-white/25 transition"
-              >
-                <Calculator className="w-4 h-4" />
-                <span className="text-sm font-medium">去计算薪酬</span>
-              </button>
-
-              <button
-                onClick={() => navigate('/compensation')}
-                className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-2.5 border border-white/25 shadow-lg hover:bg-white/25 transition"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span className="text-sm font-medium">返回配置</span>
-              </button>
-            </div>
-          </div>
-        </div>
+        <SimulationHeader
+          storeName={storeName}
+          dbOnline={dbOnline}
+          savingSetting={savingSetting}
+          lastSavedAt={lastSavedAt}
+          selectedMonth={selectedMonth}
+          onGoPayroll={() => navigate(`/payroll?month=${selectedMonth}`)}
+          onGoCompensation={() => navigate('/compensation')}
+        />
 
         <div className="mb-4">
           <StoreSwitcher />
         </div>
 
+        {/* 月份选择 + 撤销 */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">
           <div className="flex flex-wrap items-center gap-3">
             <label className="text-sm font-medium text-gray-600">月份</label>
@@ -419,9 +96,7 @@ const SimulationPage: React.FC = () => {
               value={selectedMonth}
               onChange={(e) => {
                 setSelectedMonth(e.target.value);
-                navigate(`/simulation?month=${e.target.value}`, {
-                  replace: true,
-                });
+                navigate(`/simulation?month=${e.target.value}`, { replace: true });
               }}
               className="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
@@ -442,11 +117,7 @@ const SimulationPage: React.FC = () => {
             <button
               onClick={handleUndo}
               disabled={undoDepth === 0}
-              title={
-                undoDepth > 0
-                  ? `撤销（Ctrl/Cmd+Z，剩余 ${undoDepth} 步）`
-                  : '无可撤销'
-              }
+              title={undoDepth > 0 ? `撤销（Ctrl/Cmd+Z，剩余 ${undoDepth} 步）` : '无可撤销'}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition ${
                 undoDepth > 0
                   ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
@@ -464,6 +135,7 @@ const SimulationPage: React.FC = () => {
           </div>
         </div>
 
+        {/* 主体内容 */}
         {currentPlan ? (
           <>
             <SimulationSettingsPanel
@@ -489,17 +161,7 @@ const SimulationPage: React.FC = () => {
             />
           </>
         ) : (
-          <div className="bg-white rounded-3xl shadow-sm border border-dashed border-gray-200 p-20 text-center">
-            <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-indigo-50 to-purple-50 flex items-center justify-center mb-5">
-              <Sliders className="w-8 h-8 text-indigo-500" />
-            </div>
-            <h3 className="text-gray-700 font-semibold mb-1">
-              还没有可测算的配置
-            </h3>
-            <p className="text-sm text-gray-400">
-              请先在配置页导入该月的薪酬方案
-            </p>
-          </div>
+          <SimulationEmptyState />
         )}
       </div>
     </div>

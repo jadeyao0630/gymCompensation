@@ -1,3 +1,50 @@
+/* ⭐ 收款方式明细 */
+export interface PayDetailItem {
+  pay_type: string;      // "微信" / "现金" / "刷卡"
+  amount: string;        // "2000.00"
+  pay_type_id: string;   // "1" / "3" / "4"
+}
+
+/* ⭐ 追加到 SimulationEmployeeBreakdown */
+export interface SimulationEmployeeBreakdown {
+  index: number;
+  allocatedRevenue: number;
+  hitBaseThreshold?: number;
+  baseSalary: number;
+  hitCommissionThreshold?: number;
+  commissionRate: number;
+  commission: number;
+  /* ⭐ 新增 */
+  payDetail?: PayDetailItem[];
+}
+
+/* ⭐ 追加到 SimulationPositionBreakdown（如果还没有） */
+export interface SimulationPositionBreakdown {
+  positionId: string;
+  title: string;
+  headcount: number;
+  baseSalary: number;
+  allocatedRevenue: number;
+  commissionRate: number;
+  commission: number;
+  perEmployee?: SimulationEmployeeBreakdown[];
+  /* ⭐ 新增 */
+  payDetail?: PayDetailItem[];
+}
+
+/* ⭐ 追加到 SimulationCourseBreakdown */
+export interface SimulationCourseBreakdown {
+  courseName: string;
+  averagePrice: number;
+  classCount: number;
+  headcount: number;
+  mode: 'percent' | 'fixed';
+  value: number;
+  commission: number;
+  /* ⭐ 新增 */
+  payDetail?: PayDetailItem[];
+}
+
 export type PositionCategory =
   | 'membership'
   | 'personalTraining'
