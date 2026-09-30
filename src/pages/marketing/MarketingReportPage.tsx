@@ -30,6 +30,7 @@ const MarketingReportPage: React.FC = () => {
   const canView = hasPermission('report:marketing:view', storeId);
   const storeName = getStoreById(storeId)?.name || '门店';
 
+  /* 默认日期范围：本月 */
   const initialRange = useMemo(() => {
     const now = new Date();
     const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -43,33 +44,39 @@ const MarketingReportPage: React.FC = () => {
   const [error, setError] = useState('');
   const [list, setList] = useState<FinancialFlowItem[]>([]);
 
-  const fetchData = useCallback(async () => {
-    if (!storeId || !beginDate || !endDate) return;
-    setLoading(true);
-    setError('');
-    try {
-      const res = await getCardOrderList({
-        bus_id: storeId,
-        sale_id: '',
-        begin_date: beginDate,
-        end_date: endDate,
-        page_no: 1,
-        page_size: 2000,
-      });
-      setList(res.list || []);
-    } catch (e: any) {
-      console.error('[MarketingReport] 加载失败', e);
-      setError(e?.response?.data?.errormsg || e?.message || '加载数据失败');
-    } finally {
-      setLoading(false);
-    }
-  }, [storeId, beginDate, endDate]);
+  /* ⭐ 拉取数据：改为接收 begin/end 参数，不依赖闭包 */
+  const fetchData = useCallback(
+    async (begin: string, end: string) => {
+      if (!storeId || !begin || !end) return;
+      setLoading(true);
+      setError('');
+      try {
+        const res = await getCardOrderList({
+          bus_id: storeId,
+          sale_id: '',
+          begin_date: begin,
+          end_date: end,
+          page_no: 1,
+          page_size: 2000,
+        });
+        setList(res.list || []);
+      } catch (e: any) {
+        console.error('[MarketingReport] 加载失败', e);
+        setError(e?.response?.data?.errormsg || e?.message || '加载数据失败');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [storeId]
+  );
 
+  /* 初次 & 门店变化时拉取（用当前 state） */
   useEffect(() => {
-    fetchData();
+    fetchData(beginDate, endDate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId]);
 
+  /* ⭐ 快捷日期：设置 state + 立即用新日期拉取 */
   const handleQuick = (range: string) => {
     const now = new Date();
     let begin = '';
@@ -109,15 +116,29 @@ const MarketingReportPage: React.FC = () => {
 
     setBeginDate(begin);
     setEndDate(end);
-    setTimeout(() => fetchData(), 0);
+    /* ⭐ 用新日期直接拉取，不需要 setTimeout，也不需要手动点刷新 */
+    fetchData(begin, end);
   };
 
+  /* ⭐ 手动修改日期时也自动拉取（可选，如果 DateRangePicker 有 onChange 就让它自动） */
+  const handleDateChange = (b: string, e: string) => {
+    setBeginDate(b);
+    setEndDate(e);
+  };
+
+  /* ⭐ 手动刷新按钮：用当前 state 拉取 */
+  const handleRefresh = () => {
+    fetchData(beginDate, endDate);
+  };
+
+  /* 汇总 */
   const summary = useMemo(() => aggregateOrders(list), [list]);
 
+  /* 导出 Excel */
   const handleExport = () => {
     const wb = XLSX.utils.book_new();
 
-    /* Sheet 1：汇总（含押金支付合计） */
+    /* Sheet 1：汇总 */
     const summaryRows: any[][] = [
       ['营销收入报告'],
       ['门店', storeName],
@@ -181,8 +202,6 @@ const MarketingReportPage: React.FC = () => {
     ];
     list.forEach((item) => {
       const label = getBusinessTypeLabel(item);
-
-      /* 收款方式 + 押金合并 */
       const payParts = (item.pay_detail || []).map(
         (p) => `${p.pay_type} ¥${p.amount}`
       );
@@ -207,15 +226,15 @@ const MarketingReportPage: React.FC = () => {
     });
     const ws5 = XLSX.utils.aoa_to_sheet(detailRows);
     ws5['!cols'] = [
-      { wch: 18 },  // 日期
-      { wch: 12 },  // 会员名
-      { wch: 20 },  // 卡名
-      { wch: 30 },  // 备注
-      { wch: 18 },  // 类型
-      { wch: 32 },  // 收款方式 / 押金
-      { wch: 32 },  // 业绩归属
-      { wch: 12 },  // 卡金额
-      { wch: 12 },  // 实收
+      { wch: 18 },
+      { wch: 12 },
+      { wch: 20 },
+      { wch: 30 },
+      { wch: 18 },
+      { wch: 32 },
+      { wch: 32 },
+      { wch: 12 },
+      { wch: 12 },
     ];
     XLSX.utils.book_append_sheet(wb, ws5, '订单明细');
 
@@ -260,6 +279,7 @@ const MarketingReportPage: React.FC = () => {
           </div>
         </div>
 
+        {/* 顶部工具行 */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <StoreSwitcher />
           <div className="flex-1" />
@@ -270,12 +290,9 @@ const MarketingReportPage: React.FC = () => {
           beginDate={beginDate}
           endDate={endDate}
           loading={loading}
-          onChange={(b, e) => {
-            setBeginDate(b);
-            setEndDate(e);
-          }}
+          onChange={handleDateChange}
           onQuick={handleQuick}
-          onRefresh={fetchData}
+          onRefresh={handleRefresh}
         />
 
         {loading && (
