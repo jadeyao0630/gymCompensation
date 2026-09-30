@@ -1,17 +1,17 @@
 import React, { useMemo, useState } from 'react';
-import { Search, Filter } from 'lucide-react';
+import { Search, Filter, Wallet } from 'lucide-react';
 import type { FinancialFlowItem } from '../../../api/stats';
 import {
   getBusinessType,
   getBusinessTypeLabel,
   getCardAmount,
   getIncomeAmount,
+  getPrePayment,
 } from '../utils/aggregate';
 
 const fmtMoney = (v: number) =>
   `¥${Math.round(v).toLocaleString('zh-CN')}`;
 
-/* ⭐ 类型徽章样式 */
 const typeBadgeClass = (type: string) => {
   if (type === '购卡') return 'bg-sky-50 text-sky-700 border-sky-100';
   if (type === '购泳教') return 'bg-cyan-50 text-cyan-700 border-cyan-100';
@@ -27,20 +27,15 @@ export const OrderDetailTable: React.FC<Props> = ({ list }) => {
   const [keyword, setKeyword] = useState('');
   const [labelFilter, setLabelFilter] = useState<string>('');
 
-  /* ⭐ 从 list 里动态提取所有出现过的 label */
   const { normalLabels, otherLabels } = useMemo(() => {
     const labels = new Set<string>();
-    list.forEach((item) => {
-      labels.add(getBusinessTypeLabel(item));
-    });
-
+    list.forEach((item) => labels.add(getBusinessTypeLabel(item)));
     const normal: string[] = [];
     const others: string[] = [];
     labels.forEach((l) => {
       if (l.startsWith('其他')) others.push(l);
       else normal.push(l);
     });
-
     const order = ['购卡', '购泳教', '购私教'];
     normal.sort((a, b) => {
       const ai = order.indexOf(a);
@@ -48,17 +43,14 @@ export const OrderDetailTable: React.FC<Props> = ({ list }) => {
       return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
     });
     others.sort();
-
     return { normalLabels: normal, otherLabels: others };
   }, [list]);
 
   const filtered = useMemo(() => {
     let arr = list;
-
     if (labelFilter) {
       arr = arr.filter((it) => getBusinessTypeLabel(it) === labelFilter);
     }
-
     if (keyword.trim()) {
       const kw = keyword.trim().toLowerCase();
       arr = arr.filter(
@@ -66,12 +58,22 @@ export const OrderDetailTable: React.FC<Props> = ({ list }) => {
           String(it.username || '').toLowerCase().includes(kw) ||
           String(it.card_name || '').toLowerCase().includes(kw) ||
           String(it.flow_sn || '').toLowerCase().includes(kw) ||
-          /* ⭐ 支持按备注搜索 */
           String(it.remark || '').toLowerCase().includes(kw)
       );
     }
     return arr;
   }, [list, keyword, labelFilter]);
+
+  /* 底部合计 */
+  const totals = useMemo(() => {
+    return filtered.reduce(
+      (acc, it) => ({
+        cardAmount: acc.cardAmount + getCardAmount(it),
+        income: acc.income + getIncomeAmount(it),
+      }),
+      { cardAmount: 0, income: 0 }
+    );
+  }, [filtered]);
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm mb-6 overflow-hidden">
@@ -99,7 +101,6 @@ export const OrderDetailTable: React.FC<Props> = ({ list }) => {
               className="pl-7 pr-7 py-1.5 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 appearance-none"
             >
               <option value="">全部类型（{list.length}）</option>
-
               {normalLabels.map((l) => {
                 const count = list.filter(
                   (it) => getBusinessTypeLabel(it) === l
@@ -110,7 +111,6 @@ export const OrderDetailTable: React.FC<Props> = ({ list }) => {
                   </option>
                 );
               })}
-
               {otherLabels.length > 0 && (
                 <optgroup label="其他">
                   {otherLabels.map((l) => {
@@ -137,10 +137,9 @@ export const OrderDetailTable: React.FC<Props> = ({ list }) => {
               <th className="px-3 py-2.5 text-left font-medium">日期</th>
               <th className="px-3 py-2.5 text-left font-medium">会员名</th>
               <th className="px-3 py-2.5 text-left font-medium">卡名</th>
-              {/* ⭐ 新增：备注列 */}
               <th className="px-3 py-2.5 text-left font-medium">备注</th>
               <th className="px-3 py-2.5 text-left font-medium">类型</th>
-              <th className="px-3 py-2.5 text-left font-medium">收款方式</th>
+              <th className="px-3 py-2.5 text-left font-medium">收款方式 / 押金</th>
               <th className="px-3 py-2.5 text-left font-medium">业绩归属</th>
               <th className="px-3 py-2.5 text-right font-medium">卡金额</th>
               <th className="px-3 py-2.5 text-right font-medium">实收</th>
@@ -163,8 +162,11 @@ export const OrderDetailTable: React.FC<Props> = ({ list }) => {
                 const type = getBusinessType(item);
                 const label = getBusinessTypeLabel(item);
                 const cardAmount = getCardAmount(item);
+                const prePayment = getPrePayment(item);
                 const income = getIncomeAmount(item);
                 const remark = String(item.remark || '').trim();
+                const hasPayDetail =
+                  (item.pay_detail || []).length > 0;
 
                 return (
                   <tr
@@ -180,7 +182,6 @@ export const OrderDetailTable: React.FC<Props> = ({ list }) => {
                     <td className="px-3 py-2 text-gray-700">
                       {item.card_name || '—'}
                     </td>
-                    {/* ⭐ 备注列：空显示"—"；长文本用 title 悬停显示全文 */}
                     <td className="px-3 py-2 text-gray-500">
                       {remark ? (
                         <span
@@ -203,24 +204,43 @@ export const OrderDetailTable: React.FC<Props> = ({ list }) => {
                         {label}
                       </span>
                     </td>
+
+                    {/* ⭐ 收款方式 + 押金（同一列，视觉区分） */}
                     <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-1">
-                        {(item.pay_detail || []).map((p, i) => (
-                          <span
-                            key={i}
-                            className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-100 whitespace-nowrap"
-                          >
-                            {p.pay_type}
-                            <span className="font-medium tabular-nums">
-                              ¥{Number(p.amount).toLocaleString()}
+                      {!hasPayDetail && prePayment === 0 ? (
+                        <span className="text-gray-300">—</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {/* 各支付方式 */}
+                          {(item.pay_detail || []).map((p, i) => (
+                            <span
+                              key={i}
+                              className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-100 whitespace-nowrap"
+                            >
+                              {p.pay_type}
+                              <span className="font-medium tabular-nums">
+                                ¥{Number(p.amount).toLocaleString()}
+                              </span>
                             </span>
-                          </span>
-                        ))}
-                        {(!item.pay_detail || item.pay_detail.length === 0) && (
-                          <span className="text-gray-300">—</span>
-                        )}
-                      </div>
+                          ))}
+
+                          {/* ⭐ 押金：玫瑰色 + Wallet 图标 + "押金"前缀，视觉区分 */}
+                          {prePayment > 0 && (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 whitespace-nowrap"
+                              title={`押金支付 ¥${prePayment}`}
+                            >
+                              <Wallet className="w-2.5 h-2.5" />
+                              <span>押金</span>
+                              <span className="font-medium tabular-nums">
+                                ¥{prePayment.toLocaleString()}
+                              </span>
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
+
                     <td className="px-3 py-2">
                       <div className="flex flex-col gap-0.5">
                         {(item.marketers_detail || []).map((m, i) => (
@@ -263,6 +283,23 @@ export const OrderDetailTable: React.FC<Props> = ({ list }) => {
               })
             )}
           </tbody>
+
+          {/* 底部合计行 */}
+          {filtered.length > 0 && (
+            <tfoot className="bg-gray-50/60 font-semibold text-gray-700">
+              <tr className="border-t border-gray-200">
+                <td className="px-3 py-2.5" colSpan={7}>
+                  合计（{filtered.length} 笔）
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums">
+                  {fmtMoney(totals.cardAmount)}
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">
+                  {fmtMoney(totals.income)}
+                </td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { TrendingUp, Wallet, CreditCard, Hash } from 'lucide-react';
+import { TrendingUp, Wallet, CreditCard, Hash, Receipt } from 'lucide-react';
 import type { OverallSummary } from '../utils/aggregate';
 
 const fmtMoney = (v: number) =>
@@ -27,6 +27,13 @@ export const SummaryCards: React.FC<{ summary: OverallSummary }> = ({
       value: fmtMoney(summary.totalIncomeAmount),
       gradient: 'from-emerald-500 to-teal-500',
     },
+    /* ⭐ 新增：押金支付合计 */
+    {
+      icon: <Receipt className="w-5 h-5" />,
+      label: '押金支付合计',
+      value: fmtMoney(summary.totalPrePayment),
+      gradient: 'from-rose-500 to-pink-500',
+    },
     {
       icon: <TrendingUp className="w-5 h-5" />,
       label: '客单价',
@@ -39,7 +46,7 @@ export const SummaryCards: React.FC<{ summary: OverallSummary }> = ({
   ];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
       {cards.map((c, i) => (
         <div
           key={i}

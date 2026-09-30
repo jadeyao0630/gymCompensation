@@ -117,7 +117,7 @@ const MarketingReportPage: React.FC = () => {
   const handleExport = () => {
     const wb = XLSX.utils.book_new();
 
-    /* Sheet 1：汇总 */
+    /* Sheet 1：汇总（含押金支付合计） */
     const summaryRows: any[][] = [
       ['营销收入报告'],
       ['门店', storeName],
@@ -128,13 +128,16 @@ const MarketingReportPage: React.FC = () => {
       ['订单总数', summary.totalCount],
       ['卡金额合计', summary.totalCardAmount],
       ['实收金额合计', summary.totalIncomeAmount],
+      ['押金支付合计', summary.totalPrePayment],
     ];
     const ws1 = XLSX.utils.aoa_to_sheet(summaryRows);
     ws1['!cols'] = [{ wch: 18 }, { wch: 18 }];
     XLSX.utils.book_append_sheet(wb, ws1, '汇总');
 
     /* Sheet 2：按类型 */
-    const typeRows: any[][] = [['业务类型', '订单数', '卡金额', '实收金额']];
+    const typeRows: any[][] = [
+      ['业务类型', '订单数', '卡金额', '实收金额'],
+    ];
     summary.types.forEach((t) => {
       typeRows.push([t.label, t.count, t.cardAmount, t.incomeAmount]);
     });
@@ -143,12 +146,26 @@ const MarketingReportPage: React.FC = () => {
     XLSX.utils.book_append_sheet(wb, ws2, '按类型');
 
     /* Sheet 3：卡种细分 */
-    const cardRows: any[][] = [['业务类型', '卡种', '数量', '卡金额', '实收金额']];
+    const cardRows: any[][] = [
+      ['业务类型', '卡种', '数量', '卡金额', '实收金额'],
+    ];
     summary.cards.forEach((c) => {
-      cardRows.push([c.label, c.cardName, c.count, c.cardAmount, c.incomeAmount]);
+      cardRows.push([
+        c.label,
+        c.cardName,
+        c.count,
+        c.cardAmount,
+        c.incomeAmount,
+      ]);
     });
     const ws3 = XLSX.utils.aoa_to_sheet(cardRows);
-    ws3['!cols'] = [{ wch: 20 }, { wch: 24 }, { wch: 10 }, { wch: 14 }, { wch: 14 }];
+    ws3['!cols'] = [
+      { wch: 20 },
+      { wch: 24 },
+      { wch: 10 },
+      { wch: 14 },
+      { wch: 14 },
+    ];
     XLSX.utils.book_append_sheet(wb, ws3, '卡种细分');
 
     /* Sheet 4：收款方式 */
@@ -158,28 +175,47 @@ const MarketingReportPage: React.FC = () => {
     ws4['!cols'] = [{ wch: 14 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, ws4, '收款方式');
 
-    /* Sheet 5：订单明细 */
+    /* Sheet 5：订单明细（押金合并进"收款方式"列） */
     const detailRows: any[][] = [
-      ['日期', '会员名', '卡名', '备注', '类型', '收款方式', '业绩归属', '卡金额', '实收'],
+      ['日期', '会员名', '卡名', '备注', '类型', '收款方式 / 押金', '业绩归属', '卡金额', '实收'],
     ];
     list.forEach((item) => {
       const label = getBusinessTypeLabel(item);
+
+      /* 收款方式 + 押金合并 */
+      const payParts = (item.pay_detail || []).map(
+        (p) => `${p.pay_type} ¥${p.amount}`
+      );
+      const prePayment = Number(item.pre_payment || 0);
+      if (prePayment > 0) {
+        payParts.push(`[押金] ¥${prePayment}`);
+      }
+
       detailRows.push([
         item.deal_time || '',
         item.username || '',
         item.card_name || '',
         item.remark || '',
         label,
-        (item.pay_detail || []).map((p) => `${p.pay_type} ¥${p.amount}`).join(' + '),
-        (item.marketers_detail || []).map((m) => `${m.name}[${m.role}] ${m.percent} ¥${m.amount}`).join('\n'),
+        payParts.join(' + '),
+        (item.marketers_detail || [])
+          .map((m) => `${m.name}[${m.role}] ${m.percent} ¥${m.amount}`)
+          .join('\n'),
         Number(item.amount || 0),
         Number(item.income_amount || item.amount || 0),
       ]);
     });
     const ws5 = XLSX.utils.aoa_to_sheet(detailRows);
     ws5['!cols'] = [
-      { wch: 18 }, { wch: 12 }, { wch: 20 }, { wch: 30 },
-      { wch: 18 }, { wch: 24 }, { wch: 32 }, { wch: 12 }, { wch: 12 },
+      { wch: 18 },  // 日期
+      { wch: 12 },  // 会员名
+      { wch: 20 },  // 卡名
+      { wch: 30 },  // 备注
+      { wch: 18 },  // 类型
+      { wch: 32 },  // 收款方式 / 押金
+      { wch: 32 },  // 业绩归属
+      { wch: 12 },  // 卡金额
+      { wch: 12 },  // 实收
     ];
     XLSX.utils.book_append_sheet(wb, ws5, '订单明细');
 
@@ -224,12 +260,9 @@ const MarketingReportPage: React.FC = () => {
           </div>
         </div>
 
-        {/* ⭐ 顶部工具行 */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <StoreSwitcher />
-
           <div className="flex-1" />
-
           <NavButtons active="marketing" />
         </div>
 

@@ -47,13 +47,12 @@ export function getBusinessTypeLabel(item: FinancialFlowItem): string {
   return info.type;
 }
 
-/* ⭐ 从订单业务类型推断职位（用于归属人排行） */
+/* ⭐ 从订单业务类型推断职位 */
 function inferPosition(item: FinancialFlowItem): string {
   const info = getBusinessTypeInfo(item);
   if (info.type === '购泳教') return '泳教';
   if (info.type === '购私教') return '私教';
   if (info.type === '购卡') return '会籍';
-  /* 其他时按 subType 猜 */
   const sub = info.subType || '';
   if (sub.includes('泳教')) return '泳教';
   if (sub.includes('私教')) return '私教';
@@ -73,6 +72,11 @@ export function getCardAmount(item: FinancialFlowItem): number {
   return Number(item.amount || 0);
 }
 
+/* ⭐ 新增：押金支付金额 */
+export function getPrePayment(item: FinancialFlowItem): number {
+  return Number(item.pre_payment || 0) || 0;
+}
+
 /* ============================================================
  * 单笔订单
  * ============================================================ */
@@ -83,6 +87,8 @@ export interface CardOrderItem {
   dealTime: string;
   cardAmount: number;
   incomeAmount: number;
+  /* ⭐ 新增：押金支付 */
+  prePayment: number;
   remark: string;
   payDetail: { pay_type: string; amount: string; pay_type_id: string }[];
   marketers: { name: string; role: string; percent: string; amount: string }[];
@@ -129,9 +135,7 @@ export interface MarketerSummary {
   name: string;
   count: number;
   amount: number;
-  /** ⭐ 新增：职位（从订单业务类型推断，取最多出现的那个） */
   position: string;
-  /** ⭐ 所有出现过的职位及次数（用于展示多职位） */
   positions: string[];
   orders: MarketerOrderItem[];
 }
@@ -140,6 +144,8 @@ export interface OverallSummary {
   totalCount: number;
   totalCardAmount: number;
   totalIncomeAmount: number;
+  /* ⭐ 新增：押金支付合计 */
+  totalPrePayment: number;
   types: TypeSummary[];
   cards: CardSummary[];
   payTypes: PayTypeSummary[];
@@ -160,6 +166,7 @@ export function aggregateOrders(list: FinancialFlowItem[]): OverallSummary {
 
   let totalCardAmount = 0;
   let totalIncomeAmount = 0;
+  let totalPrePayment = 0;   // ⭐ 押金合计
 
   list.forEach((item) => {
     const info = getBusinessTypeInfo(item);
@@ -167,26 +174,22 @@ export function aggregateOrders(list: FinancialFlowItem[]): OverallSummary {
     const subType = info.subType;
     const cardAmount = getCardAmount(item);
     const incomeAmount = getIncomeAmount(item);
+    const prePayment = getPrePayment(item);           // ⭐ 押金
     const cardName = String(item.card_name || '未命名');
     const remark = String(item.remark || '').trim();
     const label = subType ? `其他 (${subType})` : type;
-
-    /* ⭐ 该订单推断的职位 */
     const inferredPosition = inferPosition(item);
 
     totalCardAmount += cardAmount;
     totalIncomeAmount += incomeAmount;
+    totalPrePayment += prePayment;                    // ⭐ 累计押金
 
     /* 类型汇总 */
     const typeKey = subType ? `${type}__${subType}` : type;
     if (!typeMap.has(typeKey)) {
       typeMap.set(typeKey, {
-        type,
-        label,
-        subType,
-        count: 0,
-        cardAmount: 0,
-        incomeAmount: 0,
+        type, label, subType,
+        count: 0, cardAmount: 0, incomeAmount: 0,
       });
     }
     const ts = typeMap.get(typeKey)!;
@@ -198,13 +201,8 @@ export function aggregateOrders(list: FinancialFlowItem[]): OverallSummary {
     const cardKey = `${type}__${subType || ''}__${cardName}`;
     if (!cardMap.has(cardKey)) {
       cardMap.set(cardKey, {
-        cardName,
-        type,
-        label,
-        subType,
-        count: 0,
-        cardAmount: 0,
-        incomeAmount: 0,
+        cardName, type, label, subType,
+        count: 0, cardAmount: 0, incomeAmount: 0,
         orders: [],
       });
     }
@@ -220,6 +218,7 @@ export function aggregateOrders(list: FinancialFlowItem[]): OverallSummary {
       dealTime: String(item.deal_time || ''),
       cardAmount,
       incomeAmount,
+      prePayment,                                     // ⭐ 押金
       remark,
       payDetail: (item.pay_detail || []).map((p) => ({
         pay_type: String(p.pay_type || ''),
@@ -248,7 +247,7 @@ export function aggregateOrders(list: FinancialFlowItem[]): OverallSummary {
       payTypeMap.get(key)!.amount += amt;
     });
 
-    /* 归属人（含职位推断） */
+    /* 归属人 */
     (item.marketers_detail || []).forEach((m) => {
       const name = String(m.name || '').trim();
       if (!name) return;
@@ -269,7 +268,6 @@ export function aggregateOrders(list: FinancialFlowItem[]): OverallSummary {
       ms.count += 1;
       ms.amount += amt;
 
-      /* ⭐ 累计职位出现次数 */
       const cnt = ms._positionCount.get(inferredPosition) || 0;
       ms._positionCount.set(inferredPosition, cnt + 1);
 
@@ -282,6 +280,7 @@ export function aggregateOrders(list: FinancialFlowItem[]): OverallSummary {
         businessLabel: label,
         cardAmount,
         incomeAmount,
+        prePayment,                                   // ⭐ 押金
         remark,
         myRole: String(m.role || ''),
         myPercent: String(m.percent || ''),
@@ -301,16 +300,12 @@ export function aggregateOrders(list: FinancialFlowItem[]): OverallSummary {
     });
   });
 
-  /* ⭐ 卡种订单按日期倒序 */
+  /* 排序 */
   Array.from(cardMap.values()).forEach((cs) => {
     cs.orders.sort((a, b) => (b.dealTime > a.dealTime ? 1 : -1));
   });
-
-  /* ⭐ 归属人订单按日期倒序 + 计算职位列表 */
   Array.from(marketerMap.values()).forEach((ms) => {
     ms.orders.sort((a, b) => (b.dealTime > a.dealTime ? 1 : -1));
-
-    /* 按出现次数排序的职位列表 */
     const sorted = Array.from(ms._positionCount.entries())
       .sort((a, b) => b[1] - a[1])
       .map(([pos]) => pos);
@@ -318,9 +313,7 @@ export function aggregateOrders(list: FinancialFlowItem[]): OverallSummary {
     ms.position = sorted[0] || '—';
   });
 
-  /* 排序 */
   const typeOrder: BusinessType[] = ['购卡', '购泳教', '购私教', '其他'];
-
   const sortedTypes = Array.from(typeMap.values()).sort((a, b) => {
     const ai = typeOrder.indexOf(a.type);
     const bi = typeOrder.indexOf(b.type);
@@ -332,6 +325,7 @@ export function aggregateOrders(list: FinancialFlowItem[]): OverallSummary {
     totalCount: list.length,
     totalCardAmount,
     totalIncomeAmount,
+    totalPrePayment,                                // ⭐ 押金合计
     types: sortedTypes,
     cards: Array.from(cardMap.values()).sort(
       (a, b) => b.incomeAmount - a.incomeAmount
@@ -340,7 +334,7 @@ export function aggregateOrders(list: FinancialFlowItem[]): OverallSummary {
       (a, b) => b.amount - a.amount
     ),
     marketers: Array.from(marketerMap.values())
-      .map(({ _positionCount, ...rest }) => rest)  // ⭐ 去掉内部字段
+      .map(({ _positionCount, ...rest }) => rest)
       .sort((a, b) => b.amount - a.amount),
   };
 }
