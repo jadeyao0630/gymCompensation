@@ -1,0 +1,191 @@
+import React, { useMemo, useState } from 'react';
+import { Search } from 'lucide-react';
+import type { FinancialFlowItem } from '../../../api/stats';
+import {
+  getBusinessType,
+  getCardAmount,
+  getIncomeAmount,
+} from '../utils/aggregate';
+
+const fmtMoney = (v: number) =>
+  `¥${Math.round(v).toLocaleString('zh-CN')}`;
+
+interface Props {
+  list: FinancialFlowItem[];
+}
+
+export const OrderDetailTable: React.FC<Props> = ({ list }) => {
+  const [keyword, setKeyword] = useState('');
+  const [typeFilter, setTypeFilter] = useState<string>('');
+
+  const filtered = useMemo(() => {
+    let arr = list;
+    if (typeFilter) {
+      arr = arr.filter((it) => getBusinessType(it) === typeFilter);
+    }
+    if (keyword.trim()) {
+      const kw = keyword.trim().toLowerCase();
+      arr = arr.filter(
+        (it) =>
+          String(it.username || '').toLowerCase().includes(kw) ||
+          String(it.card_name || '').toLowerCase().includes(kw) ||
+          String(it.flow_sn || '').toLowerCase().includes(kw)
+      );
+    }
+    return arr;
+  }, [list, keyword, typeFilter]);
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm mb-6 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-gray-700">
+          订单明细（{filtered.length} / {list.length} 笔）
+        </h3>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <input
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              placeholder="会员 / 卡名 / 单号"
+              className="pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-56"
+            />
+          </div>
+          <select
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white"
+          >
+            <option value="">全部类型</option>
+            <option value="购卡">购卡</option>
+            <option value="购泳教">购泳教</option>
+            <option value="购私教">购私教</option>
+            <option value="其他">其他</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="bg-gray-50 text-gray-500">
+            <tr>
+              <th className="px-3 py-2.5 text-left font-medium">日期</th>
+              <th className="px-3 py-2.5 text-left font-medium">会员名</th>
+              <th className="px-3 py-2.5 text-left font-medium">卡名</th>
+              <th className="px-3 py-2.5 text-left font-medium">类型</th>
+              <th className="px-3 py-2.5 text-left font-medium">收款方式</th>
+              <th className="px-3 py-2.5 text-left font-medium">业绩归属</th>
+              <th className="px-3 py-2.5 text-right font-medium">卡金额</th>
+              <th className="px-3 py-2.5 text-right font-medium">实收</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filtered.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={8}
+                  className="px-4 py-10 text-center text-gray-400"
+                >
+                  无符合条件的记录
+                </td>
+              </tr>
+            ) : (
+              filtered.map((item) => {
+                const type = getBusinessType(item);
+                const cardAmount = getCardAmount(item);
+                const income = getIncomeAmount(item);
+
+                return (
+                  <tr
+                    key={item.id || item.flow_sn}
+                    className="hover:bg-gray-50/50"
+                  >
+                    <td className="px-3 py-2 text-gray-500 tabular-nums whitespace-nowrap">
+                      {item.deal_time || '—'}
+                    </td>
+                    <td className="px-3 py-2 text-gray-700">
+                      {item.username || '—'}
+                    </td>
+                    <td className="px-3 py-2 text-gray-700">
+                      {item.card_name || '—'}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={`inline-flex px-1.5 py-0.5 rounded text-[10px] border ${
+                          type === '购卡'
+                            ? 'bg-sky-50 text-sky-700 border-sky-100'
+                            : type === '购泳教'
+                            ? 'bg-cyan-50 text-cyan-700 border-cyan-100'
+                            : type === '购私教'
+                            ? 'bg-violet-50 text-violet-700 border-violet-100'
+                            : 'bg-gray-50 text-gray-600 border-gray-100'
+                        }`}
+                      >
+                        {type}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-1">
+                        {(item.pay_detail || []).map((p, i) => (
+                          <span
+                            key={i}
+                            className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-100 whitespace-nowrap"
+                          >
+                            {p.pay_type}
+                            <span className="font-medium tabular-nums">
+                              ¥{Number(p.amount).toLocaleString()}
+                            </span>
+                          </span>
+                        ))}
+                        {(!item.pay_detail || item.pay_detail.length === 0) && (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col gap-0.5">
+                        {(item.marketers_detail || []).map((m, i) => (
+                          <span
+                            key={i}
+                            className="text-[10px] text-gray-600 whitespace-nowrap"
+                          >
+                            {m.name}
+                            <span
+                              className={`ml-1 px-1 rounded text-[9px] ${
+                                m.role === '主归属'
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-amber-100 text-amber-700'
+                              }`}
+                            >
+                              {m.role === '主归属' ? '主' : '协'}
+                            </span>
+                            <span className="ml-1 text-gray-400">
+                              {m.percent}
+                            </span>
+                            <span className="ml-1 font-medium text-gray-700">
+                              ¥{Number(m.amount || 0).toLocaleString()}
+                            </span>
+                          </span>
+                        ))}
+                        {(!item.marketers_detail ||
+                          item.marketers_detail.length === 0) && (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-700">
+                      {fmtMoney(cardAmount)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-emerald-700">
+                      {fmtMoney(income)}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};

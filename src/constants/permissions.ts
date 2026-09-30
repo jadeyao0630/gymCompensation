@@ -7,10 +7,10 @@ export type PermissionKey =
   | 'position:delete'
   | 'position:rename'
   | 'headcount:edit'
-  | 'month:add'             // ⭐ 新增月份
-  | 'month:delete'          // ⭐ 删除月份
-  | 'plan:import'           // ⭐ 导入薪酬佣金设置
-  | 'plan:export'           // ⭐ 导出薪酬佣金设置
+  | 'month:add'
+  | 'month:delete'
+  | 'plan:import'
+  | 'plan:export'
   /* 薪酬佣金测算 */
   | 'simulation:access'
   | 'simulation:cost:property'
@@ -27,6 +27,7 @@ export type PermissionKey =
   | 'ops:view'
   | 'export:payroll'
   | 'export:personal'
+  | 'report:marketing:view'         // ⭐ 新增：营销收入报告
   /* 综合设置 */
   | 'user:add'
   | 'user:resetPwd';
@@ -89,31 +90,6 @@ export const PERMISSION_LIST: PermissionMeta[] = [
     label: '导出薪酬佣金设置',
     desc: '导出当前薪酬佣金方案为 JSON',
     group: '薪酬佣金设置',
-  },
-  /* ⭐ 职位细粒度：归入「综合设置」 */
-  {
-    key: 'position:add',
-    label: '新增职位',
-    desc: '在方案中新增职位',
-    group: '综合设置',
-  },
-  {
-    key: 'position:delete',
-    label: '删除职位',
-    desc: '从方案中删除职位',
-    group: '综合设置',
-  },
-  {
-    key: 'position:rename',
-    label: '职位名称更改',
-    desc: '修改职位的显示名称',
-    group: '综合设置',
-  },
-  {
-    key: 'headcount:edit',
-    label: '修改职位人数',
-    desc: '修改各职位的在编人数',
-    group: '综合设置',
   },
 
   /* ============================================================
@@ -207,10 +183,41 @@ export const PERMISSION_LIST: PermissionMeta[] = [
     desc: '导出单个员工工资佣金结算',
     group: '薪酬佣金计算',
   },
+  /* ⭐ 新增：营销收入报告 */
+  {
+    key: 'report:marketing:view',
+    label: '营销收入报告',
+    desc: '查看营销收入汇总与销售明细',
+    group: '薪酬佣金计算',
+  },
 
   /* ============================================================
    * 4、综合设置
    * ============================================================ */
+  {
+    key: 'position:add',
+    label: '新增职位',
+    desc: '在方案中新增职位',
+    group: '综合设置',
+  },
+  {
+    key: 'position:delete',
+    label: '删除职位',
+    desc: '从方案中删除职位',
+    group: '综合设置',
+  },
+  {
+    key: 'position:rename',
+    label: '职位名称更改',
+    desc: '修改职位的显示名称',
+    group: '综合设置',
+  },
+  {
+    key: 'headcount:edit',
+    label: '修改职位人数',
+    desc: '修改各职位的在编人数',
+    group: '综合设置',
+  },
   {
     key: 'user:add',
     label: '用户添加',

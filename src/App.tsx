@@ -1,10 +1,12 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import RouteGuard from './components/RouteGuard';
+import AppLayout from './components/AppLayout';                    // ⭐ 新增
 import LoginPage from './pages/LoginPage';
 import CompensationPage from './pages/CompensationPlanPage';
 import PayrollPage from './pages/payroll/PayrollPage';
 import SimulationPage from './pages/SimulationPage';
+import MarketingReportPage from './pages/marketing/MarketingReportPage';   // ⭐ 新增
 import NoPermissionPage from './pages/NoPermissionPage';
 
 const App: React.FC = () => (
@@ -13,7 +15,7 @@ const App: React.FC = () => (
     <Route path="/login" element={<LoginPage />} />
     <Route path="/no-permission" element={<NoPermissionPage />} />
 
-    {/* 受保护 */}
+    {/* 受保护（统一包裹 AppLayout） */}
     <Route
       path="/"
       element={
@@ -26,7 +28,9 @@ const App: React.FC = () => (
       path="/compensation"
       element={
         <RouteGuard permission="plan:view">
-          <CompensationPage />
+          <AppLayout>
+            <CompensationPage />
+          </AppLayout>
         </RouteGuard>
       }
     />
@@ -34,7 +38,9 @@ const App: React.FC = () => (
       path="/payroll"
       element={
         <RouteGuard permission="payroll:calc">
-          <PayrollPage />
+          <AppLayout>
+            <PayrollPage />
+          </AppLayout>
         </RouteGuard>
       }
     />
@@ -42,7 +48,19 @@ const App: React.FC = () => (
       path="/simulation"
       element={
         <RouteGuard permission="simulation:access">
-          <SimulationPage />
+          <AppLayout>
+            <SimulationPage />
+          </AppLayout>
+        </RouteGuard>
+      }
+    />
+    <Route
+      path="/marketing-report"
+      element={
+        <RouteGuard permission="report:marketing:view">
+          <AppLayout>
+            <MarketingReportPage />
+          </AppLayout>
         </RouteGuard>
       }
     />

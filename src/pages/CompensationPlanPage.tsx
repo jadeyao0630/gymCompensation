@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Plus, Calculator, Sliders, Cloud, CloudOff, Undo2, Loader2,
-  CheckCircle2, AlertCircle, Users, Wallet, Briefcase
+  CheckCircle2, AlertCircle, Users, Wallet, Briefcase,
+  BarChart3,
 } from 'lucide-react';
 import type { PositionCategory, MonthlyCompensationPlan, PositionConfig } from '../types/compensation';
 import { getCategoryLabel } from '../constants/categories';
@@ -551,6 +552,15 @@ const CompensationPlanPage: React.FC = () => {
                 }`}
               >
                 <Calculator className="w-4 h-4" /> 去计算薪酬
+              </button>
+            )}
+            {/* ⭐ 新增：营销收入 */}
+            {hasPermission('report:marketing:view', storeId) && (
+              <button
+                onClick={() => navigate('/marketing-report')}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:from-fuchsia-700 hover:to-pink-700 text-white shadow-fuchsia-500/20"
+              >
+                <BarChart3 className="w-4 h-4" /> 营销收入
               </button>
             )}
           </div>
