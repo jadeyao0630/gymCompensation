@@ -3,7 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import RouteGuard from './components/RouteGuard';
 import LoginPage from './pages/LoginPage';
 import CompensationPage from './pages/CompensationPlanPage';
-import PayrollPage from './pages/PayrollPage';
+import PayrollPage from './pages/payroll/PayrollPage';
 import SimulationPage from './pages/SimulationPage';
 import NoPermissionPage from './pages/NoPermissionPage';
 
