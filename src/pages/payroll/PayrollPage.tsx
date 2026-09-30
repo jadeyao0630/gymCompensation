@@ -1,11 +1,19 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Calculator } from 'lucide-react';
-import type { MonthlyCompensationPlan, CompensationStore } from '../../types/compensation';
+import type {
+  MonthlyCompensationPlan,
+  CompensationStore,
+} from '../../types/compensation';
 import { usePayroll } from '../../hooks/usePayroll';
 import type { PayrollResult, Department } from '../../utils/payroll';
 import { exportPayrollTableToExcel } from '../../utils/exportPayrollTable';
 import { fetchPlanByMonth } from '../../api/compensation';
+import {
+  fetchStaffStatus,
+  saveStaffStatus,
+  type StaffStatusItem,
+} from '../../api/payrollStatus';                                     // ⭐ 新增
 import MissingPositionConfigDialog from '../../components/MissingPositionConfigDialog';
 import StoreSwitcher from '../../components/StoreSwitcher';
 import { useStore } from '../../contexts/StoreContext';
@@ -13,11 +21,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import { getStoreById } from '../../constants/stores';
 import { PositionEditDialog } from '../../components/PositionEditDialog';
 
-// 导入抽离的 Hooks
 import { usePayrollStorage } from '../../hooks/usePayrollStorage';
 import { usePayrollCalculation } from '../../hooks/usePayrollCalculation';
 
-// 导入子组件
 import { PayrollHeader } from './PayrollHeader';
 import { PayrollToolbar } from './PayrollToolbar';
 import { PayrollSummary } from './PayrollSummary';
@@ -36,42 +42,54 @@ const PayrollPage: React.FC = () => {
 
   const opsViewEnabled = hasPermission('ops:view', storeId);
 
-  // 使用存储 Hook
+  /* ⭐ storage：新增 excluded 相关 */
   const {
     fullStore, setFullStore,
     overridesByStore, setOverridesByStore,
     newbieByStore, setNewbieByStore,
-    persistNewbie, savePlanToStorage,
+    excludedByStore, setExcludedByStore,                          // ⭐
+    persistNewbie,
+    persistExcluded,                                               // ⭐
+    savePlanToStorage,
   } = usePayrollStorage();
 
-  // 页面独有状态
-  const [selectedMonth, setSelectedMonth] = useState<string>(searchParams.get('month') || '');
+  const [selectedMonth, setSelectedMonth] = useState<string>(
+    searchParams.get('month') || ''
+  );
   const [missing, setMissing] = useState<string[]>([]);
   const [missingDialogOpen, setMissingDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('department');
   const [hideExcluded, setHideExcluded] = useState<boolean>(true);
-  const [resultsByStore, setResultsByStore] = useState<Record<string, PayrollResult[]>>({});
-  const [performancesByStore, setPerformancesByStore] = useState<Record<string, any[]>>({});
+
+  const [resultsByStore, setResultsByStore] = useState<
+    Record<string, PayrollResult[]>
+  >({});
+  const [performancesByStore, setPerformancesByStore] = useState<
+    Record<string, any[]>
+  >({});
   const [expanded, setExpanded] = useState<Record<Department, boolean>>({
     会籍: true, 私教: true, 泳教: true, 运营: true,
   });
-  const [excludedByStore, setExcludedByStore] = useState<Record<string, Set<string>>>({});
   const [editingStaff, setEditingStaff] = useState<PayrollResult | null>(null);
 
-  /* ⭐ 防止重复拉取方案详情 */
+  /* ⭐ 防重复拉取方案 */
   const fetchedKeyRef = useRef<string>('');
   /* ⭐ 月份初始化只跑一次 */
   const initializedRef = useRef(false);
+  /* ⭐ 员工状态同步防抖 timer */
+  const syncTimerRef = useRef<number | null>(null);
 
-  // 派生状态
+  /* 派生 */
   const store: CompensationStore = fullStore[storeId] || {};
   const allResults: PayrollResult[] = resultsByStore[storeId] || [];
   const excludedSet: Set<string> = excludedByStore[storeId] || new Set();
   const overrides = overridesByStore[storeId] || {};
   const newbieSet: Set<string> = newbieByStore[storeId] || new Set();
-  const currentPlan: MonthlyCompensationPlan | undefined = selectedMonth ? store[selectedMonth] : undefined;
+  const currentPlan: MonthlyCompensationPlan | undefined = selectedMonth
+    ? store[selectedMonth]
+    : undefined;
 
-  // 使用计算 Hook
+  /* 计算 Hook */
   const {
     updateAttendance,
     handleUpdateMemberCommission,
@@ -85,14 +103,84 @@ const PayrollPage: React.FC = () => {
     setResultsByStore,
   });
 
-  // 环境变量
   const username = import.meta.env.VITE_TEST_USERNAME || '';
   const password = import.meta.env.VITE_TEST_PASSWORD || '';
-  const { run, loading, error } = usePayroll({ username, password, busId: storeId });
+  const { run, loading, error } = usePayroll({
+    username,
+    password,
+    busId: storeId,
+  });
 
   /* ============================================================
-   * ⭐ 月份初始化：只执行一次
-   *   优先级：URL > 最新月份 > 当前月
+   * ⭐ 同步员工状态到后端（防抖）
+   * ============================================================ */
+  const syncStaffStatusToServer = useCallback(
+    (newbie: Set<string>, excluded: Set<string>) => {
+      if (syncTimerRef.current) {
+        window.clearTimeout(syncTimerRef.current);
+      }
+      syncTimerRef.current = window.setTimeout(async () => {
+        try {
+          const ids = new Set<string>([...newbie, ...excluded]);
+          const statuses: StaffStatusItem[] = Array.from(ids).map((id) => ({
+            staffId: id,
+            isNewbie: newbie.has(id),
+            isExcluded: excluded.has(id),
+          }));
+          await saveStaffStatus(storeId, selectedMonth, statuses);
+        } catch (e) {
+          console.warn('[PayrollPage] 保存员工状态到后端失败', e);
+        }
+      }, 600);
+    },
+    [storeId, selectedMonth]
+  );
+
+  /* ============================================================
+   * ⭐ 从后端拉取员工状态（新人 + 排除）
+   * ============================================================ */
+  useEffect(() => {
+    if (!storeId || !selectedMonth) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const statuses = await fetchStaffStatus(storeId, selectedMonth);
+        if (cancelled) return;
+
+        const newbie = new Set<string>();
+        const excluded = new Set<string>();
+        statuses.forEach((s) => {
+          if (s.isNewbie) newbie.add(s.staffId);
+          if (s.isExcluded) excluded.add(s.staffId);
+        });
+
+        /* 只有当后端有数据时才覆盖本地，避免空数据清空用户刚改的状态 */
+        if (statuses.length > 0) {
+          setNewbieByStore((prev) => {
+            const next = { ...prev, [storeId]: newbie };
+            persistNewbie(next);
+            return next;
+          });
+          setExcludedByStore((prev) => {
+            const next = { ...prev, [storeId]: excluded };
+            persistExcluded(next);
+            return next;
+          });
+        }
+      } catch (e) {
+        console.warn('[PayrollPage] 拉取员工状态失败，使用本地缓存', e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeId, selectedMonth]);
+
+  /* ============================================================
+   * 月份初始化：只执行一次
    * ============================================================ */
   useEffect(() => {
     if (initializedRef.current) return;
@@ -117,28 +205,23 @@ const PayrollPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId]);
 
-  /* ============================================================
-   * ⭐ URL 月份变化时同步（加 m !== selectedMonth 防死循环）
-   * ============================================================ */
+  /* URL 月份同步（带 m !== selectedMonth 守卫） */
   useEffect(() => {
     const m = searchParams.get('month');
     if (m && m !== selectedMonth) {
       setSelectedMonth(m);
-      fetchedKeyRef.current = ''; // 允许重新拉取
+      fetchedKeyRef.current = '';
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  /* ============================================================
-   * ⭐ 门店切换时重置请求标记
-   * ============================================================ */
+  /* 门店切换重置 */
   useEffect(() => {
     fetchedKeyRef.current = '';
   }, [storeId]);
 
   /* ============================================================
-   * ⭐ 远程拉取方案（防重复）
-   *   依赖数组不含 fullStore / savePlanToStorage（如果它不稳定）
+   * 拉取方案详情（防重复）
    * ============================================================ */
   useEffect(() => {
     if (!storeId || !selectedMonth) return;
@@ -146,7 +229,6 @@ const PayrollPage: React.FC = () => {
     const key = `${storeId}:${selectedMonth}`;
     if (fetchedKeyRef.current === key) return;
 
-    // 本地已有完整数据 → 直接标记，不请求
     const localPlan = fullStore[storeId]?.[selectedMonth];
     if (localPlan && localPlan.positions && localPlan.positions.length > 0) {
       fetchedKeyRef.current = key;
@@ -154,7 +236,7 @@ const PayrollPage: React.FC = () => {
     }
 
     let cancelled = false;
-    fetchedKeyRef.current = key; // 立即打标记，防 StrictMode 重复
+    fetchedKeyRef.current = key;
 
     (async () => {
       try {
@@ -166,11 +248,13 @@ const PayrollPage: React.FC = () => {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId, selectedMonth]);
 
-  // 职位选项
+  /* 职位选项 */
   const positionOptions = useMemo(() => {
     const set = new Set<string>();
     (currentPlan?.positions || []).forEach((p) => set.add(p.title));
@@ -178,7 +262,7 @@ const PayrollPage: React.FC = () => {
     return Array.from(set);
   }, [currentPlan]);
 
-  // 汇总数据
+  /* 汇总 */
   const summary = useMemo(() => {
     const filtered = allResults.filter((r) => !excludedSet.has(r.staffId));
     if (filtered.length === 0) return null;
@@ -194,31 +278,47 @@ const PayrollPage: React.FC = () => {
     );
   }, [allResults, excludedSet]);
 
-  // 事件处理
+  /* ============================================================
+   * ⭐ toggleExclude：本地 + 后端双写
+   * ============================================================ */
   const toggleExclude = (staffId: string) => {
     setExcludedByStore((prev) => {
       const cur = new Set(prev[storeId] || []);
       if (cur.has(staffId)) cur.delete(staffId);
       else cur.add(staffId);
-      return { ...prev, [storeId]: cur };
+
+      const next = { ...prev, [storeId]: cur };
+      persistExcluded(next);                                    // ⭐ 本地
+      syncStaffStatusToServer(newbieSet, cur);                  // ⭐ 后端
+      return next;
     });
   };
 
-  const toggleDept = (dept: Department) => setExpanded((p) => ({ ...p, [dept]: !p[dept] }));
+  const toggleDept = (dept: Department) =>
+    setExpanded((p) => ({ ...p, [dept]: !p[dept] }));
 
+  /* ============================================================
+   * ⭐ handleToggleNewbie：本地 + 后端双写
+   * ============================================================ */
   const handleToggleNewbie = (staffId: string) => {
+    let updatedNewbie: Set<string> | null = null;
+
     setNewbieByStore((prev) => {
       const cur = new Set(prev[storeId] || []);
       const willBeNewbie = !cur.has(staffId);
       if (willBeNewbie) cur.add(staffId);
       else cur.delete(staffId);
+
       const next = { ...prev, [storeId]: cur };
-      persistNewbie(next);
+      persistNewbie(next);                                      // ⭐ 本地
+      updatedNewbie = cur;
+      syncStaffStatusToServer(cur, excludedSet);                // ⭐ 后端
       return next;
     });
-    // 触发重算
-    calcToggleNewbie(staffId, (id, willBeNewbie) => {
-      // 这里回调主要用于通知 Hook 状态已更新，实际重算在 Hook 内部完成
+
+    /* 触发重算 */
+    calcToggleNewbie(staffId, () => {
+      // 回调空实现
     });
   };
 
@@ -323,7 +423,7 @@ const PayrollPage: React.FC = () => {
             canExportPayroll={hasPermission('export:payroll', storeId)}
             onMonthChange={(m) => {
               setSelectedMonth(m);
-              fetchedKeyRef.current = ''; // ⭐ 允许重新拉取
+              fetchedKeyRef.current = '';
               navigate(`/payroll?month=${m}`, { replace: true });
             }}
             onViewModeChange={setViewMode}
