@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom';
 import { BarChart3, Loader2, AlertCircle, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import StoreSwitcher from '../../components/StoreSwitcher';
+import NavButtons from '../../components/NavButtons';
 import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { getStoreById } from '../../constants/stores';
@@ -12,6 +13,7 @@ import {
   fmtDate,
   getMonthRange,
   getLastMonth,
+  getBusinessTypeLabel,
 } from './utils/aggregate';
 import { DateRangePicker } from './components/DateRangePicker';
 import { SummaryCards } from './components/SummaryCards';
@@ -25,17 +27,12 @@ const MarketingReportPage: React.FC = () => {
   const { storeId } = useStore();
   const { hasPermission } = useAuth();
 
-  /* ⭐ 权限控制 */
   const canView = hasPermission('report:marketing:view', storeId);
-
   const storeName = getStoreById(storeId)?.name || '门店';
 
-  /* ⭐ 默认日期范围：本月 */
   const initialRange = useMemo(() => {
     const now = new Date();
-    const month = `${now.getFullYear()}-${String(
-      now.getMonth() + 1
-    ).padStart(2, '0')}`;
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const { begin, end } = getMonthRange(month);
     return { begin, end };
   }, []);
@@ -46,7 +43,6 @@ const MarketingReportPage: React.FC = () => {
   const [error, setError] = useState('');
   const [list, setList] = useState<FinancialFlowItem[]>([]);
 
-  /* ⭐ 拉取数据 */
   const fetchData = useCallback(async () => {
     if (!storeId || !beginDate || !endDate) return;
     setLoading(true);
@@ -54,7 +50,7 @@ const MarketingReportPage: React.FC = () => {
     try {
       const res = await getCardOrderList({
         bus_id: storeId,
-        sale_id: '', // ⭐ 留空，拉全店
+        sale_id: '',
         begin_date: beginDate,
         end_date: endDate,
         page_no: 1,
@@ -63,21 +59,17 @@ const MarketingReportPage: React.FC = () => {
       setList(res.list || []);
     } catch (e: any) {
       console.error('[MarketingReport] 加载失败', e);
-      setError(
-        e?.response?.data?.errormsg || e?.message || '加载数据失败'
-      );
+      setError(e?.response?.data?.errormsg || e?.message || '加载数据失败');
     } finally {
       setLoading(false);
     }
   }, [storeId, beginDate, endDate]);
 
-  /* 初次 & 门店变化时拉取 */
   useEffect(() => {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId]);
 
-  /* ⭐ 快捷日期 */
   const handleQuick = (range: string) => {
     const now = new Date();
     let begin = '';
@@ -94,9 +86,7 @@ const MarketingReportPage: React.FC = () => {
         break;
       }
       case 'month': {
-        const month = `${now.getFullYear()}-${String(
-          now.getMonth() + 1
-        ).padStart(2, '0')}`;
+        const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
         const r = getMonthRange(month);
         begin = r.begin;
         end = r.end;
@@ -119,14 +109,11 @@ const MarketingReportPage: React.FC = () => {
 
     setBeginDate(begin);
     setEndDate(end);
-    // 立即拉取
     setTimeout(() => fetchData(), 0);
   };
 
-  /* 汇总 */
   const summary = useMemo(() => aggregateOrders(list), [list]);
 
-  /* ⭐ 导出 Excel */
   const handleExport = () => {
     const wb = XLSX.utils.book_new();
 
@@ -147,31 +134,21 @@ const MarketingReportPage: React.FC = () => {
     XLSX.utils.book_append_sheet(wb, ws1, '汇总');
 
     /* Sheet 2：按类型 */
-    const typeRows: any[][] = [
-      ['业务类型', '订单数', '卡金额', '实收金额'],
-    ];
+    const typeRows: any[][] = [['业务类型', '订单数', '卡金额', '实收金额']];
     summary.types.forEach((t) => {
-      typeRows.push([t.type, t.count, t.cardAmount, t.incomeAmount]);
+      typeRows.push([t.label, t.count, t.cardAmount, t.incomeAmount]);
     });
     const ws2 = XLSX.utils.aoa_to_sheet(typeRows);
-    ws2['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 14 }];
+    ws2['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 14 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, ws2, '按类型');
 
     /* Sheet 3：卡种细分 */
-    const cardRows: any[][] = [
-      ['业务类型', '卡种', '数量', '卡金额', '实收金额'],
-    ];
+    const cardRows: any[][] = [['业务类型', '卡种', '数量', '卡金额', '实收金额']];
     summary.cards.forEach((c) => {
-      cardRows.push([c.type, c.cardName, c.count, c.cardAmount, c.incomeAmount]);
+      cardRows.push([c.label, c.cardName, c.count, c.cardAmount, c.incomeAmount]);
     });
     const ws3 = XLSX.utils.aoa_to_sheet(cardRows);
-    ws3['!cols'] = [
-      { wch: 14 },
-      { wch: 24 },
-      { wch: 10 },
-      { wch: 14 },
-      { wch: 14 },
-    ];
+    ws3['!cols'] = [{ wch: 20 }, { wch: 24 }, { wch: 10 }, { wch: 14 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, ws3, '卡种细分');
 
     /* Sheet 4：收款方式 */
@@ -183,45 +160,26 @@ const MarketingReportPage: React.FC = () => {
 
     /* Sheet 5：订单明细 */
     const detailRows: any[][] = [
-      [
-        '日期',
-        '会员名',
-        '卡名',
-        '类型',
-        '收款方式',
-        '业绩归属',
-        '卡金额',
-        '实收',
-      ],
+      ['日期', '会员名', '卡名', '备注', '类型', '收款方式', '业绩归属', '卡金额', '实收'],
     ];
     list.forEach((item) => {
-      const type =
-        summary.cards.find((c) => c.cardName === item.card_name)?.type || '';
+      const label = getBusinessTypeLabel(item);
       detailRows.push([
         item.deal_time || '',
         item.username || '',
         item.card_name || '',
-        type,
-        (item.pay_detail || [])
-          .map((p) => `${p.pay_type} ¥${p.amount}`)
-          .join(' + '),
-        (item.marketers_detail || [])
-          .map((m) => `${m.name}[${m.role}] ${m.percent} ¥${m.amount}`)
-          .join('\n'),
+        item.remark || '',
+        label,
+        (item.pay_detail || []).map((p) => `${p.pay_type} ¥${p.amount}`).join(' + '),
+        (item.marketers_detail || []).map((m) => `${m.name}[${m.role}] ${m.percent} ¥${m.amount}`).join('\n'),
         Number(item.amount || 0),
         Number(item.income_amount || item.amount || 0),
       ]);
     });
     const ws5 = XLSX.utils.aoa_to_sheet(detailRows);
     ws5['!cols'] = [
-      { wch: 18 },
-      { wch: 12 },
-      { wch: 20 },
-      { wch: 10 },
-      { wch: 24 },
-      { wch: 32 },
-      { wch: 12 },
-      { wch: 12 },
+      { wch: 18 }, { wch: 12 }, { wch: 20 }, { wch: 30 },
+      { wch: 18 }, { wch: 24 }, { wch: 32 }, { wch: 12 }, { wch: 12 },
     ];
     XLSX.utils.book_append_sheet(wb, ws5, '订单明细');
 
@@ -229,7 +187,6 @@ const MarketingReportPage: React.FC = () => {
     XLSX.writeFile(wb, `${safeName}_营销收入_${beginDate}_${endDate}.xlsx`);
   };
 
-  /* ⭐ 无权限直接跳转 */
   if (!canView) {
     return <Navigate to="/no-permission" replace />;
   }
@@ -267,9 +224,13 @@ const MarketingReportPage: React.FC = () => {
           </div>
         </div>
 
-        {/* 门店 + 日期 */}
-        <div className="mb-4">
+        {/* ⭐ 顶部工具行 */}
+        <div className="mb-4 flex flex-wrap items-center gap-3">
           <StoreSwitcher />
+
+          <div className="flex-1" />
+
+          <NavButtons active="marketing" />
         </div>
 
         <DateRangePicker
@@ -284,7 +245,6 @@ const MarketingReportPage: React.FC = () => {
           onRefresh={fetchData}
         />
 
-        {/* 加载中 */}
         {loading && (
           <div className="flex items-center justify-center py-12 text-gray-400">
             <Loader2 className="w-5 h-5 animate-spin mr-2" />
@@ -292,7 +252,6 @@ const MarketingReportPage: React.FC = () => {
           </div>
         )}
 
-        {/* 错误 */}
         {!loading && error && (
           <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 text-sm text-red-700 flex items-center gap-2">
             <AlertCircle className="w-4 h-4" />
@@ -300,7 +259,6 @@ const MarketingReportPage: React.FC = () => {
           </div>
         )}
 
-        {/* 内容 */}
         {!loading && !error && (
           <>
             <SummaryCards summary={summary} />

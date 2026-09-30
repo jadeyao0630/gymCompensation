@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Plus, Calculator, Sliders, Cloud, CloudOff, Undo2, Loader2,
+  Plus, Cloud, CloudOff, Undo2, Loader2,
   CheckCircle2, AlertCircle, Users, Wallet, Briefcase,
-  BarChart3,
 } from 'lucide-react';
 import type { PositionCategory, MonthlyCompensationPlan, PositionConfig } from '../types/compensation';
 import { getCategoryLabel } from '../constants/categories';
@@ -23,6 +22,7 @@ import StoreSwitcher from '../components/StoreSwitcher';
 import PermissionGate from '../components/PermissionGate';
 import { CompensationGuideDialog } from '../components/CompensationGuideDialog';
 import { CompensationEmptyState } from '../components/CompensationEmptyState';
+import NavButtons from '../components/NavButtons';
 import { useStore } from '../contexts/StoreContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompensationPlan } from '../hooks/useCompensationPlan';
@@ -44,31 +44,22 @@ const CompensationPlanPage: React.FC = () => {
   const [importing, setImporting] = useState(false);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
 
-  /* ⭐ 记录已请求过的 storeId:month，避免无限请求 */
   const fetchedKeyRef = useRef<string>('');
-
   const store = fullStore[storeId] || {};
 
-  /* ============================================================
-   * 权限
-   * ============================================================ */
+  /* 权限 */
   const canEditPlan = hasPermission('plan:edit', storeId);
   const canEditTarget = hasPermission('target:edit', storeId);
   const opsViewEnabled = hasPermission('ops:view', storeId);
-  /* 月份 / 导入导出权限 */
   const canAddMonth = hasPermission('month:add', storeId);
   const canDeleteMonth = hasPermission('month:delete', storeId);
   const canImportPlan = hasPermission('plan:import', storeId);
   const canExportPlan = hasPermission('plan:export', storeId);
-  /* 职位细粒度权限 */
   const canAddPosition = hasPermission('position:add', storeId);
   const canDeletePosition = hasPermission('position:delete', storeId);
   const canRenamePosition = hasPermission('position:rename', storeId);
   const canEditHeadcount = hasPermission('headcount:edit', storeId);
 
-  /* ============================================================
-   * 选中月份逻辑
-   * ============================================================ */
   useEffect(() => {
     if (isInitialSelectDoneRef.current) return;
     const months = Object.keys(store).sort();
@@ -86,23 +77,16 @@ const CompensationPlanPage: React.FC = () => {
     }
   }, [searchParams, isInitialSelectDoneRef]);
 
-  /* ⭐ 切换门店/月份时重置请求标记，允许重新拉取 */
   useEffect(() => {
     fetchedKeyRef.current = '';
   }, [storeId]);
 
-  /* ============================================================
-   * 远程拉取方案详情
-   * ⭐ 修复：用 fetchedKeyRef 标记已请求的 key，避免依赖 store 造成无限循环
-   * ============================================================ */
   useEffect(() => {
     if (!selectedMonth) return;
     if (!dbOnline) return;
-
     const key = `${storeId}:${selectedMonth}`;
     if (fetchedKeyRef.current === key) return;
 
-    // 本地已有完整数据 → 直接标记已请求，不再请求
     const localPlan = fullStore[storeId]?.[selectedMonth];
     if (localPlan && localPlan.positions && localPlan.positions.length > 0) {
       fetchedKeyRef.current = key;
@@ -110,7 +94,7 @@ const CompensationPlanPage: React.FC = () => {
     }
 
     let cancelled = false;
-    fetchedKeyRef.current = key; // 立即打标记，防止 StrictMode 重复触发
+    fetchedKeyRef.current = key;
 
     (async () => {
       try {
@@ -134,15 +118,11 @@ const CompensationPlanPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-    // ⭐ 依赖数组不含 fullStore / store
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId, selectedMonth, dbOnline]);
 
   const currentPlan = selectedMonth ? store[selectedMonth] : undefined;
 
-  /* ============================================================
-   * 数据过滤
-   * ============================================================ */
   const overviewPositions = useMemo(() => {
     const all = currentPlan?.positions || [];
     return opsViewEnabled ? all : all.filter((p) => p.title !== '运营主管');
@@ -164,12 +144,9 @@ const CompensationPlanPage: React.FC = () => {
     0
   );
 
-  /* ============================================================
-   * 操作
-   * ============================================================ */
   const handleSelectMonth = (m: string) => {
     isInitialSelectDoneRef.current = true;
-    fetchedKeyRef.current = ''; // ⭐ 切换月份允许重新拉取
+    fetchedKeyRef.current = '';
     setSelectedMonth(m);
     navigate(`/compensation?month=${m}`, { replace: true });
   };
@@ -180,11 +157,7 @@ const CompensationPlanPage: React.FC = () => {
     const target = currentPlan.positions.find((p) => p.title === title);
     if (!target) return alert(`职位「${title}」不存在`);
 
-    pushUndo(
-      currentPlan.month,
-      currentPlan,
-      disabled ? `禁用职位「${title}」` : `启用职位「${title}」`
-    );
+    pushUndo(currentPlan.month, currentPlan, disabled ? `禁用职位「${title}」` : `启用职位「${title}」`);
     const nextPlan = {
       ...currentPlan,
       positions: currentPlan.positions.map((p) =>
@@ -194,18 +167,9 @@ const CompensationPlanPage: React.FC = () => {
     persistPlan(currentPlan.month, nextPlan);
   };
 
-  /* ⭐ 导入：需要 plan:import */
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!canEditPlan) {
-      alert('无权限：设置方案');
-      e.target.value = '';
-      return;
-    }
-    if (!canImportPlan) {
-      alert('无权限：导入薪酬佣金设置');
-      e.target.value = '';
-      return;
-    }
+    if (!canEditPlan) { alert('无权限：设置方案'); e.target.value = ''; return; }
+    if (!canImportPlan) { alert('无权限：导入薪酬佣金设置'); e.target.value = ''; return; }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -257,7 +221,7 @@ const CompensationPlanPage: React.FC = () => {
       }
 
       persistPlan(month, plan);
-      fetchedKeyRef.current = ''; // ⭐ 允许后续重新拉取
+      fetchedKeyRef.current = '';
       alert(`已导入 ${file.name} → ${formatMonthLabel(month)}（${plan.positions.length} 个岗位）`);
     } catch (err: any) {
       alert((isJson ? '解析 JSON 失败：' : '解析 Excel 失败：') + (err?.message || ''));
@@ -267,7 +231,6 @@ const CompensationPlanPage: React.FC = () => {
     }
   };
 
-  /* ⭐ 新增月份：需要 month:add */
   const handleAddMonth = async (month: string, copyFrom?: string, copySimulation?: boolean) => {
     if (!canEditPlan) return alert('无权限：设置方案');
     if (!canAddMonth) return alert('无权限：新增月份');
@@ -285,7 +248,7 @@ const CompensationPlanPage: React.FC = () => {
       pushUndo(month, blank, '新增月份');
       persistPlan(month, blank);
       setSelectedMonth(month);
-      fetchedKeyRef.current = ''; // ⭐ 允许后续重新拉取
+      fetchedKeyRef.current = '';
       return;
     }
 
@@ -307,7 +270,7 @@ const CompensationPlanPage: React.FC = () => {
           await copySimulationSetting(storeId, copyFrom, month).catch(console.warn);
         }
         setSelectedMonth(month);
-        fetchedKeyRef.current = ''; // ⭐ 允许后续重新拉取
+        fetchedKeyRef.current = '';
         alert(`已复制配置到 ${formatMonthLabel(month)}`);
       } else {
         const srcPlan = store[copyFrom];
@@ -320,7 +283,7 @@ const CompensationPlanPage: React.FC = () => {
         pushUndo(month, cloned, `复制自 ${copyFrom}`);
         persistPlan(month, cloned);
         setSelectedMonth(month);
-        fetchedKeyRef.current = ''; // ⭐ 允许后续重新拉取
+        fetchedKeyRef.current = '';
         alert(`已离线复制到 ${formatMonthLabel(month)}`);
       }
     } catch (e) {
@@ -328,7 +291,6 @@ const CompensationPlanPage: React.FC = () => {
     }
   };
 
-  /* ⭐ 删除月份：需要 month:delete */
   const removeMonth = async () => {
     if (!canEditPlan) return alert('无权限：设置方案');
     if (!canDeleteMonth) return alert('无权限：删除月份');
@@ -349,7 +311,7 @@ const CompensationPlanPage: React.FC = () => {
       await deletePlan(storeId, selectedMonth).catch(() => {});
     }
 
-    fetchedKeyRef.current = ''; // ⭐ 允许后续重新拉取
+    fetchedKeyRef.current = '';
     const rest = Object.keys(store).filter((m) => m !== selectedMonth).sort();
     setSelectedMonth(rest.length > 0 ? rest[rest.length - 1] : '');
   };
@@ -367,10 +329,8 @@ const CompensationPlanPage: React.FC = () => {
     persistPlan(selectedMonth, { ...currentPlan, ...updates });
   };
 
-  /* 修改职位：细分 人数 / 名称 权限 */
   const updatePosition = (posId: string, updates: Partial<PositionConfig>) => {
     if (!currentPlan) return;
-
     const keys = Object.keys(updates);
     const onlyTarget = keys.length === 1 && keys[0] === 'performanceTarget';
     const containsHeadcount = keys.includes('headcount');
@@ -396,7 +356,6 @@ const CompensationPlanPage: React.FC = () => {
     );
   };
 
-  /* 新增职位：需要 position:add */
   const addPosition = () => {
     if (!canEditPlan) return alert('无权限：设置方案');
     if (!canAddPosition) return alert('无权限：新增职位');
@@ -422,7 +381,6 @@ const CompensationPlanPage: React.FC = () => {
     );
   };
 
-  /* 删除职位：需要 position:delete */
   const removePosition = (posId: string) => {
     if (!canEditPlan) return alert('无权限：设置方案');
     if (!canDeletePosition) return alert('无权限：删除职位');
@@ -435,7 +393,6 @@ const CompensationPlanPage: React.FC = () => {
     );
   };
 
-  /* ⭐ 导出：需要 plan:export */
   const handleExport = () => {
     if (!canExportPlan) return alert('无权限：导出薪酬佣金设置');
     if (!currentPlan) return;
@@ -450,7 +407,6 @@ const CompensationPlanPage: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  /* 状态徽章 */
   const StatusBadge = () => {
     if (!dbOnline) {
       return (
@@ -493,77 +449,34 @@ const CompensationPlanPage: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <PageHeader selectedMonth={selectedMonth} storeId={storeId} />
 
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3 flex-wrap">
-            <StoreSwitcher />
-            <StatusBadge />
+        {/* ⭐ 顶部工具行：门店/状态/撤销 在左，NavButtons 在右 */}
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <StoreSwitcher />
+          <StatusBadge />
 
-            {canEditPlan && (
-              <button
-                onClick={() => handleUndo()}
-                disabled={undoDepth === 0}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition ${
-                  undoDepth > 0
-                    ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-                    : 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
-                }`}
-              >
-                <Undo2 className="w-3 h-3" />
-                撤销
-                {undoDepth > 0 && (
-                  <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-200 text-amber-800 text-[10px] font-bold">
-                    {undoDepth}
-                  </span>
-                )}
-              </button>
-            )}
-          </div>
+          {canEditPlan && (
+            <button
+              onClick={() => handleUndo()}
+              disabled={undoDepth === 0}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition ${
+                undoDepth > 0
+                  ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                  : 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
+              }`}
+            >
+              <Undo2 className="w-3 h-3" />
+              撤销
+              {undoDepth > 0 && (
+                <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-200 text-amber-800 text-[10px] font-bold">
+                  {undoDepth}
+                </span>
+              )}
+            </button>
+          )}
 
-          <div className="flex flex-wrap items-center gap-2">
-            {hasPermission('simulation:access', storeId) && (
-              <button
-                onClick={() =>
-                  selectedMonth
-                    ? navigate(`/simulation?month=${selectedMonth}`)
-                    : alert('请先选择月份')
-                }
-                disabled={!selectedMonth}
-                className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] ${
-                  selectedMonth
-                    ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                }`}
-              >
-                <Sliders className="w-4 h-4" /> 去测算
-              </button>
-            )}
-            {hasPermission('payroll:calc', storeId) && (
-              <button
-                onClick={() =>
-                  selectedMonth
-                    ? navigate(`/payroll?month=${selectedMonth}`)
-                    : alert('请先选择月份')
-                }
-                disabled={!selectedMonth}
-                className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] ${
-                  selectedMonth
-                    ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                }`}
-              >
-                <Calculator className="w-4 h-4" /> 去计算薪酬
-              </button>
-            )}
-            {/* ⭐ 新增：营销收入 */}
-            {hasPermission('report:marketing:view', storeId) && (
-              <button
-                onClick={() => navigate('/marketing-report')}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:from-fuchsia-700 hover:to-pink-700 text-white shadow-fuchsia-500/20"
-              >
-                <BarChart3 className="w-4 h-4" /> 营销收入
-              </button>
-            )}
-          </div>
+          <div className="flex-1" />
+
+          <NavButtons active="config" month={selectedMonth} />
         </div>
 
         <Toolbar

@@ -15,17 +15,11 @@ interface ToolbarProps {
   hasPlan: boolean;
   importing: boolean;
   importedFrom?: string;
-  /** ⭐ 是否有方案编辑权限（基础权限，plan:edit） */
   canEdit: boolean;
 
-  /* ⭐ 新增：细粒度权限（默认 true 保持向后兼容） */
-  /** 新增月份权限 */
   canAddMonth?: boolean;
-  /** 删除月份权限 */
   canDeleteMonth?: boolean;
-  /** 导入薪酬佣金设置权限 */
   canImport?: boolean;
-  /** 导出薪酬佣金设置权限 */
   canExport?: boolean;
 
   onSelectMonth: (m: string) => void;
@@ -52,13 +46,11 @@ const Toolbar: React.FC<ToolbarProps> = ({
   onImport,
   onExport,
 }) => {
-  /* ⭐ 排序后的月份列表（升序，最新在最后） */
   const sortedMonths = React.useMemo(
     () => months.slice().sort(),
     [months]
   );
 
-  /* ⭐ 各按钮的最终可用状态 */
   const addMonthEnabled = canEdit && canAddMonth;
   const deleteMonthEnabled = canEdit && canDeleteMonth && hasPlan;
   const importEnabled = canEdit && canImport && !importing;
@@ -87,7 +79,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
           </select>
         </div>
 
-        {/* ⭐ 新增月份（需要 plan:edit + month:add） */}
+        {/* 新增月份 */}
         {canEdit && (
           <button
             type="button"
@@ -117,7 +109,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
 
         <div className="flex-1" />
 
-        {/* ⭐ 导入（需要 plan:edit + plan:import） */}
+        {/* 导入 */}
         {canEdit && (
           <label
             className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition ${
@@ -154,7 +146,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
           </label>
         )}
 
-        {/* ⭐ 导出（需要 plan:export） */}
+        {/* 导出 */}
         <button
           type="button"
           onClick={onExport}
@@ -176,7 +168,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
           导出
         </button>
 
-        {/* ⭐ 删除月份（需要 plan:edit + month:delete） */}
+        {/* 删除月份 */}
         {canEdit && (
           <button
             type="button"

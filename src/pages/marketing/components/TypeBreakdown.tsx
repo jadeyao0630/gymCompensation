@@ -32,13 +32,14 @@ export const TypeBreakdown: React.FC<{ summary: OverallSummary }> = ({
       <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 gap-4 p-5">
         {summary.types.map((t) => {
           const style = TYPE_STYLE[t.type] || TYPE_STYLE['其他'];
+          /* ⭐ 用 label（其他会显示"其他 (购卡)"） */
           return (
             <div
-              key={t.type}
+              key={t.label}
               className={`rounded-xl border ${style.border} ${style.bg} p-4`}
             >
-              <div className="text-xs font-medium text-gray-500 mb-2">
-                {t.type}
+              <div className="text-xs font-medium text-gray-500 mb-2 truncate" title={t.label}>
+                {t.label}
               </div>
               <div className="space-y-1">
                 <div className="flex justify-between text-xs">

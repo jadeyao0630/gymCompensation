@@ -141,6 +141,10 @@ export interface CardOrderListParams {
 export async function getCardOrderList(
   params: CardOrderListParams
 ): Promise<{ list: FinancialFlowItem[]; totalAmount: number }> {
+  /* ⭐ 从环境变量读取测试账号（和 usePayroll 里保持一致） */
+  const username = import.meta.env.VITE_TEST_USERNAME || '';
+  const password = import.meta.env.VITE_TEST_PASSWORD || '';
+
   const { data } = await api.post<FinancialFlowResponse>(
     '/api/card-order-list',
     {
@@ -150,11 +154,13 @@ export async function getCardOrderList(
       end_date: params.end_date,
       page_no: params.page_no ?? 1,
       page_size: params.page_size ?? 1000,
+      /* ⭐ 新增：上游登录凭据 */
+      username,
+      password,
     }
   );
 
   const list = data?.data?.list || [];
-  /* ⭐ 合计取「实收」 */
   const stat = data?.data?.total_stat || [];
   const shiShou = stat.find((s) => s.pay_name === '实收');
   const totalAmount = shiShou ? Number(shiShou.pay_amount) : 0;

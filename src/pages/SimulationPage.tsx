@@ -1,13 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
 import { Undo2 } from 'lucide-react';
-import type { CompensationStore, MonthlyCompensationPlan, SimulationResult } from '../types/compensation';
+import type {
+  CompensationStore,
+  MonthlyCompensationPlan,
+  SimulationResult,
+} from '../types/compensation';
 import { calcSimulation } from '../utils/simulation';
 import SimulationSettingsPanel from '../components/SimulationSettingsPanel';
 import RevenueSliderPanel from '../components/RevenueSliderPanel';
 import StoreSwitcher from '../components/StoreSwitcher';
 import { SimulationHeader } from '../components/SimulationHeader';
 import { SimulationEmptyState } from '../components/SimulationEmptyState';
+import NavButtons from '../components/NavButtons';              // ⭐ 新增
 import { useStore } from '../contexts/StoreContext';
 import { useAuth } from '../contexts/AuthContext';
 import { getStoreById } from '../constants/stores';
@@ -20,7 +25,9 @@ const SimulationPage: React.FC = () => {
   const { hasPermission } = useAuth();
 
   const opsViewEnabled = hasPermission('ops:view', storeId);
-  const [selectedMonth, setSelectedMonth] = useState<string>(searchParams.get('month') || '');
+  const [selectedMonth, setSelectedMonth] = useState<string>(
+    searchParams.get('month') || ''
+  );
 
   // 核心业务 Hook
   const {
@@ -32,7 +39,9 @@ const SimulationPage: React.FC = () => {
   } = useSimulation(storeId, selectedMonth);
 
   const store: CompensationStore = fullStore[storeId] || {};
-  const currentPlan: MonthlyCompensationPlan | undefined = selectedMonth ? store[selectedMonth] : undefined;
+  const currentPlan: MonthlyCompensationPlan | undefined = selectedMonth
+    ? store[selectedMonth]
+    : undefined;
 
   // 默认选中最新月份
   useEffect(() => {
@@ -41,16 +50,19 @@ const SimulationPage: React.FC = () => {
       setSelectedMonth(months[months.length - 1]);
     } else {
       const now = new Date();
-      setSelectedMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+      setSelectedMonth(
+        `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+      );
     }
-  }, [storeId]); // eslint-disable-line
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeId]);
 
   useEffect(() => {
     const m = searchParams.get('month');
     if (m) setSelectedMonth(m);
   }, [searchParams]);
 
-  // 测算结果（纯计算，依赖入参变化自动更新）
+  // 测算结果
   const simResult: SimulationResult = useMemo(() => {
     if (!currentPlan) {
       return {
@@ -81,11 +93,16 @@ const SimulationPage: React.FC = () => {
           lastSavedAt={lastSavedAt}
           selectedMonth={selectedMonth}
           onGoPayroll={() => navigate(`/payroll?month=${selectedMonth}`)}
-          onGoCompensation={() => navigate('/compensation')}
+          onGoCompensation={() => navigate(`/compensation?month=${selectedMonth}`)}
         />
 
-        <div className="mb-4">
+        {/* ⭐ 顶部工具行：StoreSwitcher 在左，NavButtons 在右 */}
+        <div className="mb-4 flex flex-wrap items-center gap-3">
           <StoreSwitcher />
+
+          <div className="flex-1" />
+
+          <NavButtons active="simulation" month={selectedMonth} />
         </div>
 
         {/* 月份选择 + 撤销 */}
