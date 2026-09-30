@@ -1,41 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Plus,
-  Calendar,
-  Users,
-  Wallet,
-  Briefcase,
-  Calculator,
-  Sliders,
-  Cloud,
-  CloudOff,
-  Undo2,
-  Loader2,
-  CheckCircle2,
-  AlertCircle,
-  Upload,
+  Plus, Calculator, Sliders, Cloud, CloudOff, Undo2, Loader2,
+  CheckCircle2, AlertCircle, Users, Wallet, Briefcase
 } from 'lucide-react';
-import type {
-  CompensationStore,
-  MonthlyCompensationPlan,
-  PositionConfig,
-  PositionCategory,
-} from '../types/compensation';
+import type { PositionCategory, MonthlyCompensationPlan, PositionConfig } from '../types/compensation';
 import { getCategoryLabel } from '../constants/categories';
 import { uid } from '../utils/id';
 import { formatMonthLabel } from '../utils/format';
 import { parseCompensationExcel } from '../utils/excelParser';
 import { calcTotalBaseSalary } from '../utils/salary';
-import {
-  fetchPlanByMonth,
-  fetchPlanList,
-  initStorePlans,
-  savePlan,
-  deletePlan,
-  copyPlan,
-  copySimulationSetting,
-} from '../api/compensation';
+import { deletePlan, copyPlan, copySimulationSetting, fetchPlanByMonth } from '../api/compensation';
 import PageHeader from '../components/PageHeader';
 import Toolbar from '../components/Toolbar';
 import StatCard from '../components/StatCard';
@@ -44,24 +19,12 @@ import PositionCard from '../components/PositionCard';
 import PositionOverview from '../components/PositionOverview';
 import MonthPickerDialog from '../components/MonthPickerDialog';
 import StoreSwitcher from '../components/StoreSwitcher';
+import PermissionGate from '../components/PermissionGate';
+import { CompensationGuideDialog } from '../components/CompensationGuideDialog';
+import { CompensationEmptyState } from '../components/CompensationEmptyState';
 import { useStore } from '../contexts/StoreContext';
 import { useAuth } from '../contexts/AuthContext';
-import PermissionGate from '../components/PermissionGate';
-
-const STORAGE_KEY = 'gym_compensation_store_v2';
-const UNDO_LIMIT = 20;
-const SAVE_DEBOUNCE_MS = 400;
-const INIT_FLAG_PREFIX = 'gym_store_initialized_';
-
-type FullStore = Record<string, CompensationStore>;
-type SaveStatus = 'idle' | 'saving' | 'saved' | 'error' | 'offline';
-
-interface UndoEntry {
-  month: string;
-  plan: MonthlyCompensationPlan;
-  label: string;
-  at: number;
-}
+import { useCompensationPlan } from '../hooks/useCompensationPlan';
 
 const CompensationPlanPage: React.FC = () => {
   const navigate = useNavigate();
@@ -69,245 +32,34 @@ const CompensationPlanPage: React.FC = () => {
   const { storeId } = useStore();
   const { hasPermission } = useAuth();
 
-  const [fullStore, setFullStore] = useState<FullStore>({});
-  const [selectedMonth, setSelectedMonth] = useState<string>(
-    searchParams.get('month') || ''
-  );
+  // 核心业务逻辑 Hook
+  const {
+    fullStore, setFullStore, persistPlan, pushUndo, handleUndo, undoDepth,
+    dbOnline, saveStatus, lastSavedAt, showGuide, setShowGuide,
+    isInitialSelectDoneRef,
+  } = useCompensationPlan(storeId);
+
+  const [selectedMonth, setSelectedMonth] = useState<string>(searchParams.get('month') || '');
   const [activeTab, setActiveTab] = useState<PositionCategory>('membership');
   const [importing, setImporting] = useState(false);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
-  const [dbOnline, setDbOnline] = useState<boolean>(true);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
-  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
 
-  const [showGuide, setShowGuide] = useState(false);
-  const [initLoading, setInitLoading] = useState(false);
+  const store = fullStore[storeId] || {};
 
-  const undoStackRef = useRef<UndoEntry[]>([]);
-  const [undoDepth, setUndoDepth] = useState(0);
-  const saveTimerRef = useRef<number | null>(null);
-  const isInitialSelectDoneRef = useRef<boolean>(false);
-
-  const store: CompensationStore = fullStore[storeId] || {};
-
-  /* 权限 */
+  // 权限
   const canEditPlan = hasPermission('plan:edit', storeId);
   const canEditTarget = hasPermission('target:edit', storeId);
   const opsViewEnabled = hasPermission('ops:view', storeId);
 
-  const persistToLocalStorage = useCallback((nextFullStore: FullStore) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextFullStore));
-    } catch (e) {
-      console.error('[CompensationPage] 写 localStorage 失败', e);
-    }
-  }, []);
-
-  const pushUndo = useCallback(
-    (month: string, plan: MonthlyCompensationPlan, label: string) => {
-      const stack = undoStackRef.current;
-      stack.push({
-        month,
-        plan: JSON.parse(JSON.stringify(plan)),
-        label,
-        at: Date.now(),
-      });
-      if (stack.length > UNDO_LIMIT) stack.shift();
-      setUndoDepth(stack.length);
-    },
-    []
-  );
-
-  const persistPlan = useCallback(
-    (month: string, plan: MonthlyCompensationPlan) => {
-      setFullStore((prev) => {
-        const next = {
-          ...prev,
-          [storeId]: { ...(prev[storeId] || {}), [month]: plan },
-        };
-        persistToLocalStorage(next);
-        return next;
-      });
-
-      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = window.setTimeout(async () => {
-        if (!dbOnline) {
-          setSaveStatus('offline');
-          return;
-        }
-        setSaveStatus('saving');
-        try {
-          await savePlan(storeId, plan);
-          setSaveStatus('saved');
-          setLastSavedAt(new Date());
-        } catch (e) {
-          console.error('[persistPlan] 保存到数据库失败', e);
-          setSaveStatus('error');
-        }
-      }, SAVE_DEBOUNCE_MS);
-    },
-    [storeId, dbOnline, persistToLocalStorage]
-  );
-
-  const handleUndo = useCallback(() => {
-    if (!canEditPlan) {
-      alert('无权限：设置方案');
-      return;
-    }
-    const stack = undoStackRef.current;
-    if (stack.length === 0) return;
-    const last = stack.pop()!;
-    setUndoDepth(stack.length);
-
-    setFullStore((prev) => {
-      const next = {
-        ...prev,
-        [storeId]: { ...(prev[storeId] || {}), [last.month]: last.plan },
-      };
-      persistToLocalStorage(next);
-      return next;
-    });
-
-    if (dbOnline) {
-      setSaveStatus('saving');
-      savePlan(storeId, last.plan)
-        .then(() => {
-          setSaveStatus('saved');
-          setLastSavedAt(new Date());
-        })
-        .catch(() => setSaveStatus('error'));
-    } else {
-      setSaveStatus('offline');
-    }
-
-    if (last.month !== selectedMonth) setSelectedMonth(last.month);
-    console.log('[undo] 已撤销:', last.label);
-  }, [storeId, selectedMonth, dbOnline, persistToLocalStorage, canEditPlan]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
-        if (undoStackRef.current.length > 0) {
-          e.preventDefault();
-          handleUndo();
-        }
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [handleUndo]);
-
-  useEffect(() => {
-    const v1 = localStorage.getItem('gym_compensation_store_v1');
-    const v2 = localStorage.getItem(STORAGE_KEY);
-    if (v1 && !v2) {
-      try {
-        const old = JSON.parse(v1);
-        const migrated: FullStore = { '12279': old };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
-      } catch (e) {
-        console.error('[migrate] 失败', e);
-      }
-    }
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        setFullStore(JSON.parse(saved));
-      } catch {}
-    }
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setInitLoading(true);
-
-        let list = await fetchPlanList(storeId);
-        if (cancelled) return;
-
-        if (list.length === 0) {
-          const initFlagKey = `${INIT_FLAG_PREFIX}${storeId}`;
-          const wasInitialized = localStorage.getItem(initFlagKey);
-
-          if (!wasInitialized) {
-            console.log('[CompensationPage] 门店首次进入，自动初始化…');
-            const initRes = await initStorePlans(storeId);
-            if (cancelled) return;
-            localStorage.setItem(initFlagKey, '1');
-
-            list = await fetchPlanList(storeId);
-            if (cancelled) return;
-
-            if (initRes.initialized) setShowGuide(true);
-          } else {
-            console.log(
-              '[CompensationPage] 门店已初始化过但当前无方案，不再自动补'
-            );
-          }
-        }
-
-        setDbOnline(true);
-
-        setFullStore((prev) => {
-          const curStore = prev[storeId] || {};
-          const nextStore: CompensationStore = {};
-
-          list.forEach((p) => {
-            const local = curStore[p.month];
-            if (local && local.positions && local.positions.length > 0) {
-              nextStore[p.month] = local;
-            } else {
-              nextStore[p.month] = {
-                month: p.month,
-                periodLabel: p.periodLabel,
-                positions: [],
-                importedAt: p.importedAt,
-              };
-            }
-          });
-
-          const next = { ...prev, [storeId]: nextStore };
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-          } catch {}
-          return next;
-        });
-      } catch (e) {
-        console.warn('[CompensationPage] API 不可用，使用本地缓存', e);
-        if (!cancelled) setDbOnline(false);
-      } finally {
-        if (!cancelled) setInitLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [storeId]);
-
-  useEffect(() => {
-    undoStackRef.current = [];
-    setUndoDepth(0);
-    isInitialSelectDoneRef.current = false;
-  }, [storeId]);
-
+  // 选中月份逻辑
   useEffect(() => {
     if (isInitialSelectDoneRef.current) return;
-    const months = Object.keys(fullStore[storeId] || {}).sort();
+    const months = Object.keys(store).sort();
     if (months.length > 0) {
       setSelectedMonth(months[months.length - 1]);
       isInitialSelectDoneRef.current = true;
     }
-  }, [storeId, fullStore]);
-
-  useEffect(() => {
-    if (isInitialSelectDoneRef.current) return;
-    if (selectedMonth) return;
-    const months = Object.keys(fullStore[storeId] || {}).sort();
-    if (months.length === 0) return;
-    setSelectedMonth(months[months.length - 1]);
-    isInitialSelectDoneRef.current = true;
-  }, [storeId, fullStore, selectedMonth]);
+  }, [storeId, store, isInitialSelectDoneRef]);
 
   useEffect(() => {
     const m = searchParams.get('month');
@@ -315,11 +67,12 @@ const CompensationPlanPage: React.FC = () => {
       setSelectedMonth(m);
       isInitialSelectDoneRef.current = true;
     }
-  }, [searchParams]);
+  }, [searchParams, isInitialSelectDoneRef]);
 
+  // 远程拉取详情
   useEffect(() => {
     if (!selectedMonth) return;
-    const localPlan = fullStore[storeId]?.[selectedMonth];
+    const localPlan = store[selectedMonth];
     if (localPlan && localPlan.positions && localPlan.positions.length > 0) return;
     if (!dbOnline) return;
 
@@ -329,103 +82,56 @@ const CompensationPlanPage: React.FC = () => {
         const remote = await fetchPlanByMonth(storeId, selectedMonth);
         if (cancelled || !remote) return;
         setFullStore((prev) => {
-          const next = {
-            ...prev,
-            [storeId]: { ...(prev[storeId] || {}), [selectedMonth]: remote },
-          };
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-          } catch {}
+          const next = { ...prev, [storeId]: { ...(prev[storeId] || {}), [selectedMonth]: remote } };
+          try { localStorage.setItem('gym_compensation_store_v2', JSON.stringify(next)); } catch {}
           return next;
         });
-      } catch (e) {
-        console.warn('[CompensationPage] 加载方案详情失败', e);
-      }
+      } catch (e) { console.warn('[CompensationPlan] 加载方案详情失败', e); }
     })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeId, selectedMonth, dbOnline]);
+    return () => { cancelled = true; };
+  }, [storeId, selectedMonth, dbOnline, store, setFullStore]);
 
   const currentPlan = selectedMonth ? store[selectedMonth] : undefined;
 
-  /* ⭐ 职位总览用：含禁用职位，仅按 ops:view 过滤运营主管 */
+  // 数据过滤
   const overviewPositions = useMemo(() => {
     const all = currentPlan?.positions || [];
-    if (!opsViewEnabled) {
-      return all.filter((p) => p.title !== '运营主管');
-    }
-    return all;
+    return opsViewEnabled ? all : all.filter((p) => p.title !== '运营主管');
   }, [currentPlan, opsViewEnabled]);
 
-  /* ⭐ 分类卡片/统计用：过滤掉禁用 + 运营主管 */
   const visiblePositions = useMemo(() => {
     const all = currentPlan?.positions.filter((p) => !p.disabled) || [];
-    if (!opsViewEnabled) {
-      return all.filter((p) => p.title !== '运营主管');
-    }
-    return all;
+    return opsViewEnabled ? all : all.filter((p) => p.title !== '运营主管');
   }, [currentPlan, opsViewEnabled]);
 
   const currentPositions = useMemo(() => {
-    const all = currentPlan?.positions.filter(
-      (p) => p.category === activeTab && !p.disabled
-    ) || [];
-    if (!opsViewEnabled) {
-      return all.filter((p) => p.title !== '运营主管');
-    }
-    return all;
+    const all = currentPlan?.positions.filter((p) => p.category === activeTab && !p.disabled) || [];
+    return opsViewEnabled ? all : all.filter((p) => p.title !== '运营主管');
   }, [currentPlan, activeTab, opsViewEnabled]);
 
   const totalHeadcount = visiblePositions.reduce((s, p) => s + p.headcount, 0);
-  const totalBase = visiblePositions.reduce(
-    (s, p) => s + calcTotalBaseSalary(p, currentPlan?.positions || []),
-    0
-  );
+  const totalBase = visiblePositions.reduce((s, p) => s + calcTotalBaseSalary(p, currentPlan?.positions || []), 0);
 
-  const handleSelectMonth = useCallback(
-    (m: string) => {
-      isInitialSelectDoneRef.current = true;
-      setSelectedMonth(m);
-      navigate(`/compensation?month=${m}`, { replace: true });
-    },
-    [navigate]
-  );
+  // 操作
+  const handleSelectMonth = (m: string) => {
+    isInitialSelectDoneRef.current = true;
+    setSelectedMonth(m);
+    navigate(`/compensation?month=${m}`, { replace: true });
+  };
 
   const handleToggleDisabled = (title: string, disabled: boolean) => {
-    if (!canEditPlan) {
-      alert('无权限：设置方案');
-      return;
-    }
+    if (!canEditPlan) return alert('无权限：设置方案');
     if (!currentPlan) return;
     const target = currentPlan.positions.find((p) => p.title === title);
-    if (!target) {
-      alert(`职位「${title}」不存在，无法切换`);
-      return;
-    }
+    if (!target) return alert(`职位「${title}」不存在`);
 
-    pushUndo(
-      currentPlan.month,
-      currentPlan,
-      disabled ? `禁用职位「${title}」` : `启用职位「${title}」`
-    );
-
-    const nextPlan: MonthlyCompensationPlan = {
-      ...currentPlan,
-      positions: currentPlan.positions.map((p) =>
-        p.title === title ? { ...p, disabled } : p
-      ),
-    };
+    pushUndo(currentPlan.month, currentPlan, disabled ? `禁用职位「${title}」` : `启用职位「${title}」`);
+    const nextPlan = { ...currentPlan, positions: currentPlan.positions.map((p) => p.title === title ? { ...p, disabled } : p) };
     persistPlan(currentPlan.month, nextPlan);
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!canEditPlan) {
-      alert('无权限：设置方案');
-      e.target.value = '';
-      return;
-    }
+    if (!canEditPlan) { alert('无权限：设置方案'); e.target.value = ''; return; }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -433,45 +139,24 @@ const CompensationPlanPage: React.FC = () => {
     if (!month) {
       const now = new Date();
       month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      isInitialSelectDoneRef.current = true;
       setSelectedMonth(month);
     }
 
     const lower = file.name.toLowerCase();
     const isJson = lower.endsWith('.json');
     const isExcel = lower.endsWith('.xlsx') || lower.endsWith('.xls');
-
-    if (!isJson && !isExcel) {
-      alert('仅支持 .xlsx / .xls / .json 文件');
-      e.target.value = '';
-      return;
-    }
+    if (!isJson && !isExcel) { alert('仅支持 .xlsx / .xls / .json 文件'); e.target.value = ''; return; }
 
     setImporting(true);
     try {
       let plan: MonthlyCompensationPlan;
-
       if (isJson) {
-        const text = await file.text();
-        const parsed = JSON.parse(text) as MonthlyCompensationPlan;
-
-        if (!parsed || typeof parsed !== 'object') {
-          throw new Error('JSON 内容不是有效对象');
-        }
-        if (!Array.isArray(parsed.positions)) {
-          throw new Error('JSON 缺少 positions 数组');
-        }
-
-        const nowISO = new Date().toISOString();
+        const parsed = JSON.parse(await file.text());
+        if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.positions)) throw new Error('JSON 格式错误');
         plan = {
-          month,
-          periodLabel: formatMonthLabel(month),
-          positions: parsed.positions.map((p) => ({
-            ...p,
-            id: p.id || uid(),
-          })),
-          importedFrom: `JSON: ${file.name}`,
-          importedAt: nowISO,
+          month, periodLabel: formatMonthLabel(month),
+          positions: parsed.positions.map((p: any) => ({ ...p, id: p.id || uid() })),
+          importedFrom: `JSON: ${file.name}`, importedAt: new Date().toISOString(),
         };
       } else {
         plan = await parseCompensationExcel(file, month, formatMonthLabel(month));
@@ -479,306 +164,117 @@ const CompensationPlanPage: React.FC = () => {
 
       const existed = store[month];
       if (existed && existed.positions.length > 0) {
-        if (!confirm(`${formatMonthLabel(month)} 已有方案，是否覆盖？`)) {
-          setImporting(false);
-          e.target.value = '';
-          return;
-        }
+        if (!confirm(`${formatMonthLabel(month)} 已有方案，是否覆盖？`)) { setImporting(false); e.target.value = ''; return; }
         pushUndo(month, existed, isJson ? '导入 JSON 覆盖' : '导入 Excel 覆盖');
       } else if (existed) {
         pushUndo(month, existed, isJson ? '导入 JSON' : '导入 Excel');
       }
 
       persistPlan(month, plan);
-      alert(
-        `已导入 ${file.name} → ${formatMonthLabel(month)}（${plan.positions.length} 个岗位）`
-      );
+      alert(`已导入 ${file.name} → ${formatMonthLabel(month)}（${plan.positions.length} 个岗位）`);
     } catch (err: any) {
-      console.error(err);
-      alert(
-        (isJson ? '解析 JSON 失败：' : '解析 Excel 失败，请检查文件格式：') +
-          (err?.message || '')
-      );
+      alert((isJson ? '解析 JSON 失败：' : '解析 Excel 失败：') + (err?.message || ''));
     } finally {
       setImporting(false);
       e.target.value = '';
     }
   };
 
-  const handleExport = () => {
-    if (!currentPlan) return;
-    const blob = new Blob([JSON.stringify(currentPlan, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `薪酬配置_${storeId}_${selectedMonth}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleAddMonth = async (
-    month: string,
-    copyFrom?: string,
-    copySimulation?: boolean
-  ) => {
-    if (!canEditPlan) {
-      alert('无权限：设置方案');
-      return;
-    }
+  const handleAddMonth = async (month: string, copyFrom?: string, copySimulation?: boolean) => {
+    if (!canEditPlan) return alert('无权限：设置方案');
     setShowMonthPicker(false);
 
-    if (store[month]) {
-      if (!confirm(`${formatMonthLabel(month)} 已存在，是否覆盖？`)) return;
-      pushUndo(month, store[month], '覆盖新建');
-    }
+    if (store[month] && !confirm(`${formatMonthLabel(month)} 已存在，是否覆盖？`)) return;
+    if (store[month]) pushUndo(month, store[month], '覆盖新建');
 
     if (!copyFrom) {
-      const blank: MonthlyCompensationPlan = {
-        month,
-        periodLabel: formatMonthLabel(month),
-        positions: [],
-      };
+      const blank: MonthlyCompensationPlan = { month, periodLabel: formatMonthLabel(month), positions: [] };
       pushUndo(month, blank, '新增月份');
       persistPlan(month, blank);
-      isInitialSelectDoneRef.current = true;
       setSelectedMonth(month);
       return;
     }
 
     try {
       if (dbOnline) {
-        const res = await copyPlan(storeId, copyFrom, month);
-        console.log('[copy] 已复制方案', copyFrom, '→', month, res);
-
+        await copyPlan(storeId, copyFrom, month);
         const remote = await fetchPlanByMonth(storeId, month);
-        if (remote) {
-          setFullStore((prev) => {
-            const next = {
-              ...prev,
-              [storeId]: { ...(prev[storeId] || {}), [month]: remote },
-            };
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-            } catch {}
-            return next;
-          });
-        }
-
-        if (copySimulation) {
-          try {
-            const simRes = await copySimulationSetting(storeId, copyFrom, month);
-            console.log('[copy-sim] 结果:', simRes);
-          } catch (e) {
-            console.warn('[copy-sim] 复制测算设置失败', e);
-          }
-        }
-
-        isInitialSelectDoneRef.current = true;
+        if (remote) setFullStore((prev) => {
+          const next = { ...prev, [storeId]: { ...(prev[storeId] || {}), [month]: remote } };
+          localStorage.setItem('gym_compensation_store_v2', JSON.stringify(next));
+          return next;
+        });
+        if (copySimulation) await copySimulationSetting(storeId, copyFrom, month).catch(console.warn);
         setSelectedMonth(month);
-        alert(
-          `已复制 ${formatMonthLabel(copyFrom)} 的配置到 ${formatMonthLabel(month)}${
-            copySimulation ? '（含测算设置）' : ''
-          }`
-        );
+        alert(`已复制配置到 ${formatMonthLabel(month)}`);
       } else {
         const srcPlan = store[copyFrom];
-        if (!srcPlan) {
-          alert('源月份方案不存在');
-          return;
-        }
-        const cloned: MonthlyCompensationPlan = JSON.parse(JSON.stringify(srcPlan));
-        cloned.month = month;
-        cloned.periodLabel = formatMonthLabel(month);
-        cloned.importedFrom = `复制自 ${copyFrom}`;
-        cloned.importedAt = new Date().toISOString();
-
+        if (!srcPlan) return alert('源月份方案不存在');
+        const cloned = { ...JSON.parse(JSON.stringify(srcPlan)), month, periodLabel: formatMonthLabel(month) };
         pushUndo(month, cloned, `复制自 ${copyFrom}`);
         persistPlan(month, cloned);
-        isInitialSelectDoneRef.current = true;
         setSelectedMonth(month);
-        alert(
-          `已离线复制 ${formatMonthLabel(copyFrom)} 到 ${formatMonthLabel(month)}（仅本地）`
-        );
+        alert(`已离线复制到 ${formatMonthLabel(month)}`);
       }
-    } catch (e) {
-      console.error('[handleAddMonth] 复制失败', e);
-      alert('复制失败：' + (e as Error).message);
-    }
+    } catch (e) { alert('复制失败：' + (e as Error).message); }
   };
 
   const removeMonth = async () => {
-    if (!canEditPlan) {
-      alert('无权限：设置方案');
-      return;
-    }
-    if (!selectedMonth || !currentPlan) return;
+    if (!canEditPlan || !selectedMonth || !currentPlan) return;
     if (!confirm(`确定删除 ${formatMonthLabel(selectedMonth)} 的全部配置？`)) return;
-
-    const monthToDelete = selectedMonth;
-    pushUndo(monthToDelete, currentPlan, '删除月份');
-
+    pushUndo(selectedMonth, currentPlan, '删除月份');
     setFullStore((prev) => {
       const cur = { ...(prev[storeId] || {}) };
-      delete cur[monthToDelete];
+      delete cur[selectedMonth];
       const next = { ...prev, [storeId]: cur };
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch (e) {
-        console.error('[removeMonth] 写 localStorage 失败', e);
-      }
+      localStorage.setItem('gym_compensation_store_v2', JSON.stringify(next));
       return next;
     });
-
-    if (dbOnline) {
-      try {
-        await deletePlan(storeId, monthToDelete);
-      } catch (e) {
-        console.error('[removeMonth] 数据库删除失败', e);
-        setSaveStatus('error');
-      }
-    }
-
-    const rest = Object.keys(store)
-      .filter((m) => m !== monthToDelete)
-      .sort();
-    if (rest.length > 0) {
-      isInitialSelectDoneRef.current = true;
-      setSelectedMonth(rest[rest.length - 1]);
-    } else {
-      isInitialSelectDoneRef.current = false;
-      setSelectedMonth('');
-    }
+    if (dbOnline) await deletePlan(storeId, selectedMonth).catch(() => {});
+    const rest = Object.keys(store).filter((m) => m !== selectedMonth).sort();
+    setSelectedMonth(rest.length > 0 ? rest[rest.length - 1] : '');
   };
 
-  const updatePlan = (
-    updates: Partial<MonthlyCompensationPlan>,
-    undoLabel: string,
-    allowTargetOnly = false
-  ) => {
-    if (!canEditPlan && !(allowTargetOnly && canEditTarget)) {
-      alert('无权限：设置方案');
-      return;
-    }
+  const updatePlan = (updates: Partial<MonthlyCompensationPlan>, undoLabel: string, allowTargetOnly = false) => {
+    if (!canEditPlan && !(allowTargetOnly && canEditTarget)) return alert('无权限：设置方案');
     if (!selectedMonth || !currentPlan) return;
     pushUndo(selectedMonth, currentPlan, undoLabel);
-    const nextPlan = { ...currentPlan, ...updates };
-    persistPlan(selectedMonth, nextPlan);
+    persistPlan(selectedMonth, { ...currentPlan, ...updates });
   };
 
   const updatePosition = (posId: string, updates: Partial<PositionConfig>) => {
     if (!currentPlan) return;
-    const target = currentPlan.positions.find((p) => p.id === posId);
-
-    /* ⭐ 只有 performanceTarget 归 target:edit；managerAggregateByDept 归 plan:edit */
-    const keys = Object.keys(updates);
-    const onlyTarget =
-      keys.length === 1 && keys[0] === 'performanceTarget';
-
-    updatePlan(
-      {
-        positions: currentPlan.positions.map((p) =>
-          p.id === posId ? { ...p, ...updates } : p
-        ),
-      },
-      `修改职位「${target?.title || '未知'}」`,
-      onlyTarget
-    );
+    const onlyTarget = Object.keys(updates).length === 1 && updates.performanceTarget !== undefined;
+    updatePlan({
+      positions: currentPlan.positions.map((p) => p.id === posId ? { ...p, ...updates } : p)
+    }, `修改职位`, onlyTarget);
   };
 
   const addPosition = () => {
-    if (!canEditPlan) {
-      alert('无权限：设置方案');
-      return;
-    }
-    if (!currentPlan) return;
-    updatePlan(
-      {
-        positions: [
-          ...currentPlan.positions,
-          {
-            id: uid(),
-            title: `新${getCategoryLabel(activeTab)}职位`,
-            category: activeTab,
-            headcount: 0,
-            performanceTarget: 0,
-            performanceSource: 'self',
-            totalBaseSalary: 0,
-            commissionTiers: [],
-            baseSalaryTiers: [],
-          },
-        ],
-      },
-      `新增${getCategoryLabel(activeTab)}职位`
-    );
+    if (!canEditPlan || !currentPlan) return;
+    updatePlan({
+      positions: [...currentPlan.positions, {
+        id: uid(), title: `新${getCategoryLabel(activeTab)}职位`, category: activeTab,
+        headcount: 0, performanceTarget: 0, performanceSource: 'self',
+        totalBaseSalary: 0, commissionTiers: [], baseSalaryTiers: [],
+      }]
+    }, `新增${getCategoryLabel(activeTab)}职位`);
   };
 
   const removePosition = (posId: string) => {
-    if (!canEditPlan) {
-      alert('无权限：设置方案');
-      return;
-    }
-    if (!currentPlan) return;
+    if (!canEditPlan || !currentPlan) return;
     const target = currentPlan.positions.find((p) => p.id === posId);
     if (!confirm(`确定删除职位「${target?.title}」？`)) return;
-    updatePlan(
-      { positions: currentPlan.positions.filter((p) => p.id !== posId) },
-      `删除职位「${target?.title}」`
-    );
+    updatePlan({ positions: currentPlan.positions.filter((p) => p.id !== posId) }, `删除职位`);
   };
 
-  const goToPayroll = () => {
-    if (!selectedMonth) {
-      alert('请先选择月份');
-      return;
-    }
-    navigate(`/payroll?month=${selectedMonth}`);
-  };
-
-  const goToSimulation = () => {
-    if (!selectedMonth) {
-      alert('请先选择月份');
-      return;
-    }
-    navigate(`/simulation?month=${selectedMonth}`);
-  };
-
-  const StatusBadge: React.FC = () => {
-    if (!dbOnline) {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-gray-100 text-gray-500 border-gray-200">
-          <CloudOff className="w-3 h-3" /> 离线模式
-        </span>
-      );
-    }
-    if (saveStatus === 'saving') {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-blue-50 text-blue-700 border-blue-200">
-          <Loader2 className="w-3 h-3 animate-spin" /> 保存中…
-        </span>
-      );
-    }
-    if (saveStatus === 'error') {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-red-50 text-red-700 border-red-200">
-          <AlertCircle className="w-3 h-3" /> 保存失败
-        </span>
-      );
-    }
-    if (saveStatus === 'saved' && lastSavedAt) {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-emerald-50 text-emerald-700 border-emerald-200">
-          <CheckCircle2 className="w-3 h-3" /> 已保存{' '}
-          {lastSavedAt.toLocaleTimeString('zh-CN', { hour12: false })}
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-emerald-50 text-emerald-700 border-emerald-200">
-        <Cloud className="w-3 h-3" /> 已连接数据库
-      </span>
-    );
+  // 状态徽章
+  const StatusBadge = () => {
+    if (!dbOnline) return <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-gray-100 text-gray-500 border-gray-200"><CloudOff className="w-3 h-3" /> 离线模式</span>;
+    if (saveStatus === 'saving') return <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-blue-50 text-blue-700 border-blue-200"><Loader2 className="w-3 h-3 animate-spin" /> 保存中…</span>;
+    if (saveStatus === 'error') return <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-red-50 text-red-700 border-red-200"><AlertCircle className="w-3 h-3" /> 保存失败</span>;
+    if (saveStatus === 'saved' && lastSavedAt) return <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-emerald-50 text-emerald-700 border-emerald-200"><CheckCircle2 className="w-3 h-3" /> 已保存 {lastSavedAt.toLocaleTimeString('zh-CN', { hour12: false })}</span>;
+    return <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-emerald-50 text-emerald-700 border-emerald-200"><Cloud className="w-3 h-3" /> 已连接数据库</span>;
   };
 
   return (
@@ -790,180 +286,74 @@ const CompensationPlanPage: React.FC = () => {
           <div className="flex items-center gap-3 flex-wrap">
             <StoreSwitcher />
             <StatusBadge />
-
             {canEditPlan && (
-              <button
-                onClick={handleUndo}
-                disabled={undoDepth === 0}
-                title={
-                  undoDepth > 0
-                    ? `撤销（Ctrl/Cmd+Z，剩余 ${undoDepth} 步）`
-                    : '无可撤销'
-                }
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition ${
-                  undoDepth > 0
-                    ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-                    : 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
-                }`}
-              >
-                <Undo2 className="w-3 h-3" />
-                撤销
-                {undoDepth > 0 && (
-                  <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-200 text-amber-800 text-[10px] font-bold">
-                    {undoDepth}
-                  </span>
-                )}
+              <button onClick={() => handleUndo()} disabled={undoDepth === 0} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition ${undoDepth > 0 ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100' : 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'}`}>
+                <Undo2 className="w-3 h-3" /> 撤销 {undoDepth > 0 && <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-200 text-amber-800 text-[10px] font-bold">{undoDepth}</span>}
               </button>
             )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             {hasPermission('simulation:access', storeId) && (
-              <button
-                onClick={goToSimulation}
-                disabled={!selectedMonth}
-                className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] ${
-                  selectedMonth
-                    ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-indigo-500/20'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                }`}
-              >
-                <Sliders className="w-4 h-4" />
-                去测算
+              <button onClick={() => selectedMonth ? navigate(`/simulation?month=${selectedMonth}`) : alert('请先选择月份')} disabled={!selectedMonth} className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] ${selectedMonth ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
+                <Sliders className="w-4 h-4" /> 去测算
               </button>
             )}
-
             {hasPermission('payroll:calc', storeId) && (
-              <button
-                onClick={goToPayroll}
-                disabled={!selectedMonth}
-                className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] ${
-                  selectedMonth
-                    ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-emerald-500/20'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                }`}
-              >
-                <Calculator className="w-4 h-4" />
-                去计算薪酬
+              <button onClick={() => selectedMonth ? navigate(`/payroll?month=${selectedMonth}`) : alert('请先选择月份')} disabled={!selectedMonth} className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] ${selectedMonth ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
+                <Calculator className="w-4 h-4" /> 去计算薪酬
               </button>
             )}
           </div>
         </div>
 
         <Toolbar
-          months={Object.keys(store).sort()}
-          selectedMonth={selectedMonth}
-          hasPlan={!!currentPlan}
-          importing={importing}
-          importedFrom={currentPlan?.importedFrom}
-          canEdit={canEditPlan}
-          onSelectMonth={handleSelectMonth}
-          onAddMonth={() => {
-            if (!canEditPlan) {
-              alert('无权限：设置方案');
-              return;
-            }
-            setShowMonthPicker(true);
+          months={Object.keys(store).sort()} selectedMonth={selectedMonth} hasPlan={!!currentPlan}
+          importing={importing} importedFrom={currentPlan?.importedFrom} canEdit={canEditPlan}
+          onSelectMonth={handleSelectMonth} onAddMonth={() => canEditPlan ? setShowMonthPicker(true) : alert('无权限')}
+          onRemoveMonth={removeMonth} onImport={handleImport}
+          onExport={() => {
+            if (!currentPlan) return;
+            const blob = new Blob([JSON.stringify(currentPlan, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = `薪酬配置_${storeId}_${selectedMonth}.json`; a.click();
+            URL.revokeObjectURL(url);
           }}
-          onRemoveMonth={removeMonth}
-          onImport={handleImport}
-          onExport={handleExport}
         />
 
-        {!currentPlan && (
-          <div className="bg-white rounded-3xl shadow-sm border border-dashed border-gray-200 p-20 text-center">
-            <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-blue-50 to-indigo-50 flex items-center justify-center mb-5">
-              <Calendar className="w-8 h-8 text-blue-500" />
-            </div>
-            <h3 className="text-gray-700 font-semibold mb-1">还没有配置</h3>
-            <p className="text-sm text-gray-400">
-              请选择或新增一个月份，然后导入 Excel / JSON 生成薪酬配置
-            </p>
-          </div>
-        )}
+        {!currentPlan && <CompensationEmptyState />}
 
         {currentPlan && (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-              <StatCard
-                icon={<Briefcase className="w-5 h-5" />}
-                label="职位数"
-                value={visiblePositions.length}
-                gradient="from-blue-500 to-indigo-500"
-                glow="bg-blue-300"
-              />
-              <StatCard
-                icon={<Users className="w-5 h-5" />}
-                label="总人数"
-                value={totalHeadcount}
-                gradient="from-emerald-500 to-teal-500"
-                glow="bg-emerald-300"
-              />
-              <StatCard
-                icon={<Wallet className="w-5 h-5" />}
-                label="总底薪"
-                value={`¥${totalBase.toLocaleString()}`}
-                gradient="from-amber-500 to-orange-500"
-                glow="bg-amber-300"
-              />
+              <StatCard icon={<Briefcase className="w-5 h-5" />} label="职位数" value={visiblePositions.length} gradient="from-blue-500 to-indigo-500" glow="bg-blue-300" />
+              <StatCard icon={<Users className="w-5 h-5" />} label="总人数" value={totalHeadcount} gradient="from-emerald-500 to-teal-500" glow="bg-emerald-300" />
+              <StatCard icon={<Wallet className="w-5 h-5" />} label="总底薪" value={`¥${totalBase.toLocaleString()}`} gradient="from-amber-500 to-orange-500" glow="bg-amber-300" />
             </div>
 
-            <PositionOverview
-              positions={overviewPositions}
-              canEdit={canEditPlan}
-              onGoTo={(cat) => setActiveTab(cat)}
-              onToggleDisabled={handleToggleDisabled}
-            />
+            <PositionOverview positions={overviewPositions} canEdit={canEditPlan} onGoTo={setActiveTab} onToggleDisabled={handleToggleDisabled} />
 
             <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-              <CategoryTabs
-                positions={visiblePositions}
-                active={activeTab}
-                onChange={setActiveTab}
-              />
-
+              <CategoryTabs positions={visiblePositions} active={activeTab} onChange={setActiveTab} />
               <div className="p-4 sm:p-6 bg-gradient-to-b from-gray-50/40 to-white">
                 {currentPositions.length === 0 ? (
                   <div className="text-center py-20">
-                    <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-gray-100 to-gray-50 flex items-center justify-center mb-4">
-                      <Briefcase className="w-7 h-7 text-gray-300" />
-                    </div>
-                    <p className="text-sm text-gray-400 mb-1">
-                      该分类下暂无职位
-                    </p>
+                    <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-gray-100 to-gray-50 flex items-center justify-center mb-4"><Briefcase className="w-7 h-7 text-gray-300" /></div>
+                    <p className="text-sm text-gray-400 mb-1">该分类下暂无职位</p>
                     <p className="text-xs text-gray-300">点击下方按钮新增</p>
                   </div>
                 ) : (
                   <div className="space-y-5">
                     {currentPositions.map((pos) => (
-                      <PositionCard
-                        key={pos.id}
-                        position={pos}
-                        allPositions={currentPlan.positions}
-                        readOnly={!canEditPlan}
-                        canEditTarget={canEditTarget}
-                        onUpdate={(u) => updatePosition(pos.id, u)}
-                        onRemove={() => removePosition(pos.id)}
-                      />
+                      <PositionCard key={pos.id} position={pos} allPositions={currentPlan.positions} readOnly={!canEditPlan} canEditTarget={canEditTarget} onUpdate={(u) => updatePosition(pos.id, u)} onRemove={() => removePosition(pos.id)} />
                     ))}
                   </div>
                 )}
 
                 <div className="mt-6">
-                  <PermissionGate
-                    permission="plan:edit"
-                    fallback={
-                      <div className="text-xs text-center text-gray-400 py-3">
-                        无编辑权限，无法新增职位
-                      </div>
-                    }
-                  >
-                    <button
-                      onClick={addPosition}
-                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-3.5 bg-white border-2 border-dashed border-gray-200 hover:border-blue-400 hover:bg-blue-50/50 rounded-2xl text-sm font-medium text-gray-500 hover:text-blue-600 transition-all active:scale-[0.99]"
-                    >
-                      <Plus className="w-4 h-4" />
-                      新增{getCategoryLabel(activeTab)}职位
+                  <PermissionGate permission="plan:edit" fallback={<div className="text-xs text-center text-gray-400 py-3">无编辑权限，无法新增职位</div>}>
+                    <button onClick={addPosition} className="w-full inline-flex items-center justify-center gap-2 px-4 py-3.5 bg-white border-2 border-dashed border-gray-200 hover:border-blue-400 hover:bg-blue-50/50 rounded-2xl text-sm font-medium text-gray-500 hover:text-blue-600 transition-all active:scale-[0.99]">
+                      <Plus className="w-4 h-4" /> 新增{getCategoryLabel(activeTab)}职位
                     </button>
                   </PermissionGate>
                 </div>
@@ -974,81 +364,15 @@ const CompensationPlanPage: React.FC = () => {
       </div>
 
       {showMonthPicker && canEditPlan && (
-        <MonthPickerDialog
-          existingMonths={Object.keys(store).sort()}
-          onConfirm={handleAddMonth}
-          onCancel={() => setShowMonthPicker(false)}
-        />
+        <MonthPickerDialog existingMonths={Object.keys(store).sort()} onConfirm={handleAddMonth} onCancel={() => setShowMonthPicker(false)} />
       )}
 
-      {showGuide && canEditPlan && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-          onClick={() => setShowGuide(false)}
-        >
-          <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-6 py-5 border-b border-gray-100">
-              <h2 className="text-lg font-bold text-gray-900">开始配置薪酬方案</h2>
-              <p className="text-sm text-gray-500 mt-1">
-                该门店还没有任何方案，选择一种方式开始
-              </p>
-            </div>
-
-            <div className="p-6 space-y-3">
-              <label className="flex items-start gap-4 p-4 rounded-xl border-2 border-dashed border-emerald-200 hover:border-emerald-400 hover:bg-emerald-50/40 cursor-pointer transition-all">
-                <input
-                  type="file"
-                  accept=".xlsx,.xls,.json,application/json"
-                  className="hidden"
-                  onChange={async (e) => {
-                    setShowGuide(false);
-                    await handleImport(e);
-                  }}
-                />
-                <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
-                  <Upload className="w-5 h-5 text-emerald-600" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="font-semibold text-gray-800">导入 Excel 或 JSON</h3>
-                  <p className="text-xs text-gray-500 mt-1">
-                    .xlsx / .xls 走 Excel 解析；.json 直接还原
-                  </p>
-                </div>
-              </label>
-
-              <button
-                onClick={() => {
-                  setShowGuide(false);
-                  setShowMonthPicker(true);
-                }}
-                className="w-full flex items-start gap-4 p-4 rounded-xl border-2 border-dashed border-blue-200 hover:border-blue-400 hover:bg-blue-50/40 transition-all text-left"
-              >
-                <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center shrink-0">
-                  <Plus className="w-5 h-5 text-blue-600" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="font-semibold text-gray-800">手动新建月份</h3>
-                  <p className="text-xs text-gray-500 mt-1">
-                    选择月份后，逐个添加职位和阶梯配置
-                  </p>
-                </div>
-              </button>
-            </div>
-
-            <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 bg-gray-50/50">
-              <button
-                onClick={() => setShowGuide(false)}
-                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
-              >
-                稍后
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <CompensationGuideDialog
+        open={showGuide && canEditPlan}
+        onClose={() => setShowGuide(false)}
+        onImport={handleImport}
+        onManualAdd={() => setShowMonthPicker(true)}
+      />
     </div>
   );
 };
