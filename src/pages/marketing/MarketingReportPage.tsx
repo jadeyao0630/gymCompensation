@@ -2,10 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import {
   BarChart3, Loader2, AlertCircle, Download, Wallet, ChevronRight,
+  RefreshCw,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import StoreSwitcher from '../../components/StoreSwitcher';
 import NavButtons from '../../components/NavButtons';
+import StoreStatusBadge from '../../components/StoreStatusBadge';
 import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { getStoreById } from '../../constants/stores';
@@ -25,7 +27,7 @@ import {
 } from './utils/aggregate';
 import { DateRangePicker } from './components/DateRangePicker';
 import { SummaryCards } from './components/SummaryCards';
-// import { TypeBreakdown } from './components/TypeBreakdown';   // ⭐ 已隐藏
+// import { TypeBreakdown } from './components/TypeBreakdown';   // 按业务类型板块已隐藏
 import { CardBreakdown } from './components/CardBreakdown';
 import { PayTypeBreakdown } from './components/PayTypeBreakdown';
 import { MarketerBreakdown } from './components/MarketerBreakdown';
@@ -179,7 +181,6 @@ const MarketingReportPage: React.FC = () => {
   const handleExport = () => {
     const wb = XLSX.utils.book_new();
 
-    /* Sheet 1：汇总 */
     const summaryRows: any[][] = [
       ['营销收入报告'],
       ['门店', storeName],
@@ -193,7 +194,6 @@ const MarketingReportPage: React.FC = () => {
       ['押金支付合计', summary.totalPrePayment],
     ];
 
-    /* ⭐ 有定金时，汇总里加定金信息 */
     if (frontMoneyList.length > 0) {
       summaryRows.push(
         [],
@@ -213,7 +213,6 @@ const MarketingReportPage: React.FC = () => {
     ws1['!cols'] = [{ wch: 20 }, { wch: 18 }];
     XLSX.utils.book_append_sheet(wb, ws1, '汇总');
 
-    /* Sheet 3：卡种细分 */
     const cardRows: any[][] = [
       ['业务类型', '卡种', '数量', '卡金额', '实收金额'],
     ];
@@ -226,14 +225,12 @@ const MarketingReportPage: React.FC = () => {
     ];
     XLSX.utils.book_append_sheet(wb, ws3, '卡种细分');
 
-    /* Sheet 4：收款方式 */
     const payRows: any[][] = [['收款方式', '金额']];
     summary.payTypes.forEach((p) => payRows.push([p.payType, p.amount]));
     const ws4 = XLSX.utils.aoa_to_sheet(payRows);
     ws4['!cols'] = [{ wch: 14 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, ws4, '收款方式');
 
-    /* Sheet 5：订单明细 */
     const detailRows: any[][] = [
       [
         '日期', '会员名', '卡名', '备注', '类型',
@@ -269,7 +266,6 @@ const MarketingReportPage: React.FC = () => {
     ];
     XLSX.utils.book_append_sheet(wb, ws5, '订单明细');
 
-    /* ⭐ Sheet 6：定金明细（仅当有定金数据时导出） */
     if (frontMoneyList.length > 0) {
       const fmRows: any[][] = [
         [
@@ -334,27 +330,54 @@ const MarketingReportPage: React.FC = () => {
                   Marketing Report
                 </span>
               </div>
-              <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
+              <h1 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight">
                 营销收入报告
               </h1>
-              <p className="text-sm text-indigo-100/90 mt-3 max-w-md">
+              <p className="text-sm text-indigo-100/90 mt-3 max-w-md leading-relaxed">
                 汇总订单销售 + 定金/押金，按类型、卡种、收款方式分析
               </p>
             </div>
 
-            <button
-              onClick={handleExport}
-              disabled={list.length === 0 && frontMoneyList.length === 0}
-              className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-2.5 border border-white/25 shadow-lg hover:bg-white/25 transition disabled:opacity-50"
-            >
-              <Download className="w-4 h-4" />
-              <span className="text-sm font-medium">导出 Excel</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleRefresh}
+                disabled={loading}
+                className="inline-flex items-center gap-2 bg-white text-indigo-700 hover:bg-white/90 rounded-2xl px-5 py-2.5 shadow-lg transition disabled:opacity-50 font-semibold text-sm"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    加载中…
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4" />
+                    刷新
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={handleExport}
+                disabled={list.length === 0 && frontMoneyList.length === 0}
+                className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-2.5 border border-white/25 shadow-lg hover:bg-white/25 transition disabled:opacity-50"
+              >
+                <Download className="w-4 h-4" />
+                <span className="text-sm font-medium">导出 Excel</span>
+              </button>
+            </div>
           </div>
         </div>
 
+        {/* ⭐ 顶部工具行：门店 + 连接状态 + NavButtons */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <StoreSwitcher />
+          <StoreStatusBadge
+            dbOnline={true}
+            saveStatus="idle"
+            lastSavedAt={null}
+          />
+
           <div className="flex-1" />
           <NavButtons active="marketing" />
         </div>
@@ -365,7 +388,6 @@ const MarketingReportPage: React.FC = () => {
           loading={loading}
           onChange={handleDateChange}
           onQuick={handleQuick}
-          onRefresh={handleRefresh}
         />
 
         {loading && (
@@ -386,7 +408,6 @@ const MarketingReportPage: React.FC = () => {
           <>
             <SummaryCards summary={summary} />
 
-            {/* ⭐ 定金 / 押金汇总：无数据时自动隐藏 */}
             {frontMoneyList.length > 0 && (
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm mb-6 overflow-hidden">
                 <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
@@ -397,7 +418,6 @@ const MarketingReportPage: React.FC = () => {
                   <span className="text-xs text-gray-400">点击卡片查看明细</span>
                 </div>
                 <div className="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {/* 全部 */}
                   <button
                     type="button"
                     onClick={() => openFmDialog('all', '定金 / 押金明细')}
@@ -414,7 +434,6 @@ const MarketingReportPage: React.FC = () => {
                     </div>
                   </button>
 
-                  {/* 已启用 */}
                   <button
                     type="button"
                     onClick={() => openFmDialog('startUsing', '已启用定金明细')}
@@ -431,7 +450,6 @@ const MarketingReportPage: React.FC = () => {
                     </div>
                   </button>
 
-                  {/* 未启用 */}
                   <button
                     type="button"
                     onClick={() => openFmDialog('notStart', '未启用定金明细')}
@@ -448,7 +466,6 @@ const MarketingReportPage: React.FC = () => {
                     </div>
                   </button>
 
-                  {/* 已退款 */}
                   <button
                     type="button"
                     onClick={() => openFmDialog('drawback', '已退款定金明细')}
@@ -468,15 +485,11 @@ const MarketingReportPage: React.FC = () => {
               </div>
             )}
 
-            {/* ⭐ 按业务类型板块已隐藏 */}
-            {/* <TypeBreakdown summary={summary} /> */}
-
             <CardBreakdown summary={summary} />
             <PayTypeBreakdown summary={summary} />
             <MarketerBreakdown summary={summary} />
             <OrderDetailTable list={list} />
 
-            {/* ⭐ 定金明细表：无数据时自动隐藏 */}
             {frontMoneyList.length > 0 && (
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm mb-6 overflow-hidden">
                 <div className="px-5 py-3 border-b border-gray-100">

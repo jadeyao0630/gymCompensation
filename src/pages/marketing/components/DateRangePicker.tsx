@@ -9,7 +9,6 @@ interface Props {
   loading?: boolean;
   onChange: (begin: string, end: string) => void;
   onQuick?: (range: QuickKey) => void;
-  onRefresh: () => void;
 }
 
 /* 日期格式化 */
@@ -33,7 +32,7 @@ function getLastMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-/* ⭐ 计算每个快捷按钮对应的日期范围 */
+/* 计算每个快捷按钮对应的日期范围 */
 function calcQuickRange(range: QuickKey): { begin: string; end: string } {
   const now = new Date();
   let begin = '';
@@ -85,12 +84,10 @@ const QUICK_BUTTONS: { key: QuickKey; label: string }[] = [
 export const DateRangePicker: React.FC<Props> = ({
   beginDate,
   endDate,
-  loading,
   onChange,
   onQuick,
-  onRefresh,
 }) => {
-  /* ⭐ 根据当前 beginDate / endDate 推断激活的快捷按钮 */
+  /* 根据当前 beginDate / endDate 推断激活的快捷按钮 */
   const activeQuick = useMemo<QuickKey | null>(() => {
     if (!beginDate || !endDate) return null;
     for (const { key } of QUICK_BUTTONS) {
@@ -122,7 +119,7 @@ export const DateRangePicker: React.FC<Props> = ({
           className="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
         />
 
-        {/* ⭐ 快捷按钮：匹配时高亮 */}
+        {/* 快捷按钮：匹配时高亮 */}
         <div className="flex flex-wrap items-center gap-1.5">
           {QUICK_BUTTONS.map(({ key, label }) => {
             const isActive = activeQuick === key;
@@ -142,15 +139,7 @@ export const DateRangePicker: React.FC<Props> = ({
           })}
         </div>
 
-        <div className="flex-1" />
-
-        <button
-          onClick={onRefresh}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-md transition disabled:opacity-60"
-        >
-          {loading ? '加载中…' : '刷新'}
-        </button>
+        {/* ⭐ 刷新按钮已移到 PageHeader */}
       </div>
     </div>
   );

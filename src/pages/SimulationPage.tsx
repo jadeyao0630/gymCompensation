@@ -10,9 +10,10 @@ import { calcSimulation } from '../utils/simulation';
 import SimulationSettingsPanel from '../components/SimulationSettingsPanel';
 import RevenueSliderPanel from '../components/RevenueSliderPanel';
 import StoreSwitcher from '../components/StoreSwitcher';
+import StoreStatusBadge from '../components/StoreStatusBadge';
 import { SimulationHeader } from '../components/SimulationHeader';
 import { SimulationEmptyState } from '../components/SimulationEmptyState';
-import NavButtons from '../components/NavButtons';              // ⭐ 新增
+import NavButtons from '../components/NavButtons';
 import { useStore } from '../contexts/StoreContext';
 import { useAuth } from '../contexts/AuthContext';
 import { getStoreById } from '../constants/stores';
@@ -29,7 +30,6 @@ const SimulationPage: React.FC = () => {
     searchParams.get('month') || ''
   );
 
-  // 核心业务 Hook
   const {
     fullStore,
     simInput, shareConfig, genderCounts, courseInputs,
@@ -43,7 +43,6 @@ const SimulationPage: React.FC = () => {
     ? store[selectedMonth]
     : undefined;
 
-  // 默认选中最新月份
   useEffect(() => {
     const months = Object.keys(fullStore[storeId] || {}).sort();
     if (months.length > 0) {
@@ -62,7 +61,6 @@ const SimulationPage: React.FC = () => {
     if (m) setSelectedMonth(m);
   }, [searchParams]);
 
-  // 测算结果
   const simResult: SimulationResult = useMemo(() => {
     if (!currentPlan) {
       return {
@@ -75,7 +73,6 @@ const SimulationPage: React.FC = () => {
     );
   }, [currentPlan, simInput, courseInputs, shareConfig, genderCounts, opsViewEnabled]);
 
-  // 无权限直接跳转
   if (!hasPermission('simulation:access', storeId)) {
     return <Navigate to="/no-permission" replace />;
   }
@@ -85,27 +82,51 @@ const SimulationPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50/50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* 头部 */}
         <SimulationHeader
           storeName={storeName}
           dbOnline={dbOnline}
           savingSetting={savingSetting}
           lastSavedAt={lastSavedAt}
           selectedMonth={selectedMonth}
-          onGoPayroll={() => navigate(`/payroll?month=${selectedMonth}`)}
-          onGoCompensation={() => navigate(`/compensation?month=${selectedMonth}`)}
         />
 
-        {/* ⭐ 顶部工具行：StoreSwitcher 在左，NavButtons 在右 */}
+        {/* ⭐ 顶部工具行：门店 + 连接状态 + 撤销 + NavButtons */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <StoreSwitcher />
+          <StoreStatusBadge
+            dbOnline={dbOnline}
+            saveStatus={savingSetting ? 'saving' : 'idle'}
+            lastSavedAt={lastSavedAt}
+          />
+
+          <button
+            onClick={handleUndo}
+            disabled={undoDepth === 0}
+            title={
+              undoDepth > 0
+                ? `撤销（Ctrl/Cmd+Z，剩余 ${undoDepth} 步）`
+                : '无可撤销'
+            }
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition ${
+              undoDepth > 0
+                ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                : 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
+            }`}
+          >
+            <Undo2 className="w-3 h-3" />
+            撤销
+            {undoDepth > 0 && (
+              <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-200 text-amber-800 text-[10px] font-bold">
+                {undoDepth}
+              </span>
+            )}
+          </button>
 
           <div className="flex-1" />
 
           <NavButtons active="simulation" month={selectedMonth} />
         </div>
 
-        {/* 月份选择 + 撤销 */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">
           <div className="flex flex-wrap items-center gap-3">
             <label className="text-sm font-medium text-gray-600">月份</label>
@@ -128,31 +149,9 @@ const SimulationPage: React.FC = () => {
                 该月份暂无薪酬配置，请先到「薪酬配置」页面导入 Excel
               </p>
             )}
-
-            <div className="flex-1" />
-
-            <button
-              onClick={handleUndo}
-              disabled={undoDepth === 0}
-              title={undoDepth > 0 ? `撤销（Ctrl/Cmd+Z，剩余 ${undoDepth} 步）` : '无可撤销'}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition ${
-                undoDepth > 0
-                  ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-                  : 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
-              }`}
-            >
-              <Undo2 className="w-3 h-3" />
-              撤销
-              {undoDepth > 0 && (
-                <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-200 text-amber-800 text-[10px] font-bold">
-                  {undoDepth}
-                </span>
-              )}
-            </button>
           </div>
         </div>
 
-        {/* 主体内容 */}
         {currentPlan ? (
           <>
             <SimulationSettingsPanel

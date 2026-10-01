@@ -30,6 +30,8 @@ interface AuthContextValue {
   isSuperAdmin: boolean;
   config: UserPermissionConfig;
   hasPermission: (key: PermissionKey, storeId?: string) => boolean;
+  /** ⭐ 不做超管放行，只按实际配置判断（用于特殊场景） */
+  hasPermissionRaw: (key: PermissionKey, storeId?: string) => boolean;
   refreshPermissions: () => Promise<void>;
   login: (username: string, password: string, remember: boolean) => Promise<void>;
   logout: () => Promise<void>;
@@ -139,12 +141,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const isSuperAdmin = user?.role === 'admin';
 
+  /* ⭐ 默认：超管放行 */
   const hasPermission = useCallback(
     (key: PermissionKey, storeId?: string): boolean => {
       if (isSuperAdmin) return true;
       return isPermissionGranted(config, key, storeId);
     },
     [isSuperAdmin, config]
+  );
+
+  /* ⭐ 严格：不做超管放行（少用） */
+  const hasPermissionRaw = useCallback(
+    (key: PermissionKey, storeId?: string): boolean => {
+      return isPermissionGranted(config, key, storeId);
+    },
+    [config]
   );
 
   return (
@@ -156,6 +167,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isSuperAdmin,
         config,
         hasPermission,
+        hasPermissionRaw,
         refreshPermissions,
         login,
         logout,

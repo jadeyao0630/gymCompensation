@@ -19,6 +19,7 @@ import PositionCard from '../components/PositionCard';
 import PositionOverview from '../components/PositionOverview';
 import MonthPickerDialog from '../components/MonthPickerDialog';
 import StoreSwitcher from '../components/StoreSwitcher';
+import StoreStatusBadge from '../components/StoreStatusBadge';
 import PermissionGate from '../components/PermissionGate';
 import { CompensationGuideDialog } from '../components/CompensationGuideDialog';
 import { CompensationEmptyState } from '../components/CompensationEmptyState';
@@ -47,19 +48,26 @@ const CompensationPlanPage: React.FC = () => {
   const fetchedKeyRef = useRef<string>('');
   const store = fullStore[storeId] || {};
 
-  /* 权限 */
-  const canEditPlan = hasPermission('plan:edit', storeId);
-  const canEditTarget = hasPermission('target:edit', storeId);
-  const opsViewEnabled = hasPermission('ops:view', storeId);
-  const canAddMonth = hasPermission('month:add', storeId);
-  const canDeleteMonth = hasPermission('month:delete', storeId);
-  const canImportPlan = hasPermission('plan:import', storeId);
-  const canExportPlan = hasPermission('plan:export', storeId);
-  const canAddPosition = hasPermission('position:add', storeId);
-  const canDeletePosition = hasPermission('position:delete', storeId);
-  const canRenamePosition = hasPermission('position:rename', storeId);
-  const canEditHeadcount = hasPermission('headcount:edit', storeId);
+  /* ============================================================
+   * ⭐ 权限：基础权限 = 查看方案
+   *    没有 plan:view → 所有相关操作全部禁用/隐藏
+   * ============================================================ */
+  const canViewPlan = hasPermission('plan:view', storeId);
 
+  /* 只有 canViewPlan 为 true 时，具体权限才生效 */
+  const canEditPlan = canViewPlan && hasPermission('plan:edit', storeId);
+  const canEditTarget = canViewPlan && hasPermission('target:edit', storeId);
+  const opsViewEnabled = hasPermission('ops:view', storeId);   // 这个独立
+  const canAddMonth = canViewPlan && hasPermission('month:add', storeId);
+  const canDeleteMonth = canViewPlan && hasPermission('month:delete', storeId);
+  const canImportPlan = canViewPlan && hasPermission('plan:import', storeId);
+  const canExportPlan = canViewPlan && hasPermission('plan:export', storeId);
+  const canAddPosition = canViewPlan && hasPermission('position:add', storeId);
+  const canDeletePosition = canViewPlan && hasPermission('position:delete', storeId);
+  const canRenamePosition = canViewPlan && hasPermission('position:rename', storeId);
+  const canEditHeadcount = canViewPlan && hasPermission('headcount:edit', storeId);
+
+  /* 选中月份 */
   useEffect(() => {
     if (isInitialSelectDoneRef.current) return;
     const months = Object.keys(store).sort();
@@ -81,6 +89,7 @@ const CompensationPlanPage: React.FC = () => {
     fetchedKeyRef.current = '';
   }, [storeId]);
 
+  /* 拉取方案详情 */
   useEffect(() => {
     if (!selectedMonth) return;
     if (!dbOnline) return;
@@ -115,14 +124,13 @@ const CompensationPlanPage: React.FC = () => {
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId, selectedMonth, dbOnline]);
 
   const currentPlan = selectedMonth ? store[selectedMonth] : undefined;
 
+  /* 数据过滤 */
   const overviewPositions = useMemo(() => {
     const all = currentPlan?.positions || [];
     return opsViewEnabled ? all : all.filter((p) => p.title !== '运营主管');
@@ -144,6 +152,7 @@ const CompensationPlanPage: React.FC = () => {
     0
   );
 
+  /* 操作 */
   const handleSelectMonth = (m: string) => {
     isInitialSelectDoneRef.current = true;
     fetchedKeyRef.current = '';
@@ -407,194 +416,178 @@ const CompensationPlanPage: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const StatusBadge = () => {
-    if (!dbOnline) {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-gray-100 text-gray-500 border-gray-200">
-          <CloudOff className="w-3 h-3" /> 离线模式
-        </span>
-      );
-    }
-    if (saveStatus === 'saving') {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-blue-50 text-blue-700 border-blue-200">
-          <Loader2 className="w-3 h-3 animate-spin" /> 保存中…
-        </span>
-      );
-    }
-    if (saveStatus === 'error') {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-red-50 text-red-700 border-red-200">
-          <AlertCircle className="w-3 h-3" /> 保存失败
-        </span>
-      );
-    }
-    if (saveStatus === 'saved' && lastSavedAt) {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-emerald-50 text-emerald-700 border-emerald-200">
-          <CheckCircle2 className="w-3 h-3" /> 已保存{' '}
-          {lastSavedAt.toLocaleTimeString('zh-CN', { hour12: false })}
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-emerald-50 text-emerald-700 border-emerald-200">
-        <Cloud className="w-3 h-3" /> 已连接数据库
-      </span>
-    );
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <PageHeader selectedMonth={selectedMonth} storeId={storeId} />
 
-        {/* ⭐ 顶部工具行：门店/状态/撤销 在左，NavButtons 在右 */}
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <StoreSwitcher />
-          <StatusBadge />
-
-          {canEditPlan && (
-            <button
-              onClick={() => handleUndo()}
-              disabled={undoDepth === 0}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition ${
-                undoDepth > 0
-                  ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-                  : 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
-              }`}
-            >
-              <Undo2 className="w-3 h-3" />
-              撤销
-              {undoDepth > 0 && (
-                <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-200 text-amber-800 text-[10px] font-bold">
-                  {undoDepth}
-                </span>
-              )}
-            </button>
-          )}
-
-          <div className="flex-1" />
-
-          <NavButtons active="config" month={selectedMonth} />
-        </div>
-
-        <Toolbar
-          months={Object.keys(store).sort()}
-          selectedMonth={selectedMonth}
-          hasPlan={!!currentPlan}
-          importing={importing}
-          importedFrom={currentPlan?.importedFrom}
-          canEdit={canEditPlan}
-          onSelectMonth={handleSelectMonth}
-          onAddMonth={() => {
-            if (!canEditPlan) return alert('无权限：设置方案');
-            if (!canAddMonth) return alert('无权限：新增月份');
-            setShowMonthPicker(true);
-          }}
-          onRemoveMonth={removeMonth}
-          onImport={handleImport}
-          onExport={handleExport}
-          canAddMonth={canAddMonth}
-          canDeleteMonth={canDeleteMonth}
-          canImport={canImportPlan}
-          canExport={canExportPlan}
-        />
-
-        {!currentPlan && <CompensationEmptyState />}
-
-        {currentPlan && (
+        {/* ⭐ 无 plan:view 权限 → 直接显示无权限提示 */}
+        {!canViewPlan ? (
+          <div className="bg-white rounded-3xl border border-dashed border-gray-200 shadow-sm p-20 text-center">
+            <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-amber-50 to-orange-50 flex items-center justify-center mb-5">
+              <AlertCircle className="w-8 h-8 text-amber-500" />
+            </div>
+            <h3 className="text-gray-700 font-semibold mb-1">
+              无权限：查看方案
+            </h3>
+            <p className="text-sm text-gray-400">
+              请联系管理员分配「查看方案」权限
+            </p>
+          </div>
+        ) : (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-              <StatCard
-                icon={<Briefcase className="w-5 h-5" />}
-                label="职位数"
-                value={visiblePositions.length}
-                gradient="from-blue-500 to-indigo-500"
-                glow="bg-blue-300"
+            {/* 顶部工具行 */}
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <StoreSwitcher />
+              <StoreStatusBadge
+                dbOnline={dbOnline}
+                saveStatus={saveStatus}
+                lastSavedAt={lastSavedAt}
               />
-              <StatCard
-                icon={<Users className="w-5 h-5" />}
-                label="总人数"
-                value={totalHeadcount}
-                gradient="from-emerald-500 to-teal-500"
-                glow="bg-emerald-300"
-              />
-              <StatCard
-                icon={<Wallet className="w-5 h-5" />}
-                label="总底薪"
-                value={`¥${totalBase.toLocaleString()}`}
-                gradient="from-amber-500 to-orange-500"
-                glow="bg-amber-300"
-              />
+
+              {canEditPlan && (
+                <button
+                  onClick={() => handleUndo()}
+                  disabled={undoDepth === 0}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition ${
+                    undoDepth > 0
+                      ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                      : 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
+                  }`}
+                >
+                  <Undo2 className="w-3 h-3" />
+                  撤销
+                  {undoDepth > 0 && (
+                    <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-200 text-amber-800 text-[10px] font-bold">
+                      {undoDepth}
+                    </span>
+                  )}
+                </button>
+              )}
+
+              <div className="flex-1" />
+
+              <NavButtons active="config" month={selectedMonth} />
             </div>
 
-            <PositionOverview
-              positions={overviewPositions}
+            <Toolbar
+              months={Object.keys(store).sort()}
+              selectedMonth={selectedMonth}
+              hasPlan={!!currentPlan}
+              importing={importing}
+              importedFrom={currentPlan?.importedFrom}
               canEdit={canEditPlan}
-              onGoTo={setActiveTab}
-              onToggleDisabled={handleToggleDisabled}
+              onSelectMonth={handleSelectMonth}
+              onAddMonth={() => {
+                if (!canEditPlan) return alert('无权限：设置方案');
+                if (!canAddMonth) return alert('无权限：新增月份');
+                setShowMonthPicker(true);
+              }}
+              onRemoveMonth={removeMonth}
+              onImport={handleImport}
+              onExport={handleExport}
+              canAddMonth={canAddMonth}
+              canDeleteMonth={canDeleteMonth}
+              canImport={canImportPlan}
+              canExport={canExportPlan}
             />
 
-            <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-              <CategoryTabs
-                positions={visiblePositions}
-                active={activeTab}
-                onChange={setActiveTab}
-              />
-              <div className="p-4 sm:p-6 bg-gradient-to-b from-gray-50/40 to-white">
-                {currentPositions.length === 0 ? (
-                  <div className="text-center py-20">
-                    <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-gray-100 to-gray-50 flex items-center justify-center mb-4">
-                      <Briefcase className="w-7 h-7 text-gray-300" />
-                    </div>
-                    <p className="text-sm text-gray-400 mb-1">该分类下暂无职位</p>
-                    <p className="text-xs text-gray-300">点击下方按钮新增</p>
-                  </div>
-                ) : (
-                  <div className="space-y-5">
-                    {currentPositions.map((pos) => (
-                      <PositionCard
-                        key={pos.id}
-                        position={pos}
-                        allPositions={currentPlan.positions}
-                        readOnly={!canEditPlan}
-                        canEditTarget={canEditTarget}
-                        canEditHeadcount={canEditHeadcount}
-                        canDelete={canDeletePosition}
-                        canRename={canRenamePosition}
-                        onUpdate={(u) => updatePosition(pos.id, u)}
-                        onRemove={() => removePosition(pos.id)}
-                      />
-                    ))}
-                  </div>
-                )}
+            {!currentPlan && <CompensationEmptyState />}
 
-                <div className="mt-6">
-                  <PermissionGate
-                    permission="plan:edit"
-                    fallback={
-                      <div className="text-xs text-center text-gray-400 py-3">
-                        无编辑权限，无法新增职位
+            {currentPlan && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+                  <StatCard
+                    icon={<Briefcase className="w-5 h-5" />}
+                    label="职位数"
+                    value={visiblePositions.length}
+                    gradient="from-blue-500 to-indigo-500"
+                    glow="bg-blue-300"
+                  />
+                  <StatCard
+                    icon={<Users className="w-5 h-5" />}
+                    label="总人数"
+                    value={totalHeadcount}
+                    gradient="from-emerald-500 to-teal-500"
+                    glow="bg-emerald-300"
+                  />
+                  <StatCard
+                    icon={<Wallet className="w-5 h-5" />}
+                    label="总底薪"
+                    value={`¥${totalBase.toLocaleString()}`}
+                    gradient="from-amber-500 to-orange-500"
+                    glow="bg-amber-300"
+                  />
+                </div>
+
+                <PositionOverview
+                  positions={overviewPositions}
+                  canEdit={canEditPlan}
+                  onGoTo={setActiveTab}
+                  onToggleDisabled={handleToggleDisabled}
+                />
+
+                <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                  <CategoryTabs
+                    positions={visiblePositions}
+                    active={activeTab}
+                    onChange={setActiveTab}
+                  />
+                  <div className="p-4 sm:p-6 bg-gradient-to-b from-gray-50/40 to-white">
+                    {currentPositions.length === 0 ? (
+                      <div className="text-center py-20">
+                        <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-gray-100 to-gray-50 flex items-center justify-center mb-4">
+                          <Briefcase className="w-7 h-7 text-gray-300" />
+                        </div>
+                        <p className="text-sm text-gray-400 mb-1">该分类下暂无职位</p>
+                        <p className="text-xs text-gray-300">点击下方按钮新增</p>
                       </div>
-                    }
-                  >
-                    {canAddPosition ? (
-                      <button
-                        onClick={addPosition}
-                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-3.5 bg-white border-2 border-dashed border-gray-200 hover:border-blue-400 hover:bg-blue-50/50 rounded-2xl text-sm font-medium text-gray-500 hover:text-blue-600 transition-all active:scale-[0.99]"
-                      >
-                        <Plus className="w-4 h-4" /> 新增{getCategoryLabel(activeTab)}职位
-                      </button>
                     ) : (
-                      <div className="text-xs text-center text-gray-400 py-3">
-                        无权限：新增职位
+                      <div className="space-y-5">
+                        {currentPositions.map((pos) => (
+                          <PositionCard
+                            key={pos.id}
+                            position={pos}
+                            allPositions={currentPlan.positions}
+                            readOnly={!canEditPlan}
+                            canEditTarget={canEditTarget}
+                            canEditHeadcount={canEditHeadcount}
+                            canDelete={canDeletePosition}
+                            canRename={canRenamePosition}
+                            onUpdate={(u) => updatePosition(pos.id, u)}
+                            onRemove={() => removePosition(pos.id)}
+                          />
+                        ))}
                       </div>
                     )}
-                  </PermissionGate>
+
+                    <div className="mt-6">
+                      <PermissionGate
+                        permission="plan:edit"
+                        fallback={
+                          <div className="text-xs text-center text-gray-400 py-3">
+                            无编辑权限，无法新增职位
+                          </div>
+                        }
+                      >
+                        {canAddPosition ? (
+                          <button
+                            onClick={addPosition}
+                            className="w-full inline-flex items-center justify-center gap-2 px-4 py-3.5 bg-white border-2 border-dashed border-gray-200 hover:border-blue-400 hover:bg-blue-50/50 rounded-2xl text-sm font-medium text-gray-500 hover:text-blue-600 transition-all active:scale-[0.99]"
+                          >
+                            <Plus className="w-4 h-4" /> 新增{getCategoryLabel(activeTab)}职位
+                          </button>
+                        ) : (
+                          <div className="text-xs text-center text-gray-400 py-3">
+                            无权限：新增职位
+                          </div>
+                        )}
+                      </PermissionGate>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </>
+            )}
           </>
         )}
       </div>

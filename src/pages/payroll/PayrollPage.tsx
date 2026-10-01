@@ -16,6 +16,7 @@ import {
 } from '../../api/payrollStatus';
 import MissingPositionConfigDialog from '../../components/MissingPositionConfigDialog';
 import StoreSwitcher from '../../components/StoreSwitcher';
+import StoreStatusBadge from '../../components/StoreStatusBadge';
 import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { getStoreById } from '../../constants/stores';
@@ -338,11 +339,22 @@ const PayrollPage: React.FC = () => {
             storeName={storeName}
             month={selectedMonth}
             excludedCount={excludedCount}
+            loading={loading}
+            hasPlan={!!currentPlan}
+            canExport={allResults.length > 0}
+            canExportPayroll={hasPermission('export:payroll', storeId)}
+            onRun={handleRun}
+            onExport={handleExportTable}
           />
 
-          {/* ⭐ 顶部工具行：StoreSwitcher 在左，NavButtons 在右 */}
+          {/* ⭐ 顶部工具行：门店 + 连接状态 + NavButtons */}
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <StoreSwitcher />
+            <StoreStatusBadge
+              dbOnline={true}
+              saveStatus="idle"
+              lastSavedAt={null}
+            />
 
             <div className="flex-1" />
 
@@ -353,12 +365,9 @@ const PayrollPage: React.FC = () => {
             month={selectedMonth}
             months={Object.keys(store)}
             viewMode={viewMode}
-            loading={loading}
             showViewToggle={allResults.length > 0}
             hideExcluded={hideExcluded}
-            canExport={allResults.length > 0}
             hasPlan={!!currentPlan}
-            canExportPayroll={hasPermission('export:payroll', storeId)}
             onMonthChange={(m) => {
               setSelectedMonth(m);
               fetchedKeyRef.current = '';
@@ -366,8 +375,6 @@ const PayrollPage: React.FC = () => {
             }}
             onViewModeChange={setViewMode}
             onHideExcludedChange={setHideExcluded}
-            onRun={handleRun}
-            onExportTable={handleExportTable}
           />
 
           {error && <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 text-sm text-red-700">{error}</div>}
@@ -420,7 +427,11 @@ const PayrollPage: React.FC = () => {
               </div>
               <h3 className="font-semibold text-gray-700 mb-1">暂无计算结果</h3>
               <p className="text-sm text-gray-400 mb-4">点击「开始计算」按钮，根据本月配置拉取数据并计算薪酬</p>
-              <button onClick={handleRun} disabled={loading} className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97]">
+              <button
+                onClick={handleRun}
+                disabled={loading}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97]"
+              >
                 <Calculator className="w-4 h-4" /> 开始计算
               </button>
             </div>
@@ -433,7 +444,10 @@ const PayrollPage: React.FC = () => {
               </div>
               <h3 className="font-semibold text-gray-700 mb-1">该月份暂无薪酬配置</h3>
               <p className="text-sm text-gray-400 mb-4">请先到「薪酬配置」页面上传或导入 {selectedMonth || '当月'} 的薪酬方案</p>
-              <button onClick={() => navigate('/compensation')} className="inline-flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-xl text-sm font-semibold shadow-sm transition-all">
+              <button
+                onClick={() => navigate('/compensation')}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-xl text-sm font-semibold shadow-sm transition-all"
+              >
                 <ArrowLeft className="w-4 h-4" /> 去配置
               </button>
             </div>

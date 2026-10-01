@@ -1,28 +1,27 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Calendar,
   Sparkles,
-  Store,
   LogOut,
   KeyRound,
   Users,
   User as UserIcon,
   Shield,
 } from 'lucide-react';
-import { formatMonthLabel } from '../utils/format';
-import { getStoreById } from '../constants/stores';
 import { useAuth } from '../contexts/AuthContext';
 import ChangePasswordDialog from './ChangePasswordDialog';
 import UserManageDialog from './UserManageDialog';
 
 interface PageHeaderProps {
-  selectedMonth: string;
+  /** 兼容旧调用，已不显示 */
+  selectedMonth?: string;
   storeId?: string;
+  dbOnline?: boolean;
+  saveStatus?: any;
+  lastSavedAt?: Date | null;
 }
 
-const PageHeader: React.FC<PageHeaderProps> = ({ selectedMonth, storeId }) => {
-  const storeName = getStoreById(storeId || '')?.name || '—';
+const PageHeader: React.FC<PageHeaderProps> = () => {
   const { user, logout, isSuperAdmin } = useAuth();
   const navigate = useNavigate();
 
@@ -65,35 +64,6 @@ const PageHeader: React.FC<PageHeaderProps> = ({ selectedMonth, storeId }) => {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* 门店 */}
-          <div className="flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-3 border border-white/25 shadow-lg">
-            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
-              <Store className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-blue-100/80 font-medium">
-                当前门店
-              </p>
-              <p className="text-sm font-semibold">{storeName}</p>
-            </div>
-          </div>
-
-          {/* 月份 */}
-          <div className="flex items-center gap-3 bg-white/15 backdrop-blur-md rounded-2xl px-5 py-3 border border-white/25 shadow-lg">
-            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
-              <Calendar className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-blue-100/80 font-medium">
-                当前周期
-              </p>
-              <p className="text-sm font-semibold">
-                {selectedMonth ? formatMonthLabel(selectedMonth) : '未选择'}
-              </p>
-            </div>
-          </div>
-
-          {/* 用户信息 + 用户管理（仅超管） + 改密 + 登出 */}
           <div className="flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-3 py-2 border border-white/25 shadow-lg">
             <div className="w-8 h-8 rounded-full bg-white/25 flex items-center justify-center">
               <UserIcon className="w-4 h-4" />
@@ -114,7 +84,6 @@ const PageHeader: React.FC<PageHeaderProps> = ({ selectedMonth, storeId }) => {
               </p>
             </div>
 
-            {/* ⭐ 用户管理：仅超管可见 */}
             {isSuperAdmin && (
               <button
                 onClick={() => setShowUserManage(true)}
@@ -126,7 +95,6 @@ const PageHeader: React.FC<PageHeaderProps> = ({ selectedMonth, storeId }) => {
               </button>
             )}
 
-            {/* 改密：所有人可见 */}
             <button
               onClick={() => setShowChangePwd(true)}
               title="修改密码"
@@ -136,7 +104,6 @@ const PageHeader: React.FC<PageHeaderProps> = ({ selectedMonth, storeId }) => {
               改密
             </button>
 
-            {/* 登出 */}
             <button
               onClick={handleLogout}
               title="退出登录"
@@ -149,7 +116,6 @@ const PageHeader: React.FC<PageHeaderProps> = ({ selectedMonth, storeId }) => {
         </div>
       </div>
 
-      {/* 对话框 */}
       <ChangePasswordDialog
         open={showChangePwd}
         onClose={() => setShowChangePwd(false)}

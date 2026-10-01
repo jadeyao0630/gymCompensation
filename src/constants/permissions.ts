@@ -27,7 +27,9 @@ export type PermissionKey =
   | 'ops:view'
   | 'export:payroll'
   | 'export:personal'
-  | 'report:marketing:view'         // ⭐ 新增：营销收入报告
+  /* 营销收入报告 */
+  | 'report:marketing:view'
+  /* 月综合报告 */
   | 'report:monthly:view'
   /* 综合设置 */
   | 'user:add'
@@ -37,6 +39,8 @@ export type PermissionGroup =
   | '薪酬佣金设置'
   | '薪酬佣金测算'
   | '薪酬佣金计算'
+  | '营销收入报告'
+  | '月综合报告'
   | '综合设置';
 
 export interface PermissionMeta {
@@ -44,12 +48,17 @@ export interface PermissionMeta {
   label: string;
   desc: string;
   group: PermissionGroup;
+  /** ⭐ 子分组（如"月份控制"、"职位控制"），可选 */
+  subGroup?: string;
+  /** 依赖权限：必须先拥有 requires 里的所有权限，此项才可见 */
+  requires?: PermissionKey[];
 }
 
 export const PERMISSION_LIST: PermissionMeta[] = [
   /* ============================================================
    * 1、薪酬佣金设置
    * ============================================================ */
+  /* 基础项（无 subGroup） */
   {
     key: 'plan:view',
     label: '查看方案',
@@ -61,36 +70,80 @@ export const PERMISSION_LIST: PermissionMeta[] = [
     label: '设置方案',
     desc: '修改方案内的职位、阶梯、目标等配置',
     group: '薪酬佣金设置',
+    requires: ['plan:view'],
   },
-  {
-    key: 'target:edit',
-    label: '业绩目标设置',
-    desc: '修改各岗位的业绩目标',
-    group: '薪酬佣金设置',
-  },
+  /* ⭐ 以下都带 subGroup，且依赖 plan:edit */
   {
     key: 'month:add',
     label: '新增月份',
     desc: '在方案中新增月份（含复制已有月份）',
     group: '薪酬佣金设置',
+    subGroup: '月份控制',
+    requires: ['plan:edit'],
   },
   {
     key: 'month:delete',
     label: '删除月份',
     desc: '删除方案中的月份及其全部配置',
     group: '薪酬佣金设置',
+    subGroup: '月份控制',
+    requires: ['plan:edit'],
   },
   {
     key: 'plan:import',
     label: '导入薪酬佣金设置',
     desc: '从 Excel 或 JSON 导入薪酬佣金方案',
     group: '薪酬佣金设置',
+    subGroup: '设置控制',
+    requires: ['plan:edit'],
   },
   {
     key: 'plan:export',
     label: '导出薪酬佣金设置',
     desc: '导出当前薪酬佣金方案为 JSON',
     group: '薪酬佣金设置',
+    subGroup: '设置控制',
+    requires: ['plan:edit'],
+  },
+  {
+    key: 'position:add',
+    label: '新增职位',
+    desc: '在方案中新增职位',
+    group: '薪酬佣金设置',
+    subGroup: '职位控制',
+    requires: ['plan:edit'],
+  },
+  {
+    key: 'position:delete',
+    label: '删除职位',
+    desc: '从方案中删除职位',
+    group: '薪酬佣金设置',
+    subGroup: '职位控制',
+    requires: ['plan:edit'],
+  },
+  {
+    key: 'position:rename',
+    label: '职位名称更改',
+    desc: '修改职位的显示名称',
+    group: '薪酬佣金设置',
+    subGroup: '职位控制',
+    requires: ['plan:edit'],
+  },
+  {
+    key: 'headcount:edit',
+    label: '修改职位人数',
+    desc: '修改各职位的在编人数',
+    group: '薪酬佣金设置',
+    subGroup: '职位控制',
+    requires: ['plan:edit'],
+  },
+  {
+    key: 'target:edit',
+    label: '业绩目标设置',
+    desc: '修改各岗位的业绩目标',
+    group: '薪酬佣金设置',
+    subGroup: '业绩目标',
+    requires: ['plan:edit'],
   },
 
   /* ============================================================
@@ -107,54 +160,63 @@ export const PERMISSION_LIST: PermissionMeta[] = [
     label: '物业费',
     desc: '测算中修改物业费',
     group: '薪酬佣金测算',
+    requires: ['simulation:access'],
   },
   {
     key: 'simulation:cost:electricity',
     label: '电费',
     desc: '测算中修改电费',
     group: '薪酬佣金测算',
+    requires: ['simulation:access'],
   },
   {
     key: 'simulation:cost:rent',
     label: '租金',
     desc: '测算中修改租金',
     group: '薪酬佣金测算',
+    requires: ['simulation:access'],
   },
   {
     key: 'simulation:cost:water',
     label: '水费',
     desc: '测算中修改水费',
     group: '薪酬佣金测算',
+    requires: ['simulation:access'],
   },
   {
     key: 'simulation:cost:network',
     label: '网络费',
     desc: '测算中修改网络费',
     group: '薪酬佣金测算',
+    requires: ['simulation:access'],
   },
   {
     key: 'simulation:cost:other',
     label: '其他杂项',
     desc: '测算中修改其他杂项',
     group: '薪酬佣金测算',
+    requires: ['simulation:access'],
   },
   {
     key: 'simulation:share',
     label: '业绩分配比例',
     desc: '测算中调整业绩分配比例',
     group: '薪酬佣金测算',
+    requires: ['simulation:access'],
   },
   {
     key: 'simulation:gender',
     label: '性别人数',
     desc: '测算中调整性别人数',
     group: '薪酬佣金测算',
+    requires: ['simulation:access'],
   },
   {
     key: 'simulation:course',
     label: '课提设置',
     desc: '测算中调整课提设置',
     group: '薪酬佣金测算',
+    requires: ['simulation:access'],
   },
 
   /* ============================================================
@@ -171,60 +233,46 @@ export const PERMISSION_LIST: PermissionMeta[] = [
     label: '查看运营主管',
     desc: '查看运营主管的薪酬与测算数据',
     group: '薪酬佣金计算',
+    requires: ['payroll:calc'],
   },
   {
     key: 'export:payroll',
     label: '导出工资佣金计算结果',
     desc: '导出全员工资佣金汇总表',
     group: '薪酬佣金计算',
+    requires: ['payroll:calc'],
   },
   {
     key: 'export:personal',
     label: '导出个人结算结果',
     desc: '导出单个员工工资佣金结算',
     group: '薪酬佣金计算',
+    requires: ['payroll:calc'],
   },
-  /* ⭐ 新增：营销收入报告 */
+
+  /* ============================================================
+   * 4、营销收入报告
+   * ============================================================ */
   {
     key: 'report:marketing:view',
     label: '营销收入报告',
     desc: '查看营销收入汇总与销售明细',
-    group: '薪酬佣金计算',
+    group: '营销收入报告',
   },
+
+  /* ============================================================
+   * 5、月综合报告
+   * ============================================================ */
   {
     key: 'report:monthly:view',
     label: '月综合报告',
     desc: '查看月度经营综合分析（薪酬+营销+成本）',
-    group: '薪酬佣金计算',
+    group: '月综合报告',
   },
 
   /* ============================================================
-   * 4、综合设置
+   * 6、综合设置
    * ============================================================ */
-  {
-    key: 'position:add',
-    label: '新增职位',
-    desc: '在方案中新增职位',
-    group: '综合设置',
-  },
-  {
-    key: 'position:delete',
-    label: '删除职位',
-    desc: '从方案中删除职位',
-    group: '综合设置',
-  },
-  {
-    key: 'position:rename',
-    label: '职位名称更改',
-    desc: '修改职位的显示名称',
-    group: '综合设置',
-  },
-  {
-    key: 'headcount:edit',
-    label: '修改职位人数',
-    desc: '修改各职位的在编人数',
-    group: '综合设置',
-  },
   {
     key: 'user:add',
     label: '用户添加',
@@ -247,6 +295,8 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   '薪酬佣金设置',
   '薪酬佣金测算',
   '薪酬佣金计算',
+  '营销收入报告',
+  '月综合报告',
   '综合设置',
 ];
 
@@ -264,4 +314,14 @@ export function isPermissionGranted(
   if (!config.storeIds || config.storeIds.length === 0) return true;
   if (!storeId) return true;
   return config.storeIds.map(String).includes(String(storeId));
+}
+
+/* ⭐ 检查某项权限的依赖是否满足 */
+export function isPermissionAvailable(
+  key: PermissionKey,
+  currentPermissions: PermissionKey[]
+): boolean {
+  const meta = PERMISSION_LIST.find((p) => p.key === key);
+  if (!meta || !meta.requires || meta.requires.length === 0) return true;
+  return meta.requires.every((req) => currentPermissions.includes(req));
 }

@@ -4,6 +4,8 @@ import { TrendingUp, Loader2, Download, Play } from 'lucide-react';
 interface Props {
   isLoading: boolean;
   hasLoaded: boolean;
+  storeName?: string;
+  dbOnline?: boolean;
   onFetch: () => void;
   onExport: () => void;
 }
@@ -25,10 +27,10 @@ export const MonthlyHeader: React.FC<Props> = ({
               Monthly Report
             </span>
           </div>
-          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
+          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight">
             月度经营综合报告
           </h1>
-          <p className="text-sm text-rose-100/90 mt-3 max-w-md">
+          <p className="text-sm text-rose-100/90 mt-3 max-w-md leading-relaxed">
             整合薪酬佣金、营销收入与固定成本，一键查看月度净利润
           </p>
         </div>

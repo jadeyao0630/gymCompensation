@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { Loader2, AlertCircle } from 'lucide-react';
 import StoreSwitcher from '../../components/StoreSwitcher';
+import StoreStatusBadge from '../../components/StoreStatusBadge';
 import NavButtons from '../../components/NavButtons';
 import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -33,6 +34,7 @@ const MonthlyReportPage: React.FC = () => {
     hasLoaded,
     loading,
     error,
+    payrollResults,
     orderList,
     fixedCost,
     fixedCostDetail,
@@ -55,7 +57,7 @@ const MonthlyReportPage: React.FC = () => {
     exportMonthlyReport({
       storeName,
       month: selectedMonth,
-      payrollResults: [],
+      payrollResults,
       payrollSummary,
       orderList,
       marketingSummary,
@@ -74,15 +76,21 @@ const MonthlyReportPage: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* 头部 */}
         <MonthlyHeader
+          storeName={storeName}
           isLoading={loading}
           hasLoaded={hasLoaded}
           onFetch={handleFetch}
           onExport={handleExport}
         />
 
-        {/* 顶部工具行 */}
+        {/* ⭐ 顶部工具行：门店 + 连接状态 + 月份 + NavButtons */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <StoreSwitcher />
+          <StoreStatusBadge
+            dbOnline={true}
+            saveStatus="idle"
+            lastSavedAt={null}
+          />
 
           <div className="flex items-center gap-2">
             <label className="text-sm font-medium text-gray-600">月份</label>
