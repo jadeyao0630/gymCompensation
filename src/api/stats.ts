@@ -167,3 +167,82 @@ export async function getCardOrderList(
 
   return { list, totalAmount };
 }
+
+/* ============================================================
+ * ⭐ 定金/押金列表
+ * ============================================================ */
+export interface FrontMoneyItem {
+  id: string;
+  amount: string;
+  status: string;
+  description: string;
+  create_time: string;
+  deal_time: string;
+  marketers_id: string;
+  marketer_category: string;
+  username: string;
+  phone: string;
+  user_id: string;
+  pay_type: string;
+  purpose: string;
+  refund_time: string;
+  edit_time: string;
+  marketers_name: string;
+  date: string;
+  start_refund_date: string;
+  bus_id: string;
+  bus_name: string;
+  pay_type_name: string;
+  new_pay_type: Array<{
+    front_money_id: string;
+    pay_type_name: string;
+    amount: string;
+    pay_type: string;
+    card_user_id: string;
+  }>;
+}
+
+export interface FrontMoneyResponse {
+  errorcode?: number;
+  errormsg?: string;
+  data?: {
+    list?: FrontMoneyItem[];
+    count?: number;
+    all_told?: number;
+    not_start_using?: number;
+    start_using?: number;
+    drawback?: number;
+  };
+}
+
+export interface FrontMoneyListParams {
+  bus_id: string;
+  s_date: string;
+  e_date: string;
+  page_no?: number;
+  page_size?: number;
+}
+
+export async function getFrontMoneyList(
+  params: FrontMoneyListParams
+): Promise<{ list: FrontMoneyItem[]; count: number }> {
+  const username = import.meta.env.VITE_TEST_USERNAME || '';
+  const password = import.meta.env.VITE_TEST_PASSWORD || '';
+
+  const { data } = await api.post<FrontMoneyResponse>(
+    '/api/front-money-list',
+    {
+      bus_id: params.bus_id,
+      s_date: params.s_date,
+      e_date: params.e_date,
+      page_no: params.page_no ?? 1,
+      page_size: params.page_size ?? 1000,
+      username,
+      password,
+    }
+  );
+
+  const list = data?.data?.list || [];
+  const count = data?.data?.count || 0;
+  return { list, count };
+}

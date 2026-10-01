@@ -6,6 +6,7 @@ import CompensationPage from './pages/CompensationPlanPage';
 import PayrollPage from './pages/payroll/PayrollPage';
 import SimulationPage from './pages/SimulationPage';
 import MarketingReportPage from './pages/marketing/MarketingReportPage';
+import MonthlyReportPage from './pages/monthly/MonthlyReportPage';   // ⭐ 新增
 import NoPermissionPage from './pages/NoPermissionPage';
 
 const App: React.FC = () => (
@@ -50,6 +51,15 @@ const App: React.FC = () => (
       element={
         <RouteGuard permission="report:marketing:view">
           <MarketingReportPage />
+        </RouteGuard>
+      }
+    />
+    {/* ⭐ 月综合报告 */}
+    <Route
+      path="/monthly-report"
+      element={
+        <RouteGuard permission="report:monthly:view">
+          <MonthlyReportPage />
         </RouteGuard>
       }
     />

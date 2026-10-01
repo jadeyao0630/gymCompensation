@@ -28,6 +28,7 @@ export type PermissionKey =
   | 'export:payroll'
   | 'export:personal'
   | 'report:marketing:view'         // ⭐ 新增：营销收入报告
+  | 'report:monthly:view'
   /* 综合设置 */
   | 'user:add'
   | 'user:resetPwd';
@@ -188,6 +189,12 @@ export const PERMISSION_LIST: PermissionMeta[] = [
     key: 'report:marketing:view',
     label: '营销收入报告',
     desc: '查看营销收入汇总与销售明细',
+    group: '薪酬佣金计算',
+  },
+  {
+    key: 'report:monthly:view',
+    label: '月综合报告',
+    desc: '查看月度经营综合分析（薪酬+营销+成本）',
     group: '薪酬佣金计算',
   },
 

@@ -1,15 +1,23 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { BarChart3, Loader2, AlertCircle, Download } from 'lucide-react';
+import {
+  BarChart3, Loader2, AlertCircle, Download, Wallet, ChevronRight,
+} from 'lucide-react';
 import * as XLSX from 'xlsx';
 import StoreSwitcher from '../../components/StoreSwitcher';
 import NavButtons from '../../components/NavButtons';
 import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { getStoreById } from '../../constants/stores';
-import { getCardOrderList, type FinancialFlowItem } from '../../api/stats';
+import {
+  getCardOrderList,
+  getFrontMoneyList,
+  type FinancialFlowItem,
+  type FrontMoneyItem,
+} from '../../api/stats';
 import {
   aggregateOrders,
+  aggregateFrontMoney,
   fmtDate,
   getMonthRange,
   getLastMonth,
@@ -17,11 +25,17 @@ import {
 } from './utils/aggregate';
 import { DateRangePicker } from './components/DateRangePicker';
 import { SummaryCards } from './components/SummaryCards';
-import { TypeBreakdown } from './components/TypeBreakdown';
+// import { TypeBreakdown } from './components/TypeBreakdown';   // ⭐ 已隐藏
 import { CardBreakdown } from './components/CardBreakdown';
 import { PayTypeBreakdown } from './components/PayTypeBreakdown';
 import { MarketerBreakdown } from './components/MarketerBreakdown';
 import { OrderDetailTable } from './components/OrderDetailTable';
+import { FrontMoneyDialog } from './components/FrontMoneyDialog';
+
+const fmtMoney = (v: number) =>
+  `¥${Math.round(v).toLocaleString('zh-CN')}`;
+
+type FrontMoneyFilter = 'all' | 'startUsing' | 'notStart' | 'drawback';
 
 const MarketingReportPage: React.FC = () => {
   const { storeId } = useStore();
@@ -30,7 +44,6 @@ const MarketingReportPage: React.FC = () => {
   const canView = hasPermission('report:marketing:view', storeId);
   const storeName = getStoreById(storeId)?.name || '门店';
 
-  /* 默认日期范围：本月 */
   const initialRange = useMemo(() => {
     const now = new Date();
     const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -43,23 +56,54 @@ const MarketingReportPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [list, setList] = useState<FinancialFlowItem[]>([]);
+  const [frontMoneyList, setFrontMoneyList] = useState<FrontMoneyItem[]>([]);
 
-  /* ⭐ 拉取数据：改为接收 begin/end 参数，不依赖闭包 */
+  const [fmDialog, setFmDialog] = useState<{
+    open: boolean;
+    filter: FrontMoneyFilter;
+    title: string;
+  }>({ open: false, filter: 'all', title: '' });
+
+  const openFmDialog = (filter: FrontMoneyFilter, title: string) => {
+    setFmDialog({ open: true, filter, title });
+  };
+
+  const closeFmDialog = () => {
+    setFmDialog((prev) => ({ ...prev, open: false }));
+  };
+
   const fetchData = useCallback(
     async (begin: string, end: string) => {
       if (!storeId || !begin || !end) return;
       setLoading(true);
       setError('');
       try {
-        const res = await getCardOrderList({
-          bus_id: storeId,
-          sale_id: '',
-          begin_date: begin,
-          end_date: end,
-          page_no: 1,
-          page_size: 2000,
-        });
-        setList(res.list || []);
+        const [orderRes, frontMoneyRes] = await Promise.all([
+          getCardOrderList({
+            bus_id: storeId,
+            sale_id: '',
+            begin_date: begin,
+            end_date: end,
+            page_no: 1,
+            page_size: 2000,
+          }).catch((e) => {
+            console.warn('[MarketingReport] 拉订单失败', e);
+            return { list: [], totalAmount: 0 };
+          }),
+          getFrontMoneyList({
+            bus_id: storeId,
+            s_date: begin,
+            e_date: end,
+            page_no: 1,
+            page_size: 1000,
+          }).catch((e) => {
+            console.warn('[MarketingReport] 拉定金失败', e);
+            return { list: [], count: 0 };
+          }),
+        ]);
+
+        setList(orderRes.list || []);
+        setFrontMoneyList(frontMoneyRes.list || []);
       } catch (e: any) {
         console.error('[MarketingReport] 加载失败', e);
         setError(e?.response?.data?.errormsg || e?.message || '加载数据失败');
@@ -70,13 +114,11 @@ const MarketingReportPage: React.FC = () => {
     [storeId]
   );
 
-  /* 初次 & 门店变化时拉取（用当前 state） */
   useEffect(() => {
     fetchData(beginDate, endDate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId]);
 
-  /* ⭐ 快捷日期：设置 state + 立即用新日期拉取 */
   const handleQuick = (range: string) => {
     const now = new Date();
     let begin = '';
@@ -116,25 +158,24 @@ const MarketingReportPage: React.FC = () => {
 
     setBeginDate(begin);
     setEndDate(end);
-    /* ⭐ 用新日期直接拉取，不需要 setTimeout，也不需要手动点刷新 */
     fetchData(begin, end);
   };
 
-  /* ⭐ 手动修改日期时也自动拉取（可选，如果 DateRangePicker 有 onChange 就让它自动） */
   const handleDateChange = (b: string, e: string) => {
     setBeginDate(b);
     setEndDate(e);
   };
 
-  /* ⭐ 手动刷新按钮：用当前 state 拉取 */
   const handleRefresh = () => {
     fetchData(beginDate, endDate);
   };
 
-  /* 汇总 */
   const summary = useMemo(() => aggregateOrders(list), [list]);
+  const frontMoneySummary = useMemo(
+    () => aggregateFrontMoney(frontMoneyList),
+    [frontMoneyList]
+  );
 
-  /* 导出 Excel */
   const handleExport = () => {
     const wb = XLSX.utils.book_new();
 
@@ -145,47 +186,43 @@ const MarketingReportPage: React.FC = () => {
       ['日期范围', `${beginDate} ~ ${endDate}`],
       ['导出时间', new Date().toLocaleString()],
       [],
-      ['项目', '数值'],
+      ['— 销售订单 —', ''],
       ['订单总数', summary.totalCount],
       ['卡金额合计', summary.totalCardAmount],
       ['实收金额合计', summary.totalIncomeAmount],
       ['押金支付合计', summary.totalPrePayment],
     ];
-    const ws1 = XLSX.utils.aoa_to_sheet(summaryRows);
-    ws1['!cols'] = [{ wch: 18 }, { wch: 18 }];
-    XLSX.utils.book_append_sheet(wb, ws1, '汇总');
 
-    /* Sheet 2：按类型 */
-    const typeRows: any[][] = [
-      ['业务类型', '订单数', '卡金额', '实收金额'],
-    ];
-    summary.types.forEach((t) => {
-      typeRows.push([t.label, t.count, t.cardAmount, t.incomeAmount]);
-    });
-    const ws2 = XLSX.utils.aoa_to_sheet(typeRows);
-    ws2['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 14 }, { wch: 14 }];
-    XLSX.utils.book_append_sheet(wb, ws2, '按类型');
+    /* ⭐ 有定金时，汇总里加定金信息 */
+    if (frontMoneyList.length > 0) {
+      summaryRows.push(
+        [],
+        ['— 定金/押金 —', ''],
+        ['定金笔数', frontMoneySummary.totalCount],
+        ['定金金额合计', frontMoneySummary.totalAmount],
+        ['  已启用笔数', frontMoneySummary.startUsingCount],
+        ['  已启用金额', frontMoneySummary.startUsingAmount],
+        ['  未启用笔数', frontMoneySummary.notStartCount],
+        ['  未启用金额', frontMoneySummary.notStartAmount],
+        ['  已退款笔数', frontMoneySummary.drawbackCount],
+        ['  已退款金额', frontMoneySummary.drawbackAmount]
+      );
+    }
+
+    const ws1 = XLSX.utils.aoa_to_sheet(summaryRows);
+    ws1['!cols'] = [{ wch: 20 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, ws1, '汇总');
 
     /* Sheet 3：卡种细分 */
     const cardRows: any[][] = [
       ['业务类型', '卡种', '数量', '卡金额', '实收金额'],
     ];
     summary.cards.forEach((c) => {
-      cardRows.push([
-        c.label,
-        c.cardName,
-        c.count,
-        c.cardAmount,
-        c.incomeAmount,
-      ]);
+      cardRows.push([c.label, c.cardName, c.count, c.cardAmount, c.incomeAmount]);
     });
     const ws3 = XLSX.utils.aoa_to_sheet(cardRows);
     ws3['!cols'] = [
-      { wch: 20 },
-      { wch: 24 },
-      { wch: 10 },
-      { wch: 14 },
-      { wch: 14 },
+      { wch: 20 }, { wch: 24 }, { wch: 10 }, { wch: 14 }, { wch: 14 },
     ];
     XLSX.utils.book_append_sheet(wb, ws3, '卡种细分');
 
@@ -196,9 +233,12 @@ const MarketingReportPage: React.FC = () => {
     ws4['!cols'] = [{ wch: 14 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, ws4, '收款方式');
 
-    /* Sheet 5：订单明细（押金合并进"收款方式"列） */
+    /* Sheet 5：订单明细 */
     const detailRows: any[][] = [
-      ['日期', '会员名', '卡名', '备注', '类型', '收款方式 / 押金', '业绩归属', '卡金额', '实收'],
+      [
+        '日期', '会员名', '卡名', '备注', '类型',
+        '收款方式 / 押金', '业绩归属', '卡金额', '实收',
+      ],
     ];
     list.forEach((item) => {
       const label = getBusinessTypeLabel(item);
@@ -206,9 +246,7 @@ const MarketingReportPage: React.FC = () => {
         (p) => `${p.pay_type} ¥${p.amount}`
       );
       const prePayment = Number(item.pre_payment || 0);
-      if (prePayment > 0) {
-        payParts.push(`[押金] ¥${prePayment}`);
-      }
+      if (prePayment > 0) payParts.push(`[押金] ¥${prePayment}`);
 
       detailRows.push([
         item.deal_time || '',
@@ -226,17 +264,53 @@ const MarketingReportPage: React.FC = () => {
     });
     const ws5 = XLSX.utils.aoa_to_sheet(detailRows);
     ws5['!cols'] = [
-      { wch: 18 },
-      { wch: 12 },
-      { wch: 20 },
-      { wch: 30 },
-      { wch: 18 },
-      { wch: 32 },
-      { wch: 32 },
-      { wch: 12 },
-      { wch: 12 },
+      { wch: 18 }, { wch: 12 }, { wch: 20 }, { wch: 30 },
+      { wch: 18 }, { wch: 32 }, { wch: 32 }, { wch: 12 }, { wch: 12 },
     ];
     XLSX.utils.book_append_sheet(wb, ws5, '订单明细');
+
+    /* ⭐ Sheet 6：定金明细（仅当有定金数据时导出） */
+    if (frontMoneyList.length > 0) {
+      const fmRows: any[][] = [
+        [
+          '日期', '会员名', '手机', '金额', '状态',
+          '收款方式', '收款人', '启用时间', '退款时间', '描述',
+        ],
+      ];
+      frontMoneyList.forEach((it) => {
+        const isRefund = Number(it.refund_time || 0) > 0;
+        const statusText = isRefund
+          ? '已退款'
+          : it.status === '1'
+          ? '已启用'
+          : '未启用';
+
+        fmRows.push([
+          it.date || it.create_time || '',
+          it.username || '',
+          it.phone || '',
+          Number(it.amount || 0),
+          statusText,
+          it.pay_type_name || '',
+          it.marketers_name || '',
+          it.start_refund_date || '',
+          isRefund ? new Date(Number(it.refund_time) * 1000).toLocaleString() : '',
+          it.description || '',
+        ]);
+      });
+      fmRows.push([
+        '合计', '', '',
+        frontMoneySummary.totalAmount,
+        `${frontMoneySummary.totalCount} 笔`,
+        '', '', '', '', '',
+      ]);
+      const ws6 = XLSX.utils.aoa_to_sheet(fmRows);
+      ws6['!cols'] = [
+        { wch: 16 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 10 },
+        { wch: 12 }, { wch: 12 }, { wch: 20 }, { wch: 20 }, { wch: 40 },
+      ];
+      XLSX.utils.book_append_sheet(wb, ws6, '定金明细');
+    }
 
     const safeName = storeName.replace(/[\\/:*?"<>|]/g, '_');
     XLSX.writeFile(wb, `${safeName}_营销收入_${beginDate}_${endDate}.xlsx`);
@@ -264,13 +338,13 @@ const MarketingReportPage: React.FC = () => {
                 营销收入报告
               </h1>
               <p className="text-sm text-indigo-100/90 mt-3 max-w-md">
-                汇总指定时段内的购卡 / 购泳教 / 购私教订单，按类型、卡种、收款方式分析
+                汇总订单销售 + 定金/押金，按类型、卡种、收款方式分析
               </p>
             </div>
 
             <button
               onClick={handleExport}
-              disabled={list.length === 0}
+              disabled={list.length === 0 && frontMoneyList.length === 0}
               className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-2.5 border border-white/25 shadow-lg hover:bg-white/25 transition disabled:opacity-50"
             >
               <Download className="w-4 h-4" />
@@ -279,7 +353,6 @@ const MarketingReportPage: React.FC = () => {
           </div>
         </div>
 
-        {/* 顶部工具行 */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <StoreSwitcher />
           <div className="flex-1" />
@@ -312,14 +385,209 @@ const MarketingReportPage: React.FC = () => {
         {!loading && !error && (
           <>
             <SummaryCards summary={summary} />
-            <TypeBreakdown summary={summary} />
+
+            {/* ⭐ 定金 / 押金汇总：无数据时自动隐藏 */}
+            {frontMoneyList.length > 0 && (
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm mb-6 overflow-hidden">
+                <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Wallet className="w-4 h-4 text-amber-500" />
+                    定金 / 押金汇总
+                  </h3>
+                  <span className="text-xs text-gray-400">点击卡片查看明细</span>
+                </div>
+                <div className="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* 全部 */}
+                  <button
+                    type="button"
+                    onClick={() => openFmDialog('all', '定金 / 押金明细')}
+                    className="rounded-xl border border-amber-100 bg-amber-50/60 p-4 text-left transition hover:border-amber-300 hover:shadow-md active:scale-[0.98] group"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-xs text-amber-600">
+                        定金金额合计（{frontMoneySummary.totalCount} 笔）
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 text-amber-400 opacity-0 group-hover:opacity-100 transition" />
+                    </div>
+                    <div className="text-xl font-bold text-amber-700 tabular-nums">
+                      {fmtMoney(frontMoneySummary.totalAmount)}
+                    </div>
+                  </button>
+
+                  {/* 已启用 */}
+                  <button
+                    type="button"
+                    onClick={() => openFmDialog('startUsing', '已启用定金明细')}
+                    className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4 text-left transition hover:border-emerald-300 hover:shadow-md active:scale-[0.98] group"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-xs text-emerald-600">
+                        已启用（{frontMoneySummary.startUsingCount} 笔）
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 text-emerald-400 opacity-0 group-hover:opacity-100 transition" />
+                    </div>
+                    <div className="text-xl font-bold text-emerald-700 tabular-nums">
+                      {fmtMoney(frontMoneySummary.startUsingAmount)}
+                    </div>
+                  </button>
+
+                  {/* 未启用 */}
+                  <button
+                    type="button"
+                    onClick={() => openFmDialog('notStart', '未启用定金明细')}
+                    className="rounded-xl border border-gray-100 bg-gray-50/60 p-4 text-left transition hover:border-gray-300 hover:shadow-md active:scale-[0.98] group"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-xs text-gray-500">
+                        未启用（{frontMoneySummary.notStartCount} 笔）
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 text-gray-400 opacity-0 group-hover:opacity-100 transition" />
+                    </div>
+                    <div className="text-xl font-bold text-gray-700 tabular-nums">
+                      {fmtMoney(frontMoneySummary.notStartAmount)}
+                    </div>
+                  </button>
+
+                  {/* 已退款 */}
+                  <button
+                    type="button"
+                    onClick={() => openFmDialog('drawback', '已退款定金明细')}
+                    className="rounded-xl border border-rose-100 bg-rose-50/60 p-4 text-left transition hover:border-rose-300 hover:shadow-md active:scale-[0.98] group"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-xs text-rose-600">
+                        已退款（{frontMoneySummary.drawbackCount} 笔）
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 text-rose-400 opacity-0 group-hover:opacity-100 transition" />
+                    </div>
+                    <div className="text-xl font-bold text-rose-700 tabular-nums">
+                      {fmtMoney(frontMoneySummary.drawbackAmount)}
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ⭐ 按业务类型板块已隐藏 */}
+            {/* <TypeBreakdown summary={summary} /> */}
+
             <CardBreakdown summary={summary} />
             <PayTypeBreakdown summary={summary} />
             <MarketerBreakdown summary={summary} />
             <OrderDetailTable list={list} />
+
+            {/* ⭐ 定金明细表：无数据时自动隐藏 */}
+            {frontMoneyList.length > 0 && (
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm mb-6 overflow-hidden">
+                <div className="px-5 py-3 border-b border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-700">
+                    定金 / 押金明细（{frontMoneyList.length} 笔）
+                  </h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 text-gray-500">
+                      <tr>
+                        <th className="px-3 py-2.5 text-left font-medium">日期</th>
+                        <th className="px-3 py-2.5 text-left font-medium">会员名</th>
+                        <th className="px-3 py-2.5 text-left font-medium">手机</th>
+                        <th className="px-3 py-2.5 text-right font-medium">金额</th>
+                        <th className="px-3 py-2.5 text-center font-medium">状态</th>
+                        <th className="px-3 py-2.5 text-left font-medium">收款方式</th>
+                        <th className="px-3 py-2.5 text-left font-medium">收款人</th>
+                        <th className="px-3 py-2.5 text-left font-medium">
+                          启用/退款时间
+                        </th>
+                        <th className="px-3 py-2.5 text-left font-medium">描述</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {frontMoneyList.map((it) => {
+                        const isRefund = Number(it.refund_time || 0) > 0;
+                        const statusText = isRefund
+                          ? '已退款'
+                          : it.status === '1'
+                          ? '已启用'
+                          : '未启用';
+                        const statusCls = isRefund
+                          ? 'bg-rose-50 text-rose-700 border-rose-100'
+                          : it.status === '1'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                          : 'bg-gray-50 text-gray-600 border-gray-200';
+
+                        return (
+                          <tr key={it.id} className="hover:bg-gray-50/50">
+                            <td className="px-3 py-2 text-gray-500 tabular-nums whitespace-nowrap">
+                              {it.date || it.create_time || '—'}
+                            </td>
+                            <td className="px-3 py-2 text-gray-700">
+                              {it.username || '—'}
+                            </td>
+                            <td className="px-3 py-2 text-gray-500 tabular-nums">
+                              {it.phone || '—'}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums font-semibold text-amber-700">
+                              {fmtMoney(Number(it.amount || 0))}
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              <span
+                                className={`inline-flex px-1.5 py-0.5 rounded text-[10px] border ${statusCls}`}
+                              >
+                                {statusText}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="flex flex-wrap gap-1">
+                                {(it.new_pay_type || []).map((p, i) => (
+                                  <span
+                                    key={i}
+                                    className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-100"
+                                  >
+                                    {p.pay_type_name}
+                                    <span className="font-medium tabular-nums">
+                                      ¥{Number(p.amount).toLocaleString()}
+                                    </span>
+                                  </span>
+                                ))}
+                                {(!it.new_pay_type ||
+                                  it.new_pay_type.length === 0) && (
+                                  <span className="text-gray-300">—</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 text-gray-600">
+                              {it.marketers_name || '—'}
+                            </td>
+                            <td className="px-3 py-2 text-gray-500 tabular-nums whitespace-nowrap">
+                              {it.start_refund_date || '—'}
+                            </td>
+                            <td className="px-3 py-2 text-gray-500">
+                              <span
+                                className="inline-block max-w-[280px] truncate align-middle"
+                                title={it.description}
+                              >
+                                {it.description || '—'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
+
+      <FrontMoneyDialog
+        open={fmDialog.open}
+        onClose={closeFmDialog}
+        title={fmDialog.title}
+        filter={fmDialog.filter}
+        list={frontMoneyList}
+      />
     </div>
   );
 };

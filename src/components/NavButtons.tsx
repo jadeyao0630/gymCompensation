@@ -1,15 +1,13 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutGrid, Sliders, Calculator, BarChart3 } from 'lucide-react';
+import { LayoutGrid, Sliders, Calculator, BarChart3, TrendingUp } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useStore } from '../contexts/StoreContext';
 
-type ActiveKey = 'config' | 'simulation' | 'payroll' | 'marketing';
+type ActiveKey = 'config' | 'simulation' | 'payroll' | 'marketing' | 'monthly';
 
 interface NavButtonsProps {
-  /** 当前页面对应的 key（用于高亮） */
   active: ActiveKey;
-  /** 当前月份（可选），用于跳转带 ?month= */
   month?: string;
 }
 
@@ -26,11 +24,9 @@ export const NavButtons: React.FC<NavButtonsProps> = ({ active, month }) => {
     }
   };
 
-  /* 按钮通用样式 */
   const baseCls =
     'inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-all';
-  const activeCls =
-    'ring-2 ring-offset-2 cursor-default';
+  const activeCls = 'ring-2 ring-offset-2 cursor-default';
   const clickCls = 'active:scale-[0.97]';
 
   return (
@@ -92,6 +88,21 @@ export const NavButtons: React.FC<NavButtonsProps> = ({ active, month }) => {
           }`}
         >
           <BarChart3 className="w-4 h-4" /> 营销收入
+        </button>
+      )}
+
+      {/* ⭐ 月综合报告 */}
+      {hasPermission('report:monthly:view', storeId) && (
+        <button
+          onClick={() => active !== 'monthly' && go('/monthly-report')}
+          disabled={active === 'monthly'}
+          className={`${baseCls} ${
+            active === 'monthly'
+              ? `bg-gradient-to-r from-rose-600 to-orange-600 text-white shadow-rose-500/30 ${activeCls} ring-rose-300`
+              : `bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-700 hover:to-orange-700 text-white shadow-rose-500/20 ${clickCls}`
+          }`}
+        >
+          <TrendingUp className="w-4 h-4" /> 月综合报告
         </button>
       )}
     </div>

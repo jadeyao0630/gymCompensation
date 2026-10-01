@@ -1,0 +1,164 @@
+import React, { useMemo, useState } from 'react';
+import { Navigate } from 'react-router-dom';
+import { Loader2, AlertCircle } from 'lucide-react';
+import StoreSwitcher from '../../components/StoreSwitcher';
+import NavButtons from '../../components/NavButtons';
+import { useStore } from '../../contexts/StoreContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { getStoreById } from '../../constants/stores';
+
+import { useMonthlyReport } from './hooks/useMonthlyReport';
+import { getRecentMonths } from './utils/date';
+import { exportMonthlyReport } from './utils/exportExcel';
+
+import { MonthlyHeader } from './components/MonthlyHeader';
+import { MonthlyEmptyState } from './components/MonthlyEmptyState';
+import { MonthlySummaryCards } from './components/MonthlySummaryCards';
+import { MonthlyDetailPanels } from './components/MonthlyDetailPanels';
+import { MonthlyProfitPanel } from './components/MonthlyProfitPanel';
+
+const MonthlyReportPage: React.FC = () => {
+  const { storeId } = useStore();
+  const { hasPermission } = useAuth();
+
+  const canView = hasPermission('report:monthly:view', storeId);
+  const storeName = getStoreById(storeId)?.name || '门店';
+
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+
+  const {
+    hasLoaded,
+    loading,
+    error,
+    orderList,
+    fixedCost,
+    fixedCostDetail,
+    payrollSummary,
+    marketingSummary,
+    profit,
+    isProfit,
+    fetchAll,
+  } = useMonthlyReport(storeId, selectedMonth);
+
+  const monthOptions = useMemo(() => getRecentMonths(24), []);
+
+  const handleFetch = () => fetchAll(selectedMonth);
+
+  const handleExport = () => {
+    if (!hasLoaded) {
+      alert('请先点击"获取报告"加载数据');
+      return;
+    }
+    exportMonthlyReport({
+      storeName,
+      month: selectedMonth,
+      payrollResults: [],
+      payrollSummary,
+      orderList,
+      marketingSummary,
+      fixedCost,
+      fixedCostDetail,
+      profit,
+    });
+  };
+
+  if (!canView) {
+    return <Navigate to="/no-permission" replace />;
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-rose-50 via-white to-orange-50/50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* 头部 */}
+        <MonthlyHeader
+          isLoading={loading}
+          hasLoaded={hasLoaded}
+          onFetch={handleFetch}
+          onExport={handleExport}
+        />
+
+        {/* 顶部工具行 */}
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <StoreSwitcher />
+
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-gray-600">月份</label>
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+            >
+              {monthOptions.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex-1" />
+
+          <NavButtons active="monthly" month={selectedMonth} />
+        </div>
+
+        {/* 空状态 */}
+        {!hasLoaded && !loading && !error && (
+          <MonthlyEmptyState
+            month={selectedMonth}
+            isLoading={loading}
+            onFetch={handleFetch}
+          />
+        )}
+
+        {/* 加载中 */}
+        {loading && (
+          <div className="flex items-center justify-center py-12 text-gray-400">
+            <Loader2 className="w-5 h-5 animate-spin mr-2" />
+            正在加载：拉订单 + 员工状态 + 计算薪酬 + 拉成本…
+          </div>
+        )}
+
+        {/* 错误 */}
+        {!loading && error && (
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 text-sm text-red-700 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4" />
+            {error}
+          </div>
+        )}
+
+        {/* 主体 */}
+        {!loading && !error && hasLoaded && (
+          <>
+            <MonthlySummaryCards
+              marketing={marketingSummary}
+              payrollTotal={payrollSummary.total}
+              payrollHeadcount={payrollSummary.headcount}
+              fixedCost={fixedCost}
+              profit={profit}
+              isProfit={isProfit}
+            />
+            <MonthlyDetailPanels
+              marketing={marketingSummary}
+              orderCount={orderList.length}
+              payrollSummary={payrollSummary}
+              fixedCost={fixedCost}
+              fixedCostDetail={fixedCostDetail}
+            />
+            <MonthlyProfitPanel
+              incomeAmount={marketingSummary.incomeAmount}
+              payrollTotal={payrollSummary.total}
+              fixedCost={fixedCost}
+              profit={profit}
+              isProfit={isProfit}
+            />
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default MonthlyReportPage;

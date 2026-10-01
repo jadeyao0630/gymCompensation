@@ -362,3 +362,82 @@ export function getLastMonth(): string {
   const d = new Date(y, m - 1, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
+
+/* ============================================================
+ * ⭐ 定金/押金聚合
+ * ============================================================ */
+import type { FrontMoneyItem } from '../../../api/stats';
+
+export interface FrontMoneySummary {
+  totalCount: number;      // 总笔数
+  totalAmount: number;     // 总金额
+  startUsingCount: number; // 已启用
+  startUsingAmount: number;
+  notStartCount: number;   // 未启用
+  notStartAmount: number;
+  drawbackCount: number;   // 已退款
+  drawbackAmount: number;
+  byPayType: PayTypeSummary[];
+  orders: FrontMoneyItem[];
+}
+
+export function aggregateFrontMoney(
+  list: FrontMoneyItem[]
+): FrontMoneySummary {
+  let totalAmount = 0;
+  let startUsingCount = 0;
+  let startUsingAmount = 0;
+  let notStartCount = 0;
+  let notStartAmount = 0;
+  let drawbackCount = 0;
+  let drawbackAmount = 0;
+
+  const payTypeMap = new Map<string, PayTypeSummary>();
+
+  list.forEach((it) => {
+    const amt = Number(it.amount) || 0;
+    totalAmount += amt;
+
+    /* status: "1"=启用中, "0"=未启用, 退款时 refund_time > 0 */
+    const isRefund = Number(it.refund_time || 0) > 0;
+    if (isRefund) {
+      drawbackCount += 1;
+      drawbackAmount += amt;
+    } else if (it.status === '1') {
+      startUsingCount += 1;
+      startUsingAmount += amt;
+    } else {
+      notStartCount += 1;
+      notStartAmount += amt;
+    }
+
+    /* 收款方式 */
+    (it.new_pay_type || []).forEach((p) => {
+      const key = String(p.pay_type || p.pay_type_name);
+      const payAmt = Number(p.amount) || 0;
+      if (!payTypeMap.has(key)) {
+        payTypeMap.set(key, {
+          payType: p.pay_type_name,
+          payTypeId: String(p.pay_type || ''),
+          amount: 0,
+        });
+      }
+      payTypeMap.get(key)!.amount += payAmt;
+    });
+  });
+
+  return {
+    totalCount: list.length,
+    totalAmount,
+    startUsingCount,
+    startUsingAmount,
+    notStartCount,
+    notStartAmount,
+    drawbackCount,
+    drawbackAmount,
+    byPayType: Array.from(payTypeMap.values()).sort(
+      (a, b) => b.amount - a.amount
+    ),
+    orders: list,
+  };
+}
