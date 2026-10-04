@@ -1,5 +1,6 @@
 import React from 'react';
 import { Sliders } from 'lucide-react';
+import NavButtons from './NavButtons';
 
 interface SimulationHeaderProps {
   storeName?: string;
@@ -11,7 +12,9 @@ interface SimulationHeaderProps {
   onGoCompensation?: () => void;
 }
 
-export const SimulationHeader: React.FC<SimulationHeaderProps> = () => {
+export const SimulationHeader: React.FC<SimulationHeaderProps> = ({
+  selectedMonth,
+}) => {
   return (
     <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-purple-600 to-fuchsia-600 shadow-2xl shadow-indigo-500/20 p-8 sm:p-10 mb-8 text-white">
       <div className="absolute -top-24 -right-24 w-72 h-72 rounded-full bg-white/10 blur-3xl pointer-events-none" />
@@ -28,6 +31,11 @@ export const SimulationHeader: React.FC<SimulationHeaderProps> = () => {
         <p className="text-sm text-indigo-100/90 mt-3 max-w-md leading-relaxed">
           设置成本、业绩比例、性别人数，拖动滑块查看利润
         </p>
+
+        {/* ⭐ 底部：页面切换按钮 */}
+        <div className="mt-6">
+          <NavButtons active="simulation" month={selectedMonth} />
+        </div>
       </div>
     </div>
   );

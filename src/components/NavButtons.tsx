@@ -1,10 +1,23 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutGrid, Sliders, Calculator, BarChart3, TrendingUp } from 'lucide-react';
+import {
+  LayoutGrid,
+  Sliders,
+  Calculator,
+  BarChart3,
+  TrendingUp,
+  FileText,
+} from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useStore } from '../contexts/StoreContext';
 
-type ActiveKey = 'config' | 'simulation' | 'payroll' | 'marketing' | 'monthly';
+type ActiveKey =
+  | 'config'
+  | 'simulation'
+  | 'payroll'
+  | 'marketing'
+  | 'monthly'
+  | 'dingtalk';   // ⭐ 新增
 
 interface NavButtonsProps {
   active: ActiveKey;
@@ -91,7 +104,7 @@ export const NavButtons: React.FC<NavButtonsProps> = ({ active, month }) => {
         </button>
       )}
 
-      {/* ⭐ 月综合报告 */}
+      {/* 月综合报告 */}
       {hasPermission('report:monthly:view', storeId) && (
         <button
           onClick={() => active !== 'monthly' && go('/monthly-report')}
@@ -103,6 +116,21 @@ export const NavButtons: React.FC<NavButtonsProps> = ({ active, month }) => {
           }`}
         >
           <TrendingUp className="w-4 h-4" /> 月综合报告
+        </button>
+      )}
+
+      {/* ⭐ 钉钉报销 */}
+      {hasPermission('report:monthly:view', storeId) && (
+        <button
+          onClick={() => active !== 'dingtalk' && go('/dingtalk-report')}
+          disabled={active === 'dingtalk'}
+          className={`${baseCls} ${
+            active === 'dingtalk'
+              ? `bg-gradient-to-r from-sky-600 to-blue-600 text-white shadow-sky-500/30 ${activeCls} ring-sky-300`
+              : `bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-700 hover:to-blue-700 text-white shadow-sky-500/20 ${clickCls}`
+          }`}
+        >
+          <FileText className="w-4 h-4" /> 钉钉报销
         </button>
       )}
     </div>

@@ -13,7 +13,6 @@ import StoreSwitcher from '../components/StoreSwitcher';
 import StoreStatusBadge from '../components/StoreStatusBadge';
 import { SimulationHeader } from '../components/SimulationHeader';
 import { SimulationEmptyState } from '../components/SimulationEmptyState';
-import NavButtons from '../components/NavButtons';
 import { useStore } from '../contexts/StoreContext';
 import { useAuth } from '../contexts/AuthContext';
 import { getStoreById } from '../constants/stores';
@@ -124,7 +123,6 @@ const SimulationPage: React.FC = () => {
 
           <div className="flex-1" />
 
-          <NavButtons active="simulation" month={selectedMonth} />
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">

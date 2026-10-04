@@ -21,7 +21,6 @@ import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { getStoreById } from '../../constants/stores';
 import { PositionEditDialog } from '../../components/PositionEditDialog';
-import NavButtons from '../../components/NavButtons';
 
 import { usePayrollStorage } from '../../hooks/usePayrollStorage';
 import { usePayrollCalculation } from '../../hooks/usePayrollCalculation';
@@ -358,7 +357,6 @@ const PayrollPage: React.FC = () => {
 
             <div className="flex-1" />
 
-            <NavButtons active="payroll" month={selectedMonth} />
           </div>
 
           <PayrollToolbar

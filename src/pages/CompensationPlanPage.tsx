@@ -23,7 +23,6 @@ import StoreStatusBadge from '../components/StoreStatusBadge';
 import PermissionGate from '../components/PermissionGate';
 import { CompensationGuideDialog } from '../components/CompensationGuideDialog';
 import { CompensationEmptyState } from '../components/CompensationEmptyState';
-import NavButtons from '../components/NavButtons';
 import { useStore } from '../contexts/StoreContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompensationPlan } from '../hooks/useCompensationPlan';
@@ -467,7 +466,6 @@ const CompensationPlanPage: React.FC = () => {
 
               <div className="flex-1" />
 
-              <NavButtons active="config" month={selectedMonth} />
             </div>
 
             <Toolbar

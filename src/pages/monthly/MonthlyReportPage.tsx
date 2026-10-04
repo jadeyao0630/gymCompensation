@@ -3,7 +3,6 @@ import { Navigate } from 'react-router-dom';
 import { Loader2, AlertCircle } from 'lucide-react';
 import StoreSwitcher from '../../components/StoreSwitcher';
 import StoreStatusBadge from '../../components/StoreStatusBadge';
-import NavButtons from '../../components/NavButtons';
 import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { getStoreById } from '../../constants/stores';
@@ -109,7 +108,6 @@ const MonthlyReportPage: React.FC = () => {
 
           <div className="flex-1" />
 
-          <NavButtons active="monthly" month={selectedMonth} />
         </div>
 
         {/* 空状态 */}

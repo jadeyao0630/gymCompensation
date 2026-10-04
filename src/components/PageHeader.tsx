@@ -11,9 +11,9 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import ChangePasswordDialog from './ChangePasswordDialog';
 import UserManageDialog from './UserManageDialog';
+import NavButtons from './NavButtons';
 
 interface PageHeaderProps {
-  /** 兼容旧调用，已不显示 */
   selectedMonth?: string;
   storeId?: string;
   dbOnline?: boolean;
@@ -47,72 +47,79 @@ const PageHeader: React.FC<PageHeaderProps> = () => {
         }}
       />
 
-      <div className="relative flex items-start justify-between flex-wrap gap-6">
-        <div>
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 backdrop-blur-sm border border-white/20 mb-4">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span className="text-[11px] font-semibold tracking-widest uppercase">
-              Gym Compensation
-            </span>
+      <div className="relative">
+        <div className="flex items-start justify-between flex-wrap gap-6">
+          <div>
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 backdrop-blur-sm border border-white/20 mb-4">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span className="text-[11px] font-semibold tracking-widest uppercase">
+                Gym Compensation
+              </span>
+            </div>
+            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight">
+              健身房薪酬方案配置
+            </h1>
+            <p className="text-sm text-blue-100/90 mt-3 max-w-md leading-relaxed">
+              按月管理 · Excel 一键导入 · 分职位配置佣金与底薪阶梯
+            </p>
           </div>
-          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight">
-            健身房薪酬方案配置
-          </h1>
-          <p className="text-sm text-blue-100/90 mt-3 max-w-md leading-relaxed">
-            按月管理 · Excel 一键导入 · 分职位配置佣金与底薪阶梯
-          </p>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-3 py-2 border border-white/25 shadow-lg">
+              <div className="w-8 h-8 rounded-full bg-white/25 flex items-center justify-center">
+                <UserIcon className="w-4 h-4" />
+              </div>
+              <div className="hidden sm:block">
+                <div className="flex items-center gap-1">
+                  <p className="text-[10px] uppercase tracking-wider text-blue-100/80 font-medium">
+                    当前用户
+                  </p>
+                  {isSuperAdmin && (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] px-1 py-0.5 rounded bg-amber-300/30 text-amber-100 border border-amber-200/40">
+                      <Shield className="w-2.5 h-2.5" /> 超管
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs font-semibold">
+                  {user?.displayName || user?.username || '未登录'}
+                </p>
+              </div>
+
+              {isSuperAdmin && (
+                <button
+                  onClick={() => setShowUserManage(true)}
+                  title="用户管理"
+                  className="ml-1 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-blue-500/40 border border-white/20 hover:border-blue-300/40 text-xs font-medium transition active:scale-[0.97]"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  用户
+                </button>
+              )}
+
+              <button
+                onClick={() => setShowChangePwd(true)}
+                title="修改密码"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-amber-500/40 border border-white/20 hover:border-amber-300/40 text-xs font-medium transition active:scale-[0.97]"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                改密
+              </button>
+
+              <button
+                onClick={handleLogout}
+                title="退出登录"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-red-500/40 border border-white/20 hover:border-red-300/40 text-xs font-medium transition active:scale-[0.97]"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                登出
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-3 py-2 border border-white/25 shadow-lg">
-            <div className="w-8 h-8 rounded-full bg-white/25 flex items-center justify-center">
-              <UserIcon className="w-4 h-4" />
-            </div>
-            <div className="hidden sm:block">
-              <div className="flex items-center gap-1">
-                <p className="text-[10px] uppercase tracking-wider text-blue-100/80 font-medium">
-                  当前用户
-                </p>
-                {isSuperAdmin && (
-                  <span className="inline-flex items-center gap-0.5 text-[9px] px-1 py-0.5 rounded bg-amber-300/30 text-amber-100 border border-amber-200/40">
-                    <Shield className="w-2.5 h-2.5" /> 超管
-                  </span>
-                )}
-              </div>
-              <p className="text-xs font-semibold">
-                {user?.displayName || user?.username || '未登录'}
-              </p>
-            </div>
-
-            {isSuperAdmin && (
-              <button
-                onClick={() => setShowUserManage(true)}
-                title="用户管理"
-                className="ml-1 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-blue-500/40 border border-white/20 hover:border-blue-300/40 text-xs font-medium transition active:scale-[0.97]"
-              >
-                <Users className="w-3.5 h-3.5" />
-                用户
-              </button>
-            )}
-
-            <button
-              onClick={() => setShowChangePwd(true)}
-              title="修改密码"
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-amber-500/40 border border-white/20 hover:border-amber-300/40 text-xs font-medium transition active:scale-[0.97]"
-            >
-              <KeyRound className="w-3.5 h-3.5" />
-              改密
-            </button>
-
-            <button
-              onClick={handleLogout}
-              title="退出登录"
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-red-500/40 border border-white/20 hover:border-red-300/40 text-xs font-medium transition active:scale-[0.97]"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              登出
-            </button>
-          </div>
+        {/* ⭐ 底部：页面切换按钮 */}
+        <div className="mt-6">
+          <NavButtons active="config" />
         </div>
       </div>
 
