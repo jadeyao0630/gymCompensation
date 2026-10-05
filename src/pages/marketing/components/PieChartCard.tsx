@@ -14,17 +14,19 @@ interface Props {
 
 const fmt = (v: number) => `¥${Math.round(v).toLocaleString('zh-CN')}`;
 
-/* 极坐标 → 直角坐标 */
 const polar = (cx: number, cy: number, r: number, deg: number) => {
   const rad = ((deg - 90) * Math.PI) / 180;
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
 };
 
-/* 生成一段扇形路径 */
+/* 普通扇形（甜甜圈段） */
 const arcPath = (
-  cx: number, cy: number,
-  rOuter: number, rInner: number,
-  start: number, end: number
+  cx: number,
+  cy: number,
+  rOuter: number,
+  rInner: number,
+  start: number,
+  end: number
 ) => {
   const s1 = polar(cx, cy, rOuter, end);
   const e1 = polar(cx, cy, rOuter, start);
@@ -40,9 +42,36 @@ const arcPath = (
   ].join(' ');
 };
 
+/* ⭐ 100% 整环：用两段同心圆 + fillRule=evenodd 挖空中间 */
+const fullRingPath = (
+  cx: number,
+  cy: number,
+  rOuter: number,
+  rInner: number
+) => {
+  return [
+    `M ${cx - rOuter} ${cy}`,
+    `a ${rOuter} ${rOuter} 0 1 0 ${rOuter * 2} 0`,
+    `a ${rOuter} ${rOuter} 0 1 0 ${-rOuter * 2} 0`,
+    `M ${cx - rInner} ${cy}`,
+    `a ${rInner} ${rInner} 0 1 0 ${rInner * 2} 0`,
+    `a ${rInner} ${rInner} 0 1 0 ${-rInner * 2} 0`,
+    'Z',
+  ].join(' ');
+};
+
 export const PieChartCard: React.FC<Props> = ({ data, height = 300 }) => {
   const [active, setActive] = useState(-1);
-  const total = useMemo(() => data.reduce((s, d) => s + d.value, 0), [data]);
+
+  const cleanData = useMemo(
+    () => data.filter((d) => Number(d.value) > 0),
+    [data]
+  );
+
+  const total = useMemo(
+    () => cleanData.reduce((s, d) => s + d.value, 0),
+    [cleanData]
+  );
 
   const cx = 160;
   const cy = height / 2;
@@ -50,12 +79,24 @@ export const PieChartCard: React.FC<Props> = ({ data, height = 300 }) => {
   const rInner = rOuter * 0.58;
 
   let acc = 0;
-  const slices = data.map((d, i) => {
+  const slices = cleanData.map((d, i) => {
     const start = (acc / total) * 360;
     acc += d.value;
     const end = (acc / total) * 360;
-    return { ...d, start, end, index: i };
+    const isFull = end - start >= 359.999;
+    return { ...d, start, end, index: i, isFull };
   });
+
+  if (cleanData.length === 0) {
+    return (
+      <div
+        className="w-full flex items-center justify-center text-sm text-gray-400"
+        style={{ height }}
+      >
+        暂无数据
+      </div>
+    );
+  }
 
   return (
     <div className="w-full">
@@ -69,6 +110,22 @@ export const PieChartCard: React.FC<Props> = ({ data, height = 300 }) => {
           {slices.map((s) => {
             const isActive = active === s.index;
             const grow = isActive ? 6 : 0;
+
+            if (s.isFull) {
+              /* ⭐ 100%：用 path + evenodd 画整环，无白线 */
+              return (
+                <path
+                  key={s.index}
+                  d={fullRingPath(cx, cy, rOuter + grow, rInner - grow)}
+                  fill={s.color}
+                  fillRule="evenodd"
+                  onMouseEnter={() => setActive(s.index)}
+                  onMouseLeave={() => setActive(-1)}
+                  style={{ transition: 'all .15s', cursor: 'pointer' }}
+                />
+              );
+            }
+
             return (
               <path
                 key={s.index}
@@ -82,7 +139,8 @@ export const PieChartCard: React.FC<Props> = ({ data, height = 300 }) => {
               />
             );
           })}
-          {/* 中心总计 */}
+
+          {/* 中心：合计 */}
           <text
             x={cx}
             y={cy - 6}
@@ -106,7 +164,7 @@ export const PieChartCard: React.FC<Props> = ({ data, height = 300 }) => {
 
         {/* 图例 */}
         <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-2 gap-y-2 gap-x-4">
-          {data.map((d, i) => {
+          {cleanData.map((d, i) => {
             const percent = total > 0 ? (d.value / total) * 100 : 0;
             return (
               <button
