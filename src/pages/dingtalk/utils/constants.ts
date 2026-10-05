@@ -102,7 +102,8 @@ export function getTemplateCategory(templateName: string): TemplateCategory {
     name.includes('退款') ||
     name.includes('资产') ||
     name.includes('银行账户') ||
-    name.includes('费用')
+    name.includes('费用') ||
+    name.includes('底薪、佣金支付申请') 
   ) {
     return '智能财务';
   }
