@@ -96,7 +96,9 @@ const MonthlyReportPage: React.FC = () => {
               value={selectedMonth}
               onChange={setSelectedMonth}
               disabled={loading}
-              allowAnyMonth
+              allowAnyMonth                    // ⭐ 所有月份都可选，无灰化
+              showDot={false}        // ⭐ 不显示绿点
+              showHint={false}       // ⭐ 不显示底部提示
               minYear={new Date().getFullYear() - 10}
               maxYear={new Date().getFullYear() + 1}
             />

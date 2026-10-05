@@ -7,12 +7,7 @@ export interface MonthPickerProps {
   /** 选中回调 */
   onChange: (month: string) => void;
 
-  /**
-   * 可用月份列表：
-   * - 传数组 → 只有列表里的月份可选，其它灰掉不可点
-   * - 不传 + allowAnyMonth=false → 全部灰掉
-   * - 不传 + allowAnyMonth=true  → 全部可选
-   */
+  /** 可用月份列表；allowAnyMonth=true 时忽略 */
   availableMonths?: string[];
 
   /** true → 忽略 availableMonths，任何月份都可选 */
@@ -27,7 +22,10 @@ export interface MonthPickerProps {
   /** 尺寸 */
   size?: 'sm' | 'md';
 
-  /** 是否显示「N 个月可选」提示 */
+  /** ⭐ 是否在可选月份右上角显示小绿点（默认 true） */
+  showDot?: boolean;
+
+  /** ⭐ 是否显示底部提示栏（默认 true） */
   showHint?: boolean;
 
   /** 不可选月份的 hover 提示文案 */
@@ -52,7 +50,8 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
   disabled = false,
   theme = 'light',
   size = 'md',
-  showHint = true,
+  showDot = true,        // ⭐ 新增
+  showHint = true,       // ⭐ 保留（若已有）
   unavailableHint = '该月暂无方案',
   minYear,
   maxYear,
@@ -209,6 +208,7 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
               const isCurrent =
                 viewYear === currentYear && m === currentMonth;
 
+              /* 不可选：灰掉 */
               if (!avail) {
                 return (
                   <button
@@ -238,7 +238,8 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
                   ].join(' ')}
                 >
                   {label}
-                  {!isSelected && (
+                  {/* ⭐ 绿点，可通过 showDot 关闭 */}
+                  {showDot && !isSelected && (
                     <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-500" />
                   )}
                   {isSelected && (
@@ -249,7 +250,7 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
             })}
           </div>
 
-          {/* 底部 */}
+          {/* ⭐ 底部提示，可通过 showHint 关闭 */}
           {showHint && (
             <div className="mt-3 pt-2 border-t border-gray-100 flex items-center justify-between text-xs">
               <span className="text-gray-400">
