@@ -125,7 +125,7 @@ export const NavButtons: React.FC<NavButtonsProps> = ({ active, month }) => {
       )}
 
       {/* 钉钉流程 */}
-      {hasPermission('report:monthly:view', storeId) && (
+      {hasPermission('report:dingtalk:view', storeId) && (
         <button
           onClick={() => active !== 'dingtalk' && go('/dingtalk-report')}
           disabled={active === 'dingtalk'}

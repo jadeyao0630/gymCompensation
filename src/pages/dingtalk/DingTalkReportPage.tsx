@@ -1,6 +1,10 @@
 import React, { useMemo, useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import { AlertCircle, Loader2, Search, Store } from 'lucide-react';
 import * as XLSX from 'xlsx';
+
+import { useStore } from '../../contexts/StoreContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 import { getDefaultMonth } from './utils/date';
 import { getStoreFromPaymentUnit } from './utils/constants';
@@ -16,6 +20,12 @@ import GroupedResults from './components/GroupedResults';
 import TypePieChart, { getPieColor } from './components/TypePieChart';
 
 const DingTalkReportPage: React.FC = () => {
+  const { storeId } = useStore();
+  const { hasPermission } = useAuth();
+
+  /* ⭐ 独立权限校验 */
+  const canView = hasPermission('report:dingtalk:view', storeId);
+
   const defaults = useMemo(() => getDefaultMonth(), []);
 
   const [start, setStart] = useState(defaults.start);
@@ -23,9 +33,9 @@ const DingTalkReportPage: React.FC = () => {
   const [paymentUnits, setPaymentUnits] = useState<string[]>([]);
   const [templateTypes, setTemplateTypes] = useState<string[]>([]);
 
-  /* ⭐ 选中的类型（全局，配合明细表） */
+  /* 选中的类型（配合扇形图 + 明细表） */
   const [selectedType, setSelectedType] = useState<string | null>(null);
-  /* ⭐ 选中的门店（扇形图联动） */
+  /* 选中的门店（扇形图联动） */
   const [selectedStore, setSelectedStore] = useState<string | null>(null);
 
   const {
@@ -47,7 +57,7 @@ const DingTalkReportPage: React.FC = () => {
     groupedByStore,
   } = useDingTalkReport();
 
-  /* ⭐ 门店 × 类型的扇形数据 */
+  /* 门店 × 类型的扇形数据 */
   const storeCharts = useMemo(
     () =>
       groupedByStore.map((s) => ({
@@ -86,14 +96,16 @@ const DingTalkReportPage: React.FC = () => {
     setTemplateTypes(names);
   };
 
-  /* ⭐ 明细过滤：按门店 + 类型 */
+  /* 明细过滤：按门店 + 类型 */
   const filteredGrouped = useMemo(() => {
     let groups = grouped;
     if (selectedStore) {
-      groups = groups.map((g) => ({
-        ...g,
-        units: g.units.filter((u) => u.storeName === selectedStore),
-      })).filter((g) => g.units.length > 0);
+      groups = groups
+        .map((g) => ({
+          ...g,
+          units: g.units.filter((u) => u.storeName === selectedStore),
+        }))
+        .filter((g) => g.units.length > 0);
     }
     if (selectedType) {
       groups = groups.filter((g) => g.typeName === selectedType);
@@ -166,6 +178,11 @@ const DingTalkReportPage: React.FC = () => {
     XLSX.writeFile(wb, `钉钉流程报告_${start}_${end}${suffix}.xlsx`);
   };
 
+  /* ⭐ 无权限 → 跳转 */
+  if (!canView) {
+    return <Navigate to="/no-permission" replace />;
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50/50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -227,7 +244,7 @@ const DingTalkReportPage: React.FC = () => {
 
         {!loading && !error && results.length > 0 && (
           <>
-            {/* ⭐ 每个门店一个扇形图（按金额） */}
+            {/* 每个门店一个扇形图（按金额） */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
               {storeCharts.map((chart) => {
                 const isStoreSelected = selectedStore === chart.storeName;
@@ -288,7 +305,6 @@ const DingTalkReportPage: React.FC = () => {
                       selectedLabel={isStoreSelected ? selectedType : null}
                       onSelect={(label) => {
                         if (!isStoreSelected && label) {
-                          /* 点击扇区但未选门店 → 自动选该门店 */
                           setSelectedStore(chart.storeName);
                           setSelectedType(label);
                         } else {
@@ -302,7 +318,7 @@ const DingTalkReportPage: React.FC = () => {
               })}
             </div>
 
-            {/* ⭐ 当前筛选提示 */}
+            {/* 当前筛选提示 */}
             {(selectedStore || selectedType) && (
               <div className="bg-blue-50 border border-blue-100 rounded-2xl p-3 mb-4 text-xs text-blue-700 flex items-center gap-2 flex-wrap">
                 <span className="font-medium">当前筛选：</span>
@@ -341,7 +357,7 @@ const DingTalkReportPage: React.FC = () => {
               </div>
             )}
 
-            {/* ⭐ 明细表（联动） */}
+            {/* 明细表（联动） */}
             <GroupedResults
               grouped={filteredGrouped}
               isColVisible={isColVisible}

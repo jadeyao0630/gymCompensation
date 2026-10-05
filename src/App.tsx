@@ -65,11 +65,11 @@ const App: React.FC = () => (
         </RouteGuard>
       }
     />
-    {/* ⭐ 钉钉报销数据 */}
+    {/* ⭐ 钉钉流程数据 */}
     <Route
       path="/dingtalk-report"
       element={
-        <RouteGuard permission="report:monthly:view">
+        <RouteGuard permission="report:dingtalk:view">
           <DingTalkReportPage />
         </RouteGuard>
       }

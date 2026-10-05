@@ -31,6 +31,8 @@ export type PermissionKey =
   | 'report:marketing:view'
   /* 月综合报告 */
   | 'report:monthly:view'
+  /* ⭐ 钉钉流程报告 */
+  | 'report:dingtalk:view'
   /* 综合设置 */
   | 'user:add'
   | 'user:resetPwd';
@@ -41,6 +43,7 @@ export type PermissionGroup =
   | '薪酬佣金计算'
   | '营销收入报告'
   | '月综合报告'
+  | '钉钉流程报告'      // ⭐ 独立分组
   | '综合设置';
 
 export interface PermissionMeta {
@@ -48,9 +51,7 @@ export interface PermissionMeta {
   label: string;
   desc: string;
   group: PermissionGroup;
-  /** ⭐ 子分组（如"月份控制"、"职位控制"），可选 */
   subGroup?: string;
-  /** 依赖权限：必须先拥有 requires 里的所有权限，此项才可见 */
   requires?: PermissionKey[];
 }
 
@@ -58,7 +59,6 @@ export const PERMISSION_LIST: PermissionMeta[] = [
   /* ============================================================
    * 1、薪酬佣金设置
    * ============================================================ */
-  /* 基础项（无 subGroup） */
   {
     key: 'plan:view',
     label: '查看方案',
@@ -72,7 +72,14 @@ export const PERMISSION_LIST: PermissionMeta[] = [
     group: '薪酬佣金设置',
     requires: ['plan:view'],
   },
-  /* ⭐ 以下都带 subGroup，且依赖 plan:edit */
+  {
+    key: 'target:edit',
+    label: '业绩目标设置',
+    desc: '修改各岗位的业绩目标',
+    group: '薪酬佣金设置',
+    subGroup: '业绩目标',
+    requires: ['plan:edit'],
+  },
   {
     key: 'month:add',
     label: '新增月份',
@@ -135,14 +142,6 @@ export const PERMISSION_LIST: PermissionMeta[] = [
     desc: '修改各职位的在编人数',
     group: '薪酬佣金设置',
     subGroup: '职位控制',
-    requires: ['plan:edit'],
-  },
-  {
-    key: 'target:edit',
-    label: '业绩目标设置',
-    desc: '修改各岗位的业绩目标',
-    group: '薪酬佣金设置',
-    subGroup: '业绩目标',
     requires: ['plan:edit'],
   },
 
@@ -271,7 +270,17 @@ export const PERMISSION_LIST: PermissionMeta[] = [
   },
 
   /* ============================================================
-   * 6、综合设置
+   * 6、⭐ 钉钉流程报告
+   * ============================================================ */
+  {
+    key: 'report:dingtalk:view',
+    label: '钉钉流程报告',
+    desc: '查看钉钉审批流程数据（报销、付款、借款等）',
+    group: '钉钉流程报告',
+  },
+
+  /* ============================================================
+   * 7、综合设置
    * ============================================================ */
   {
     key: 'user:add',
@@ -297,6 +306,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   '薪酬佣金计算',
   '营销收入报告',
   '月综合报告',
+  '钉钉流程报告',
   '综合设置',
 ];
 
@@ -316,7 +326,6 @@ export function isPermissionGranted(
   return config.storeIds.map(String).includes(String(storeId));
 }
 
-/* ⭐ 检查某项权限的依赖是否满足 */
 export function isPermissionAvailable(
   key: PermissionKey,
   currentPermissions: PermissionKey[]
