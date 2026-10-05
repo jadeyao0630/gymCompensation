@@ -1,6 +1,6 @@
 import React from 'react';
 import { LayoutGrid, LayoutList, Eye, EyeOff } from 'lucide-react';
-import { PayrollMonthPicker } from './PayrollMonthPicker';
+import { MonthPicker } from '../../../components/MonthPicker';
 
 interface Props {
   month: string;
@@ -34,11 +34,13 @@ export const PayrollToolbar: React.FC<Props> = ({
       <div className="flex items-center gap-2">
         <label className="text-sm font-medium text-gray-600">月份</label>
         {/* ⭐ 换成日历式月份选择器 */}
-        <PayrollMonthPicker
+        <MonthPicker
           value={month}
           availableMonths={availableMonths}
           onChange={onMonthChange}
           disabled={monthsLoading}
+          theme="light"
+          unavailableHint="该月暂无薪酬配置"
         />
       </div>
 

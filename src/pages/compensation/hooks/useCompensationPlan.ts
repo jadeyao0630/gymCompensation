@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CompensationStore, MonthlyCompensationPlan } from '../types/compensation';
-import { fetchPlanByMonth, fetchPlanList, initStorePlans, savePlan } from '../api/compensation';
+import type { CompensationStore, MonthlyCompensationPlan } from '../../../types/compensation';
+import { fetchPlanByMonth, fetchPlanList, initStorePlans, savePlan } from '../../../api/compensation';
 
 const STORAGE_KEY = 'gym_compensation_store_v2';
 const UNDO_LIMIT = 20;

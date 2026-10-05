@@ -11,8 +11,8 @@ import {
   CheckCircle2,
   AlertCircle,
 } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
-import { adminCheckInitStatus, adminInitDatabase } from '../api/adminAuth';
+import { useAuth } from '../../contexts/AuthContext';
+import { adminCheckInitStatus, adminInitDatabase } from '../../api/adminAuth';
 
 type InitStatus = 'checking' | 'ready' | 'initializing' | 'initialized' | 'error';
 

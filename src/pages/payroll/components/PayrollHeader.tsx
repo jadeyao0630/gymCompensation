@@ -2,8 +2,8 @@ import React from 'react';
 import {
   Sparkles, UserX, Calculator, Download, Loader2,
 } from 'lucide-react';
-import NavButtons from '../../components/NavButtons';
-import UserMenu from '../../components/UserMenu';
+import NavButtons from '../../../components/NavButtons';
+import UserMenu from '../../../components/UserMenu';
 
 interface Props {
   storeName?: string;

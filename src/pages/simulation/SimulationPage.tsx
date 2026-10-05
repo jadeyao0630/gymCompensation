@@ -5,19 +5,19 @@ import type {
   CompensationStore,
   MonthlyCompensationPlan,
   SimulationResult,
-} from '../types/compensation';
-import { calcSimulation } from '../utils/simulation';
-import SimulationSettingsPanel from '../components/SimulationSettingsPanel';
-import RevenueSliderPanel from '../components/RevenueSliderPanel';
-import StoreSwitcher from '../components/StoreSwitcher';
-import StoreStatusBadge from '../components/StoreStatusBadge';
-import { SimulationHeader } from '../components/SimulationHeader';
-import { SimulationEmptyState } from '../components/SimulationEmptyState';
-import { MonthPicker } from '../components/MonthPicker';
-import { useStore } from '../contexts/StoreContext';
-import { useAuth } from '../contexts/AuthContext';
-import { getStoreById } from '../constants/stores';
-import { useSimulation } from '../hooks/useSimulation';
+} from '../../types/compensation';
+import { calcSimulation } from '../../utils/simulation';
+import SimulationSettingsPanel from '../../components/SimulationSettingsPanel';
+import RevenueSliderPanel from '../../components/RevenueSliderPanel';
+import StoreSwitcher from '../../components/StoreSwitcher';
+import StoreStatusBadge from '../../components/StoreStatusBadge';
+import { SimulationHeader } from '../../components/SimulationHeader';
+import { SimulationEmptyState } from '../../components/SimulationEmptyState';
+import { MonthPicker } from '../../components/MonthPicker';
+import { useStore } from '../../contexts/StoreContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { getStoreById } from '../../constants/stores';
+import { useSimulation } from '../../hooks/useSimulation';
 
 const SimulationPage: React.FC = () => {
   const navigate = useNavigate();
@@ -140,6 +140,7 @@ const SimulationPage: React.FC = () => {
               onChange={handleMonthChange}
               availableMonths={availableMonths}
               theme="light"
+              unavailableHint="该月暂无方案，请先到「薪酬配置」导入"
             />
 
             {!currentPlan && (

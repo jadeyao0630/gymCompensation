@@ -10,10 +10,10 @@ import {
   UserX,
   UserPlus,
 } from 'lucide-react';
-import type { PayrollResult, Department } from '../../utils/payroll';
-import type { MonthlyCompensationPlan } from '../../types/compensation';
-import { getDepartmentOf, calcDepartmentStats } from '../../utils/payroll';
-import { exportEmployeePayrollToExcel } from '../../utils/exportPayroll';
+import type { PayrollResult, Department } from '../../../utils/payroll';
+import type { MonthlyCompensationPlan } from '../../../types/compensation';
+import { getDepartmentOf, calcDepartmentStats } from '../../../utils/payroll';
+import { exportEmployeePayrollToExcel } from '../../../utils/exportPayroll';
 import {
   GenderBadge,
   ManagerBadge,
@@ -25,7 +25,7 @@ import {
   DEPT_DETAIL_FIELDS,
 } from './PayrollBadges';
 import ClassMemberDetailRow from './ClassMemberDetailRow';
-import SalesDetailRow from '../../components/SalesDetailRow';
+import SalesDetailRow from '../../../components/SalesDetailRow';
 
 interface Props {
   allResults: PayrollResult[];

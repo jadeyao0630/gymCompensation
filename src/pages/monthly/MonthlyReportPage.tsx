@@ -15,7 +15,7 @@ import { MonthlyEmptyState } from './components/MonthlyEmptyState';
 import { MonthlySummaryCards } from './components/MonthlySummaryCards';
 import { MonthlyDetailPanels } from './components/MonthlyDetailPanels';
 import { MonthlyProfitPanel } from './components/MonthlyProfitPanel';
-import { MonthPicker } from './components/MonthPicker';
+import { MonthPicker } from '../../components/MonthPicker';
 
 const MonthlyReportPage: React.FC = () => {
   const { storeId } = useStore();
@@ -96,6 +96,7 @@ const MonthlyReportPage: React.FC = () => {
               value={selectedMonth}
               onChange={setSelectedMonth}
               disabled={loading}
+              allowAnyMonth
               minYear={new Date().getFullYear() - 10}
               maxYear={new Date().getFullYear() + 1}
             />

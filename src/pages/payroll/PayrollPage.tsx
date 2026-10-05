@@ -25,13 +25,13 @@ import { PositionEditDialog } from '../../components/PositionEditDialog';
 import { usePayrollStorage } from '../../hooks/usePayrollStorage';
 import { usePayrollCalculation } from '../../hooks/usePayrollCalculation';
 
-import { PayrollHeader } from './PayrollHeader';
-import { PayrollToolbar } from './PayrollToolbar';
-import { PayrollSummary } from './PayrollSummary';
-import { PayrollMissingAlert } from './PayrollMissingAlert';
-import { PayrollAllTable } from './PayrollAllTable';
-import { PayrollDeptList } from './PayrollDeptList';
-import { PayrollActionsProvider } from './PayrollActionsContext';
+import { PayrollHeader } from './components/PayrollHeader';
+import { PayrollToolbar } from './components/PayrollToolbar';
+import { PayrollSummary } from './components/PayrollSummary';
+import { PayrollMissingAlert } from './components/PayrollMissingAlert';
+import { PayrollAllTable } from './components/PayrollAllTable';
+import { PayrollDeptList } from './components/PayrollDeptList';
+import { PayrollActionsProvider } from './components/PayrollActionsContext';
 
 type ViewMode = 'all' | 'department';
 

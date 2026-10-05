@@ -7,8 +7,8 @@ import {
   UserX,
   UserPlus,
 } from 'lucide-react';
-import type { PayrollResult } from '../../utils/payroll';
-import type { MonthlyCompensationPlan } from '../../types/compensation';
+import type { PayrollResult } from '../../../utils/payroll';
+import type { MonthlyCompensationPlan } from '../../../types/compensation';
 import {
   GenderBadge,
   ManagerBadge,
@@ -16,9 +16,9 @@ import {
   fmtMoney,
   fmtNumber,
 } from './PayrollBadges';
-import { exportEmployeePayrollToExcel } from '../../utils/exportPayroll';
+import { exportEmployeePayrollToExcel } from '../../../utils/exportPayroll';
 import ClassMemberDetailRow from './ClassMemberDetailRow';
-import SalesDetailRow from '../../components/SalesDetailRow';
+import SalesDetailRow from '../../../components/SalesDetailRow';
 
 interface Props {
   results: PayrollResult[];

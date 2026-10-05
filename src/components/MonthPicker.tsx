@@ -8,28 +8,29 @@ export interface MonthPickerProps {
   onChange: (month: string) => void;
 
   /**
-   * 可用月份列表；
+   * 可用月份列表：
    * - 传数组 → 只有列表里的月份可选，其它灰掉不可点
-   * - 传 undefined 且 allowAnyMonth=false → 所有月份灰掉（相当于禁用）
+   * - 不传 + allowAnyMonth=false → 全部灰掉
+   * - 不传 + allowAnyMonth=true  → 全部可选
    */
   availableMonths?: string[];
 
-  /** true → 忽略 availableMonths，任何月份都可选（配置页「快速切月」用） */
+  /** true → 忽略 availableMonths，任何月份都可选 */
   allowAnyMonth?: boolean;
 
   /** 是否禁用整个选择器 */
   disabled?: boolean;
 
-  /** 主题：light（白底）/ dark（深色头部） */
+  /** 主题：light / dark */
   theme?: 'light' | 'dark';
 
   /** 尺寸 */
   size?: 'sm' | 'md';
 
-  /** 面板底部是否显示「N 个月可算」提示 */
+  /** 是否显示「N 个月可选」提示 */
   showHint?: boolean;
 
-  /** 面板提示文案（可选月份时的提示，默认「该月暂无薪酬配置」） */
+  /** 不可选月份的 hover 提示文案 */
   unavailableHint?: string;
 
   minYear?: number;
@@ -63,7 +64,6 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
   const min = minYear ?? currentYear - 5;
   const max = maxYear ?? currentYear + 1;
 
-  /* 可用月份集合（allowAnyMonth 时忽略） */
   const availableSet = useMemo(
     () => new Set(allowAnyMonth ? [] : availableMonths || []),
     [availableMonths, allowAnyMonth]
@@ -87,7 +87,6 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
 
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  /* 点击外部 / Esc 关闭 */
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e: MouseEvent) => {
@@ -119,7 +118,6 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
     setOpen(false);
   };
 
-  /* 当前年份可选月数 */
   const availableCountInYear = useMemo(() => {
     if (allowAnyMonth) return 12;
     let n = 0;
@@ -127,10 +125,8 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
       if (availableSet.has(`${viewYear}-${pad2(m)}`)) n++;
     }
     return n;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availableSet, viewYear, allowAnyMonth]);
 
-  /* ---------- 主题样式 ---------- */
   const triggerCls =
     theme === 'dark'
       ? 'bg-white/15 hover:bg-white/25 border-white/25 text-white'
@@ -141,9 +137,6 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
   const sizeCls =
     size === 'sm' ? 'px-2.5 py-1.5 text-xs gap-1.5' : 'px-3 py-2 text-sm gap-2';
 
-  const yearInputFocusRing =
-    'focus:ring-emerald-500'; // 三处统一绿色主题
-
   return (
     <div ref={wrapRef} className="relative inline-block">
       {/* 触发按钮 */}
@@ -153,7 +146,7 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
         onClick={() => setOpen((v) => !v)}
         className={`inline-flex items-center rounded-xl border shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${triggerCls} ${sizeCls}`}
       >
-        <CalendarDays className={`w-4 h-4 ${iconCls}`} />
+        <CalendarDays className="w-4 h-4" />
         <span className="tabular-nums font-medium">
           {parsed.year} 年 {parsed.month} 月
         </span>
@@ -190,7 +183,7 @@ export const MonthPicker: React.FC<MonthPickerProps> = ({
                     setViewYear(v);
                   }
                 }}
-                className={`w-20 text-center text-sm font-semibold text-gray-800 border border-gray-200 rounded-lg px-2 py-1 tabular-nums focus:outline-none focus:ring-2 ${yearInputFocusRing}`}
+                className="w-20 text-center text-sm font-semibold text-gray-800 border border-gray-200 rounded-lg px-2 py-1 tabular-nums focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
               <span className="text-sm text-gray-500">年</span>
             </div>

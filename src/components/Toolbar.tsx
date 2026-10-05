@@ -7,7 +7,6 @@ import {
   Calendar,
   Loader2,
 } from 'lucide-react';
-import { formatMonthLabel } from '../utils/format';
 import { MonthPicker } from './MonthPicker';
 
 interface ToolbarProps {
@@ -71,7 +70,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
           <MonthPicker
             value={selectedMonth}
             onChange={onSelectMonth}
-            availableMonths={sortedAvailable}
+            availableMonths={availableMonths}
             theme="light"
             unavailableHint="该月暂无方案，请点击「新增月份」"
           />

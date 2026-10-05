@@ -1,14 +1,14 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import RouteGuard from './components/RouteGuard';
-import LoginPage from './pages/LoginPage';
-import CompensationPage from './pages/CompensationPlanPage';
+import LoginPage from './pages/login/LoginPage';
+import CompensationPage from './pages/compensation/CompensationPlanPage';
 import PayrollPage from './pages/payroll/PayrollPage';
-import SimulationPage from './pages/SimulationPage';
+import SimulationPage from './pages/simulation/SimulationPage';
 import MarketingReportPage from './pages/marketing/MarketingReportPage';
 import MonthlyReportPage from './pages/monthly/MonthlyReportPage';
 import DingTalkReportPage from './pages/dingtalk/DingTalkReportPage';   // ⭐ 新增
-import NoPermissionPage from './pages/NoPermissionPage';
+import NoPermissionPage from './pages/no-permission/NoPermissionPage';
 
 const App: React.FC = () => (
   <Routes>
