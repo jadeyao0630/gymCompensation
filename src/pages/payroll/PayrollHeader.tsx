@@ -3,6 +3,7 @@ import {
   Sparkles, UserX, Calculator, Download, Loader2,
 } from 'lucide-react';
 import NavButtons from '../../components/NavButtons';
+import UserMenu from '../../components/UserMenu';
 
 interface Props {
   storeName?: string;
@@ -60,35 +61,38 @@ export const PayrollHeader: React.FC<Props> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onRun}
-              disabled={loading || !hasPlan}
-              title={!hasPlan ? '该月份暂无薪酬配置' : '开始计算'}
-              className="inline-flex items-center gap-2 bg-white text-emerald-700 hover:bg-white/90 rounded-2xl px-5 py-2.5 shadow-lg transition disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-sm"
-            >
-              {loading ? (
-                <><Loader2 className="w-4 h-4 animate-spin" /> 计算中…</>
-              ) : (
-                <><Calculator className="w-4 h-4" /> 开始计算</>
-              )}
-            </button>
+          <div className="flex flex-col items-end gap-2">
+            <UserMenu variant="dark" />
 
-            {canExportPayroll && (
+            <div className="flex items-center gap-2">
               <button
-                onClick={onExport}
-                disabled={loading || !canExport}
-                title={!canExport ? '暂无可导出的数据' : '导出整表为 Excel'}
-                className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-2.5 border border-white/25 shadow-lg hover:bg-white/25 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={onRun}
+                disabled={loading || !hasPlan}
+                title={!hasPlan ? '该月份暂无薪酬配置' : '开始计算'}
+                className="inline-flex items-center gap-2 bg-white text-emerald-700 hover:bg-white/90 rounded-2xl px-5 py-2.5 shadow-lg transition disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-sm"
               >
-                <Download className="w-4 h-4" />
-                <span className="text-sm font-medium">导出整表</span>
+                {loading ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> 计算中…</>
+                ) : (
+                  <><Calculator className="w-4 h-4" /> 开始计算</>
+                )}
               </button>
-            )}
+
+              {canExportPayroll && (
+                <button
+                  onClick={onExport}
+                  disabled={loading || !canExport}
+                  title={!canExport ? '暂无可导出的数据' : '导出整表为 Excel'}
+                  className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-2.5 border border-white/25 shadow-lg hover:bg-white/25 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Download className="w-4 h-4" />
+                  <span className="text-sm font-medium">导出整表</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* ⭐ 底部：页面切换按钮 */}
         <div className="mt-6">
           <NavButtons active="payroll" month={month} />
         </div>

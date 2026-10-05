@@ -8,6 +8,7 @@ import * as XLSX from 'xlsx';
 import StoreSwitcher from '../../components/StoreSwitcher';
 import StoreStatusBadge from '../../components/StoreStatusBadge';
 import NavButtons from '../../components/NavButtons';
+import UserMenu from '../../components/UserMenu';
 import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { getStoreById } from '../../constants/stores';
@@ -339,27 +340,32 @@ const MarketingReportPage: React.FC = () => {
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleRefresh}
-                  disabled={loading}
-                  className="inline-flex items-center gap-2 bg-white text-indigo-700 hover:bg-white/90 rounded-2xl px-5 py-2.5 shadow-lg transition disabled:opacity-50 font-semibold text-sm"
-                >
-                  {loading ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> 加载中…</>
-                  ) : (
-                    <><RefreshCw className="w-4 h-4" /> 刷新</>
-                  )}
-                </button>
+              {/* ⭐ 右上角：UserMenu + 刷新/导出按钮 */}
+              <div className="flex flex-col items-end gap-2">
+                <UserMenu variant="dark" />
 
-                <button
-                  onClick={handleExport}
-                  disabled={list.length === 0 && frontMoneyList.length === 0}
-                  className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-2.5 border border-white/25 shadow-lg hover:bg-white/25 transition disabled:opacity-50"
-                >
-                  <Download className="w-4 h-4" />
-                  <span className="text-sm font-medium">导出 Excel</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleRefresh}
+                    disabled={loading}
+                    className="inline-flex items-center gap-2 bg-white text-indigo-700 hover:bg-white/90 rounded-2xl px-5 py-2.5 shadow-lg transition disabled:opacity-50 font-semibold text-sm"
+                  >
+                    {loading ? (
+                      <><Loader2 className="w-4 h-4 animate-spin" /> 加载中…</>
+                    ) : (
+                      <><RefreshCw className="w-4 h-4" /> 刷新</>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={handleExport}
+                    disabled={list.length === 0 && frontMoneyList.length === 0}
+                    className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-2.5 border border-white/25 shadow-lg hover:bg-white/25 transition disabled:opacity-50"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span className="text-sm font-medium">导出 Excel</span>
+                  </button>
+                </div>
               </div>
             </div>
 

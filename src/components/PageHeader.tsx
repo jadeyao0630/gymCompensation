@@ -1,17 +1,7 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-  Sparkles,
-  LogOut,
-  KeyRound,
-  Users,
-  User as UserIcon,
-  Shield,
-} from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
-import ChangePasswordDialog from './ChangePasswordDialog';
-import UserManageDialog from './UserManageDialog';
+import React from 'react';
+import { Sparkles } from 'lucide-react';
 import NavButtons from './NavButtons';
+import UserMenu from './UserMenu';
 
 interface PageHeaderProps {
   selectedMonth?: string;
@@ -22,18 +12,6 @@ interface PageHeaderProps {
 }
 
 const PageHeader: React.FC<PageHeaderProps> = () => {
-  const { user, logout, isSuperAdmin } = useAuth();
-  const navigate = useNavigate();
-
-  const [showChangePwd, setShowChangePwd] = useState(false);
-  const [showUserManage, setShowUserManage] = useState(false);
-
-  const handleLogout = async () => {
-    if (!confirm('确定要退出登录吗？')) return;
-    await logout();
-    navigate('/login', { replace: true });
-  };
-
   return (
     <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-blue-600 to-violet-600 shadow-2xl shadow-indigo-500/20 p-8 sm:p-10 mb-8 text-white">
       <div className="absolute -top-24 -right-24 w-72 h-72 rounded-full bg-white/10 blur-3xl animate-glow pointer-events-none" />
@@ -64,57 +42,8 @@ const PageHeader: React.FC<PageHeaderProps> = () => {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-3 py-2 border border-white/25 shadow-lg">
-              <div className="w-8 h-8 rounded-full bg-white/25 flex items-center justify-center">
-                <UserIcon className="w-4 h-4" />
-              </div>
-              <div className="hidden sm:block">
-                <div className="flex items-center gap-1">
-                  <p className="text-[10px] uppercase tracking-wider text-blue-100/80 font-medium">
-                    当前用户
-                  </p>
-                  {isSuperAdmin && (
-                    <span className="inline-flex items-center gap-0.5 text-[9px] px-1 py-0.5 rounded bg-amber-300/30 text-amber-100 border border-amber-200/40">
-                      <Shield className="w-2.5 h-2.5" /> 超管
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs font-semibold">
-                  {user?.displayName || user?.username || '未登录'}
-                </p>
-              </div>
-
-              {isSuperAdmin && (
-                <button
-                  onClick={() => setShowUserManage(true)}
-                  title="用户管理"
-                  className="ml-1 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-blue-500/40 border border-white/20 hover:border-blue-300/40 text-xs font-medium transition active:scale-[0.97]"
-                >
-                  <Users className="w-3.5 h-3.5" />
-                  用户
-                </button>
-              )}
-
-              <button
-                onClick={() => setShowChangePwd(true)}
-                title="修改密码"
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-amber-500/40 border border-white/20 hover:border-amber-300/40 text-xs font-medium transition active:scale-[0.97]"
-              >
-                <KeyRound className="w-3.5 h-3.5" />
-                改密
-              </button>
-
-              <button
-                onClick={handleLogout}
-                title="退出登录"
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-red-500/40 border border-white/20 hover:border-red-300/40 text-xs font-medium transition active:scale-[0.97]"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                登出
-              </button>
-            </div>
-          </div>
+          {/* ⭐ 用户菜单：用户信息 + 用户管理（超管）+ 改密 + 登出 */}
+          <UserMenu variant="dark" />
         </div>
 
         {/* ⭐ 底部：页面切换按钮 */}
@@ -122,17 +51,6 @@ const PageHeader: React.FC<PageHeaderProps> = () => {
           <NavButtons active="config" />
         </div>
       </div>
-
-      <ChangePasswordDialog
-        open={showChangePwd}
-        onClose={() => setShowChangePwd(false)}
-      />
-      {isSuperAdmin && (
-        <UserManageDialog
-          open={showUserManage}
-          onClose={() => setShowUserManage(false)}
-        />
-      )}
     </div>
   );
 };
