@@ -13,6 +13,7 @@ import StoreSwitcher from '../components/StoreSwitcher';
 import StoreStatusBadge from '../components/StoreStatusBadge';
 import { SimulationHeader } from '../components/SimulationHeader';
 import { SimulationEmptyState } from '../components/SimulationEmptyState';
+import { MonthPicker } from '../components/MonthPicker';
 import { useStore } from '../contexts/StoreContext';
 import { useAuth } from '../contexts/AuthContext';
 import { getStoreById } from '../constants/stores';
@@ -77,6 +78,12 @@ const SimulationPage: React.FC = () => {
   }
 
   const storeName = getStoreById(storeId)?.name || '';
+  const availableMonths = Object.keys(store).sort();
+
+  const handleMonthChange = (m: string) => {
+    setSelectedMonth(m);
+    navigate(`/simulation?month=${m}`, { replace: true });
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50/50">
@@ -89,7 +96,7 @@ const SimulationPage: React.FC = () => {
           selectedMonth={selectedMonth}
         />
 
-        {/* ⭐ 顶部工具行：门店 + 连接状态 + 撤销 + NavButtons */}
+        {/* ⭐ 顶部工具行：门店 + 连接状态 + 撤销 */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <StoreSwitcher />
           <StoreStatusBadge
@@ -122,25 +129,18 @@ const SimulationPage: React.FC = () => {
           </button>
 
           <div className="flex-1" />
-
         </div>
 
+        {/* ⭐ 月份选择条 */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">
           <div className="flex flex-wrap items-center gap-3">
             <label className="text-sm font-medium text-gray-600">月份</label>
-            <select
+            <MonthPicker
               value={selectedMonth}
-              onChange={(e) => {
-                setSelectedMonth(e.target.value);
-                navigate(`/simulation?month=${e.target.value}`, { replace: true });
-              }}
-              className="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              {Object.keys(store).sort().map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-              {!selectedMonth && <option value="">请选择月份</option>}
-            </select>
+              onChange={handleMonthChange}
+              availableMonths={availableMonths}
+              theme="light"
+            />
 
             {!currentPlan && (
               <p className="text-xs text-amber-600">

@@ -8,7 +8,7 @@ import type {
 import { usePayroll } from '../../hooks/usePayroll';
 import type { PayrollResult, Department } from '../../utils/payroll';
 import { exportPayrollTableToExcel } from '../../utils/exportPayrollTable';
-import { fetchPlanByMonth } from '../../api/compensation';
+import { fetchPlanByMonth, fetchPlanList } from '../../api/compensation';
 import {
   fetchStaffStatus,
   saveStaffStatus,
@@ -59,6 +59,10 @@ const PayrollPage: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('department');
   const [hideExcluded, setHideExcluded] = useState<boolean>(true);
 
+  /* ⭐ 新增：可用月份列表（该月有薪酬方案配置） */
+  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [monthsLoading, setMonthsLoading] = useState(false);
+
   const [resultsByStore, setResultsByStore] = useState<Record<string, PayrollResult[]>>({});
   const [performancesByStore, setPerformancesByStore] = useState<Record<string, any[]>>({});
   const [expanded, setExpanded] = useState<Record<Department, boolean>>({
@@ -78,6 +82,40 @@ const PayrollPage: React.FC = () => {
   const currentPlan: MonthlyCompensationPlan | undefined = selectedMonth
     ? store[selectedMonth]
     : undefined;
+
+  /* ⭐ 拉取可用月份列表 = 后端方案月 ∪ 本地缓存月 */
+  useEffect(() => {
+    if (!storeId) return;
+    let cancelled = false;
+    setMonthsLoading(true);
+    (async () => {
+      /* 1) 本地缓存（导入后即使后端还没同步，也能立刻可选） */
+      const localMonths = Object.keys(fullStore[storeId] || {});
+      let remoteMonths: string[] = [];
+
+      /* 2) 后端方案列表 */
+      try {
+        const plans = await fetchPlanList(storeId);
+        remoteMonths = (plans || [])
+          .filter((p) => p.isActive !== 0)
+          .map((p) => p.month);
+      } catch (e) {
+        console.warn('[PayrollPage] 拉取可用月份列表失败，使用本地缓存', e);
+      }
+
+      if (cancelled) return;
+
+      /* 3) 合并 + 去重 + 排序 */
+      const merged = Array.from(
+        new Set([...remoteMonths, ...localMonths])
+      ).sort();
+
+      setAvailableMonths(merged);
+      setMonthsLoading(false);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeId, fullStore]);
 
   const {
     updateAttendance,
@@ -346,7 +384,6 @@ const PayrollPage: React.FC = () => {
             onExport={handleExportTable}
           />
 
-          {/* ⭐ 顶部工具行：门店 + 连接状态 + NavButtons */}
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <StoreSwitcher />
             <StoreStatusBadge
@@ -354,14 +391,13 @@ const PayrollPage: React.FC = () => {
               saveStatus="idle"
               lastSavedAt={null}
             />
-
             <div className="flex-1" />
-
           </div>
 
           <PayrollToolbar
             month={selectedMonth}
-            months={Object.keys(store)}
+            availableMonths={availableMonths}
+            monthsLoading={monthsLoading}
             viewMode={viewMode}
             showViewToggle={allResults.length > 0}
             hideExcluded={hideExcluded}

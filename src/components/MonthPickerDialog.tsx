@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Calendar, X, Check, ChevronLeft, ChevronRight, Copy } from 'lucide-react';
+import { Calendar, X, Check, ChevronLeft, ChevronRight, Copy, Loader2 } from 'lucide-react';
 import { formatMonthLabel } from '../utils/format';
 
 interface MonthPickerDialogProps {
@@ -11,6 +11,8 @@ interface MonthPickerDialogProps {
     copySimulation?: boolean
   ) => void;
   onCancel: () => void;
+  /** ⭐ 由父组件控制的提交中状态：禁止重复点击 & 关闭 */
+  submitting?: boolean;
 }
 
 const MONTH_LABELS = [
@@ -23,6 +25,7 @@ const MonthPickerDialog: React.FC<MonthPickerDialogProps> = ({
   existingMonths,
   onConfirm,
   onCancel,
+  submitting = false,
 }) => {
   const now = new Date();
 
@@ -40,18 +43,18 @@ const MonthPickerDialog: React.FC<MonthPickerDialogProps> = ({
     return now.getMonth() + 1;
   });
 
-  /* ⭐ 新增状态：复制自 + 复制测算设置 */
   const [copyFrom, setCopyFrom] = useState<string>('');
   const [copySimulation, setCopySimulation] = useState<boolean>(true);
-
   const [error, setError] = useState('');
 
   const changeYear = (delta: number) => {
+    if (submitting) return;
     setYear((y) => y + delta);
     setError('');
   };
 
   const pickMonth = (m: number) => {
+    if (submitting) return;
     setMonth(m);
     setError('');
   };
@@ -79,22 +82,25 @@ const MonthPickerDialog: React.FC<MonthPickerDialogProps> = ({
     }
   }, [value, existingSet]);
 
-  /* 复制源选项：排除当前选中月份 */
   const copyOptions = useMemo(
     () => existingMonths.filter((m) => m !== value).sort().reverse(),
     [existingMonths, value]
   );
 
-  /* 用户选择「已存在」的月份时，允许覆盖（清 error 但标记 overwrite） */
   const isOverwrite = existingSet.has(value);
 
   const handleConfirm = () => {
+    if (submitting) return;
     if (!value) {
       setError('请选择月份');
       return;
     }
-    /* 允许覆盖，交给 CompensationPage 弹确认 */
     onConfirm(value, copyFrom || undefined, copySimulation);
+  };
+
+  const handleCancel = () => {
+    if (submitting) return;
+    onCancel();
   };
 
   return (
@@ -112,8 +118,9 @@ const MonthPickerDialog: React.FC<MonthPickerDialogProps> = ({
             </p>
           </div>
           <button
-            onClick={onCancel}
-            className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
+            onClick={handleCancel}
+            disabled={submitting}
+            className="p-1 text-gray-400 hover:text-gray-600 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <X className="w-5 h-5" />
           </button>
@@ -125,7 +132,8 @@ const MonthPickerDialog: React.FC<MonthPickerDialogProps> = ({
           <div className="px-6 pt-5 flex items-center justify-between">
             <button
               onClick={() => changeYear(-1)}
-              className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition"
+              disabled={submitting}
+              className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition disabled:opacity-40"
               title="上一年"
             >
               <ChevronLeft className="w-5 h-5" />
@@ -135,7 +143,8 @@ const MonthPickerDialog: React.FC<MonthPickerDialogProps> = ({
             </div>
             <button
               onClick={() => changeYear(1)}
-              className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition"
+              disabled={submitting}
+              className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition disabled:opacity-40"
               title="下一年"
             >
               <ChevronRight className="w-5 h-5" />
@@ -156,8 +165,10 @@ const MonthPickerDialog: React.FC<MonthPickerDialogProps> = ({
                   <button
                     key={label}
                     onClick={() => pickMonth(m)}
+                    disabled={submitting}
                     className={`
                       relative py-3 rounded-xl text-sm font-medium transition-all
+                      disabled:cursor-not-allowed
                       ${
                         isSelected
                           ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/30 scale-[1.02]'
@@ -183,7 +194,6 @@ const MonthPickerDialog: React.FC<MonthPickerDialogProps> = ({
               })}
             </div>
 
-            {/* 当前选择提示 */}
             <div className="mt-4 flex items-center justify-between text-xs">
               <span className="text-gray-400">
                 已选择：
@@ -200,7 +210,7 @@ const MonthPickerDialog: React.FC<MonthPickerDialogProps> = ({
             </div>
           </div>
 
-          {/* ⭐ 复制设置区 */}
+          {/* 复制设置区 */}
           <div className="px-6 pb-5 space-y-4 border-t border-gray-50 pt-5">
             <div>
               <label className="text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1">
@@ -210,7 +220,8 @@ const MonthPickerDialog: React.FC<MonthPickerDialogProps> = ({
               <select
                 value={copyFrom}
                 onChange={(e) => setCopyFrom(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={submitting}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
               >
                 <option value="">不复制（空白方案）</option>
                 {copyOptions.map((m) => (
@@ -227,7 +238,8 @@ const MonthPickerDialog: React.FC<MonthPickerDialogProps> = ({
                   type="checkbox"
                   checked={copySimulation}
                   onChange={(e) => setCopySimulation(e.target.checked)}
-                  className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  disabled={submitting}
+                  className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
                 />
                 <span className="text-sm text-gray-700">
                   同时复制 {formatMonthLabel(copyFrom)} 的测算设置（物业费、租金等）
@@ -240,17 +252,28 @@ const MonthPickerDialog: React.FC<MonthPickerDialogProps> = ({
         {/* 底部 */}
         <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3 bg-gray-50/50">
           <button
-            onClick={onCancel}
-            className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 rounded-lg hover:bg-gray-100 transition"
+            onClick={handleCancel}
+            disabled={submitting}
+            className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 rounded-lg hover:bg-gray-100 transition disabled:opacity-50"
           >
             取消
           </button>
           <button
             onClick={handleConfirm}
-            className="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold shadow-md transition active:scale-[0.97] bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white"
+            disabled={submitting}
+            className="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold shadow-md transition active:scale-[0.97] bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <Check className="w-4 h-4" />
-            {isOverwrite ? '覆盖并创建' : '确认新增'}
+            {submitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                处理中…
+              </>
+            ) : (
+              <>
+                <Check className="w-4 h-4" />
+                {isOverwrite ? '覆盖并创建' : '确认新增'}
+              </>
+            )}
           </button>
         </div>
       </div>

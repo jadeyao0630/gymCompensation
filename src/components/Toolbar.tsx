@@ -8,9 +8,14 @@ import {
   Loader2,
 } from 'lucide-react';
 import { formatMonthLabel } from '../utils/format';
+import { MonthPicker } from './MonthPicker';
 
 interface ToolbarProps {
+  /** 所有月份 key（用于「已导入信息」展示等） */
   months: string[];
+  /** ⭐ 有实际方案（positions.length > 0）的月份 —— MonthPicker 判定可选 */
+  availableMonths: string[];
+
   selectedMonth: string;
   hasPlan: boolean;
   importing: boolean;
@@ -31,6 +36,7 @@ interface ToolbarProps {
 
 const Toolbar: React.FC<ToolbarProps> = ({
   months,
+  availableMonths,
   selectedMonth,
   hasPlan,
   importing,
@@ -46,9 +52,9 @@ const Toolbar: React.FC<ToolbarProps> = ({
   onImport,
   onExport,
 }) => {
-  const sortedMonths = React.useMemo(
-    () => months.slice().sort(),
-    [months]
+  const sortedAvailable = React.useMemo(
+    () => availableMonths.slice().sort(),
+    [availableMonths]
   );
 
   const addMonthEnabled = canEdit && canAddMonth;
@@ -59,24 +65,16 @@ const Toolbar: React.FC<ToolbarProps> = ({
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">
       <div className="flex flex-wrap items-center gap-3">
-        {/* 月份选择 */}
+        {/* ⭐ 月份选择：只有有方案的月份可选 */}
         <div className="flex items-center gap-2">
           <label className="text-sm font-medium text-gray-600">月份</label>
-          <select
+          <MonthPicker
             value={selectedMonth}
-            onChange={(e) => {
-              const next = e.target.value;
-              if (next) onSelectMonth(next);
-            }}
-            className="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          >
-            {sortedMonths.length === 0 && <option value="">暂无月份</option>}
-            {sortedMonths.map((m) => (
-              <option key={m} value={m}>
-                {formatMonthLabel(m)}
-              </option>
-            ))}
-          </select>
+            onChange={onSelectMonth}
+            availableMonths={sortedAvailable}
+            theme="light"
+            unavailableHint="该月暂无方案，请点击「新增月份」"
+          />
         </div>
 
         {/* 新增月份 */}
@@ -192,6 +190,9 @@ const Toolbar: React.FC<ToolbarProps> = ({
           </button>
         )}
       </div>
+
+      {/* 未使用 months 变量，保留 prop 以便将来扩展；防止 TS 未用警告 */}
+      <span className="hidden">{months.length}</span>
     </div>
   );
 };

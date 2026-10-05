@@ -13,7 +13,7 @@ import { exportMarketingExcel } from './utils/exportExcel';
 import { useMarketingData } from './hooks/useMarketingData';
 
 import { MarketingHeader } from './components/MarketingHeader';
-import { DateRangePicker } from './components/DateRangePicker';
+import { DateRangePicker } from '../../components/DateRangePicker';   // ⭐ 改为公共组件
 import { SummaryCards } from './components/SummaryCards';
 import { CardBreakdown } from './components/CardBreakdown';
 import { PayTypeBreakdown } from './components/PayTypeBreakdown';
@@ -68,13 +68,58 @@ const MarketingReportPage: React.FC = () => {
           <StoreStatusBadge dbOnline saveStatus="idle" lastSavedAt={null} />
         </div>
 
-        <DateRangePicker
-          beginDate={beginDate}
-          endDate={endDate}
-          loading={loading}
-          onChange={handleDateChange}
-          onQuick={handleQuick}
-        />
+        {/* ⭐ 日期范围：使用公共 DateRangePicker */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <DateRangePicker
+              start={beginDate}
+              end={endDate}
+              onChange={handleDateChange}
+              label="日期范围"
+              size="md"
+            />
+          </div>
+
+          {/* 快捷区间（点击即拉数据，保留原行为） */}
+          <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+            <span className="text-[11px] text-gray-400 mr-1">快捷：</span>
+            <button
+              type="button"
+              onClick={() => handleQuick('today')}
+              className="px-2.5 py-1 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-blue-50 hover:border-blue-300"
+            >
+              今天
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuick('week')}
+              className="px-2.5 py-1 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-blue-50 hover:border-blue-300"
+            >
+              近 7 天
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuick('month')}
+              className="px-2.5 py-1 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-blue-50 hover:border-blue-300"
+            >
+              本月
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuick('lastMonth')}
+              className="px-2.5 py-1 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-blue-50 hover:border-blue-300"
+            >
+              上月
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuick('quarter')}
+              className="px-2.5 py-1 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-blue-50 hover:border-blue-300"
+            >
+              近 3 月
+            </button>
+          </div>
+        </div>
 
         {loading && (
           <div className="flex items-center justify-center py-12 text-gray-400">

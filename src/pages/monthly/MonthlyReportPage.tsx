@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { Loader2, AlertCircle } from 'lucide-react';
 import StoreSwitcher from '../../components/StoreSwitcher';
@@ -8,7 +8,6 @@ import { useAuth } from '../../contexts/AuthContext';
 import { getStoreById } from '../../constants/stores';
 
 import { useMonthlyReport } from './hooks/useMonthlyReport';
-import { getRecentMonths } from './utils/date';
 import { exportMonthlyReport } from './utils/exportExcel';
 
 import { MonthlyHeader } from './components/MonthlyHeader';
@@ -16,6 +15,7 @@ import { MonthlyEmptyState } from './components/MonthlyEmptyState';
 import { MonthlySummaryCards } from './components/MonthlySummaryCards';
 import { MonthlyDetailPanels } from './components/MonthlyDetailPanels';
 import { MonthlyProfitPanel } from './components/MonthlyProfitPanel';
+import { MonthPicker } from './components/MonthPicker';
 
 const MonthlyReportPage: React.FC = () => {
   const { storeId } = useStore();
@@ -43,8 +43,6 @@ const MonthlyReportPage: React.FC = () => {
     isProfit,
     fetchAll,
   } = useMonthlyReport(storeId, selectedMonth);
-
-  const monthOptions = useMemo(() => getRecentMonths(24), []);
 
   const handleFetch = () => fetchAll(selectedMonth);
 
@@ -78,11 +76,12 @@ const MonthlyReportPage: React.FC = () => {
           storeName={storeName}
           isLoading={loading}
           hasLoaded={hasLoaded}
+          month={selectedMonth}
           onFetch={handleFetch}
           onExport={handleExport}
         />
 
-        {/* ⭐ 顶部工具行：门店 + 连接状态 + 月份 + NavButtons */}
+        {/* ⭐ 顶部工具行：门店 + 连接状态 + 月份选择器 */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <StoreSwitcher />
           <StoreStatusBadge
@@ -93,21 +92,16 @@ const MonthlyReportPage: React.FC = () => {
 
           <div className="flex items-center gap-2">
             <label className="text-sm font-medium text-gray-600">月份</label>
-            <select
+            <MonthPicker
               value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              className="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
-            >
-              {monthOptions.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
+              onChange={setSelectedMonth}
+              disabled={loading}
+              minYear={new Date().getFullYear() - 10}
+              maxYear={new Date().getFullYear() + 1}
+            />
           </div>
 
           <div className="flex-1" />
-
         </div>
 
         {/* 空状态 */}

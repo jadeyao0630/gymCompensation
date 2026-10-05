@@ -45,6 +45,29 @@ export function useCompensationPlan(storeId: string) {
     setUndoDepth(stack.length);
   }, []);
 
+  /* ============================================================
+   * ⭐ 只写本地（用于复制模式：后端已由 copyPlan 创建好，不需要再 savePlan）
+   * ============================================================ */
+  const persistLocalOnly = useCallback(
+    (month: string, plan: MonthlyCompensationPlan) => {
+      setFullStore((prev) => {
+        const next = {
+          ...prev,
+          [storeId]: { ...(prev[storeId] || {}), [month]: plan },
+        };
+        persistToLocalStorage(next);
+        return next;
+      });
+      // 明确：不触发 savePlan
+      setSaveStatus('saved');
+      setLastSavedAt(new Date());
+    },
+    [storeId, persistToLocalStorage]
+  );
+
+  /* ============================================================
+   * 常规持久化：写本地 + 防抖落库
+   * ============================================================ */
   const persistPlan = useCallback((month: string, plan: MonthlyCompensationPlan) => {
     setFullStore((prev) => {
       const next = { ...prev, [storeId]: { ...(prev[storeId] || {}), [month]: plan } };
@@ -162,7 +185,10 @@ export function useCompensationPlan(storeId: string) {
   }, [storeId]);
 
   return {
-    fullStore, setFullStore, persistPlan, pushUndo, handleUndo, undoDepth,
+    fullStore, setFullStore,
+    persistPlan,          // 常规：写本地 + 落库
+    persistLocalOnly,     // ⭐ 新增：只写本地，复制模式专用
+    pushUndo, handleUndo, undoDepth,
     dbOnline, saveStatus, lastSavedAt, showGuide, setShowGuide, initLoading,
     isInitialSelectDoneRef,
   };

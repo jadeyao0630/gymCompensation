@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Plus, Cloud, CloudOff, Undo2, Loader2,
-  CheckCircle2, AlertCircle, Users, Wallet, Briefcase,
+  Plus, Undo2, AlertCircle, Users, Wallet, Briefcase, Loader2,
 } from 'lucide-react';
 import type { PositionCategory, MonthlyCompensationPlan, PositionConfig } from '../types/compensation';
 import { getCategoryLabel } from '../constants/categories';
@@ -34,7 +33,9 @@ const CompensationPlanPage: React.FC = () => {
   const { hasPermission } = useAuth();
 
   const {
-    fullStore, setFullStore, persistPlan, pushUndo, handleUndo, undoDepth,
+    fullStore, setFullStore,
+    persistPlan, persistLocalOnly,         // ⭐ 复制模式用 persistLocalOnly
+    pushUndo, handleUndo, undoDepth,
     dbOnline, saveStatus, lastSavedAt, showGuide, setShowGuide,
     isInitialSelectDoneRef,
   } = useCompensationPlan(storeId);
@@ -44,19 +45,18 @@ const CompensationPlanPage: React.FC = () => {
   const [importing, setImporting] = useState(false);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
 
+  const [copying, setCopying] = useState<{ active: boolean; target?: string }>({
+    active: false,
+  });
+
   const fetchedKeyRef = useRef<string>('');
   const store = fullStore[storeId] || {};
 
-  /* ============================================================
-   * ⭐ 权限：基础权限 = 查看方案
-   *    没有 plan:view → 所有相关操作全部禁用/隐藏
-   * ============================================================ */
+  /* ⭐ 权限 */
   const canViewPlan = hasPermission('plan:view', storeId);
-
-  /* 只有 canViewPlan 为 true 时，具体权限才生效 */
   const canEditPlan = canViewPlan && hasPermission('plan:edit', storeId);
   const canEditTarget = canViewPlan && hasPermission('target:edit', storeId);
-  const opsViewEnabled = hasPermission('ops:view', storeId);   // 这个独立
+  const opsViewEnabled = hasPermission('ops:view', storeId);
   const canAddMonth = canViewPlan && hasPermission('month:add', storeId);
   const canDeleteMonth = canViewPlan && hasPermission('month:delete', storeId);
   const canImportPlan = canViewPlan && hasPermission('plan:import', storeId);
@@ -66,15 +66,17 @@ const CompensationPlanPage: React.FC = () => {
   const canRenamePosition = canViewPlan && hasPermission('position:rename', storeId);
   const canEditHeadcount = canViewPlan && hasPermission('headcount:edit', storeId);
 
+  /* ⭐ 月份可选：用 Object.keys(store) */
+  const availableMonths = useMemo(() => Object.keys(store).sort(), [store]);
+
   /* 选中月份 */
   useEffect(() => {
     if (isInitialSelectDoneRef.current) return;
-    const months = Object.keys(store).sort();
-    if (months.length > 0) {
-      setSelectedMonth(months[months.length - 1]);
+    if (availableMonths.length > 0) {
+      setSelectedMonth(availableMonths[availableMonths.length - 1]);
       isInitialSelectDoneRef.current = true;
     }
-  }, [storeId, store, isInitialSelectDoneRef]);
+  }, [storeId, availableMonths, isInitialSelectDoneRef]);
 
   useEffect(() => {
     const m = searchParams.get('month');
@@ -92,6 +94,7 @@ const CompensationPlanPage: React.FC = () => {
   useEffect(() => {
     if (!selectedMonth) return;
     if (!dbOnline) return;
+    if (copying.active) return;
     const key = `${storeId}:${selectedMonth}`;
     if (fetchedKeyRef.current === key) return;
 
@@ -125,11 +128,10 @@ const CompensationPlanPage: React.FC = () => {
 
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeId, selectedMonth, dbOnline]);
+  }, [storeId, selectedMonth, dbOnline, copying.active]);
 
   const currentPlan = selectedMonth ? store[selectedMonth] : undefined;
 
-  /* 数据过滤 */
   const overviewPositions = useMemo(() => {
     const all = currentPlan?.positions || [];
     return opsViewEnabled ? all : all.filter((p) => p.title !== '运营主管');
@@ -153,6 +155,7 @@ const CompensationPlanPage: React.FC = () => {
 
   /* 操作 */
   const handleSelectMonth = (m: string) => {
+    if (copying.active) return;
     isInitialSelectDoneRef.current = true;
     fetchedKeyRef.current = '';
     setSelectedMonth(m);
@@ -160,6 +163,7 @@ const CompensationPlanPage: React.FC = () => {
   };
 
   const handleToggleDisabled = (title: string, disabled: boolean) => {
+    if (copying.active) return;
     if (!canEditPlan) return alert('无权限：设置方案');
     if (!currentPlan) return;
     const target = currentPlan.positions.find((p) => p.title === title);
@@ -176,6 +180,7 @@ const CompensationPlanPage: React.FC = () => {
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (copying.active) { e.target.value = ''; return; }
     if (!canEditPlan) { alert('无权限：设置方案'); e.target.value = ''; return; }
     if (!canImportPlan) { alert('无权限：导入薪酬佣金设置'); e.target.value = ''; return; }
     const file = e.target.files?.[0];
@@ -239,15 +244,30 @@ const CompensationPlanPage: React.FC = () => {
     }
   };
 
+  /* ============================================================
+   * ⭐ handleAddMonth
+   *  空白：本地写入 → 完成
+   *  复制：遮罩 → 本地乐观写入（persistLocalOnly） → 并行落库
+   *        成功 → 关遮罩 + 切月；失败 → 回滚本地
+   * ============================================================ */
   const handleAddMonth = async (month: string, copyFrom?: string, copySimulation?: boolean) => {
+    if (copying.active) return;
     if (!canEditPlan) return alert('无权限：设置方案');
     if (!canAddMonth) return alert('无权限：新增月份');
-    setShowMonthPicker(false);
 
-    if (store[month] && !confirm(`${formatMonthLabel(month)} 已存在，是否覆盖？`)) return;
-    if (store[month]) pushUndo(month, store[month], '覆盖新建');
-
+    /* ---------- 空白新增 ---------- */
     if (!copyFrom) {
+      setShowMonthPicker(false);
+
+      const existedPlan = store[month];
+      const hasRealPlan =
+        !!existedPlan &&
+        Array.isArray(existedPlan.positions) &&
+        existedPlan.positions.length > 0;
+
+      if (hasRealPlan && !confirm(`${formatMonthLabel(month)} 已存在，是否覆盖？`)) return;
+      if (hasRealPlan) pushUndo(month, existedPlan, '覆盖新建');
+
       const blank: MonthlyCompensationPlan = {
         month,
         periodLabel: formatMonthLabel(month),
@@ -257,71 +277,122 @@ const CompensationPlanPage: React.FC = () => {
       persistPlan(month, blank);
       setSelectedMonth(month);
       fetchedKeyRef.current = '';
+      navigate(`/compensation?month=${month}`, { replace: true });
       return;
     }
 
+    /* ---------- 复制新增 ---------- */
+    const srcPlan = store[copyFrom];
+    if (!srcPlan) return alert('源月份方案不存在');
+
+    const existedPlan = store[month];
+    const hasRealPlan =
+      !!existedPlan &&
+      Array.isArray(existedPlan.positions) &&
+      existedPlan.positions.length > 0;
+    if (hasRealPlan && !confirm(`${formatMonthLabel(month)} 已存在，是否覆盖？`)) return;
+
+    setShowMonthPicker(false);
+    setCopying({ active: true, target: month });
+
+    /* 保存旧状态，失败时回滚 */
+    const prevPlan = existedPlan ? JSON.parse(JSON.stringify(existedPlan)) : undefined;
+
     try {
+      /* 1) 本地乐观写入（不触发 savePlan） */
+      const cloned: MonthlyCompensationPlan = {
+        ...JSON.parse(JSON.stringify(srcPlan)),
+        month,
+        periodLabel: formatMonthLabel(month),
+        importedFrom: `复制自 ${formatMonthLabel(copyFrom)}`,
+        importedAt: new Date().toISOString(),
+      };
+
+      if (hasRealPlan) pushUndo(month, existedPlan, '覆盖新建（复制）');
+      pushUndo(month, cloned, `复制自 ${copyFrom}`);
+      persistLocalOnly(month, cloned);           // ⭐ 只写本地，后端交给 copyPlan
+
+      /* 2) 并行落库，等全部完成 */
       if (dbOnline) {
-        await copyPlan(storeId, copyFrom, month);
-        const remote = await fetchPlanByMonth(storeId, month);
-        if (remote) {
-          setFullStore((prev) => {
-            const next = {
-              ...prev,
-              [storeId]: { ...(prev[storeId] || {}), [month]: remote },
-            };
-            localStorage.setItem('gym_compensation_store_v2', JSON.stringify(next));
-            return next;
-          });
-        }
-        if (copySimulation) {
-          await copySimulationSetting(storeId, copyFrom, month).catch(console.warn);
-        }
-        setSelectedMonth(month);
-        fetchedKeyRef.current = '';
-        alert(`已复制配置到 ${formatMonthLabel(month)}`);
-      } else {
-        const srcPlan = store[copyFrom];
-        if (!srcPlan) return alert('源月份方案不存在');
-        const cloned = {
-          ...JSON.parse(JSON.stringify(srcPlan)),
-          month,
-          periodLabel: formatMonthLabel(month),
-        };
-        pushUndo(month, cloned, `复制自 ${copyFrom}`);
-        persistPlan(month, cloned);
-        setSelectedMonth(month);
-        fetchedKeyRef.current = '';
-        alert(`已离线复制到 ${formatMonthLabel(month)}`);
+        await Promise.all([
+          copyPlan(storeId, copyFrom, month),
+          copySimulation
+            ? copySimulationSetting(storeId, copyFrom, month)
+            : Promise.resolve(),
+        ]);
       }
-    } catch (e) {
-      alert('复制失败：' + (e as Error).message);
+
+      /* 3) 成功后切月 */
+      setSelectedMonth(month);
+      fetchedKeyRef.current = '';
+      navigate(`/compensation?month=${month}`, { replace: true });
+    } catch (e: any) {
+      console.error('[handleAddMonth] 复制失败', e);
+
+      /* 4) 失败回滚本地 */
+      if (prevPlan) {
+        persistLocalOnly(month, prevPlan);
+      } else {
+        // 之前没有这个月 → 直接从 store 里删除
+        setFullStore((prev) => {
+          const curStore = { ...(prev[storeId] || {}) };
+          delete curStore[month];
+          const next = { ...prev, [storeId]: curStore };
+          try {
+            localStorage.setItem('gym_compensation_store_v2', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+      }
+      alert('复制失败：' + (e?.message || '未知错误'));
+    } finally {
+      setCopying({ active: false });
     }
   };
 
+  /* ============================================================
+   * ⭐ removeMonth：删除后自动切到「下一个有效月」
+   * ============================================================ */
   const removeMonth = async () => {
+    if (copying.active) return;
     if (!canEditPlan) return alert('无权限：设置方案');
     if (!canDeleteMonth) return alert('无权限：删除月份');
     if (!selectedMonth || !currentPlan) return;
     if (!confirm(`确定删除 ${formatMonthLabel(selectedMonth)} 的全部配置？`)) return;
 
-    pushUndo(selectedMonth, currentPlan, '删除月份');
+    const target = selectedMonth;
+
+    const remaining = availableMonths.filter((m) => m !== target);
+    const smaller = remaining.filter((m) => m < target).sort();
+    const larger = remaining.filter((m) => m > target).sort();
+    const nextMonth =
+      smaller.length > 0
+        ? smaller[smaller.length - 1]
+        : larger.length > 0
+        ? larger[0]
+        : '';
+
+    pushUndo(target, currentPlan, '删除月份');
 
     setFullStore((prev) => {
       const cur = { ...(prev[storeId] || {}) };
-      delete cur[selectedMonth];
+      delete cur[target];
       const next = { ...prev, [storeId]: cur };
       localStorage.setItem('gym_compensation_store_v2', JSON.stringify(next));
       return next;
     });
 
     if (dbOnline) {
-      await deletePlan(storeId, selectedMonth).catch(() => {});
+      deletePlan(storeId, target).catch(() => {});
     }
 
     fetchedKeyRef.current = '';
-    const rest = Object.keys(store).filter((m) => m !== selectedMonth).sort();
-    setSelectedMonth(rest.length > 0 ? rest[rest.length - 1] : '');
+    setSelectedMonth(nextMonth);
+    if (nextMonth) {
+      navigate(`/compensation?month=${nextMonth}`, { replace: true });
+    } else {
+      navigate(`/compensation`, { replace: true });
+    }
   };
 
   const updatePlan = (
@@ -329,6 +400,7 @@ const CompensationPlanPage: React.FC = () => {
     undoLabel: string,
     allowTargetOnly = false
   ) => {
+    if (copying.active) return;
     if (!canEditPlan && !(allowTargetOnly && canEditTarget)) {
       return alert('无权限：设置方案');
     }
@@ -338,6 +410,7 @@ const CompensationPlanPage: React.FC = () => {
   };
 
   const updatePosition = (posId: string, updates: Partial<PositionConfig>) => {
+    if (copying.active) return;
     if (!currentPlan) return;
     const keys = Object.keys(updates);
     const onlyTarget = keys.length === 1 && keys[0] === 'performanceTarget';
@@ -365,6 +438,7 @@ const CompensationPlanPage: React.FC = () => {
   };
 
   const addPosition = () => {
+    if (copying.active) return;
     if (!canEditPlan) return alert('无权限：设置方案');
     if (!canAddPosition) return alert('无权限：新增职位');
     if (!currentPlan) return;
@@ -390,6 +464,7 @@ const CompensationPlanPage: React.FC = () => {
   };
 
   const removePosition = (posId: string) => {
+    if (copying.active) return;
     if (!canEditPlan) return alert('无权限：设置方案');
     if (!canDeletePosition) return alert('无权限：删除职位');
     if (!currentPlan) return;
@@ -402,6 +477,7 @@ const CompensationPlanPage: React.FC = () => {
   };
 
   const handleExport = () => {
+    if (copying.active) return;
     if (!canExportPlan) return alert('无权限：导出薪酬佣金设置');
     if (!currentPlan) return;
     const blob = new Blob([JSON.stringify(currentPlan, null, 2)], {
@@ -420,7 +496,6 @@ const CompensationPlanPage: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <PageHeader selectedMonth={selectedMonth} storeId={storeId} />
 
-        {/* ⭐ 无 plan:view 权限 → 直接显示无权限提示 */}
         {!canViewPlan ? (
           <div className="bg-white rounded-3xl border border-dashed border-gray-200 shadow-sm p-20 text-center">
             <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-amber-50 to-orange-50 flex items-center justify-center mb-5">
@@ -435,7 +510,6 @@ const CompensationPlanPage: React.FC = () => {
           </div>
         ) : (
           <>
-            {/* 顶部工具行 */}
             <div className="mb-4 flex flex-wrap items-center gap-3">
               <StoreSwitcher />
               <StoreStatusBadge
@@ -447,9 +521,9 @@ const CompensationPlanPage: React.FC = () => {
               {canEditPlan && (
                 <button
                   onClick={() => handleUndo()}
-                  disabled={undoDepth === 0}
+                  disabled={undoDepth === 0 || copying.active}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition ${
-                    undoDepth > 0
+                    undoDepth > 0 && !copying.active
                       ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
                       : 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
                   }`}
@@ -465,18 +539,19 @@ const CompensationPlanPage: React.FC = () => {
               )}
 
               <div className="flex-1" />
-
             </div>
 
             <Toolbar
-              months={Object.keys(store).sort()}
+              months={availableMonths}
+              availableMonths={availableMonths}
               selectedMonth={selectedMonth}
               hasPlan={!!currentPlan}
               importing={importing}
               importedFrom={currentPlan?.importedFrom}
-              canEdit={canEditPlan}
+              canEdit={canEditPlan && !copying.active}
               onSelectMonth={handleSelectMonth}
               onAddMonth={() => {
+                if (copying.active) return;
                 if (!canEditPlan) return alert('无权限：设置方案');
                 if (!canAddMonth) return alert('无权限：新增月份');
                 setShowMonthPicker(true);
@@ -484,10 +559,10 @@ const CompensationPlanPage: React.FC = () => {
               onRemoveMonth={removeMonth}
               onImport={handleImport}
               onExport={handleExport}
-              canAddMonth={canAddMonth}
-              canDeleteMonth={canDeleteMonth}
-              canImport={canImportPlan}
-              canExport={canExportPlan}
+              canAddMonth={canAddMonth && !copying.active}
+              canDeleteMonth={canDeleteMonth && !copying.active}
+              canImport={canImportPlan && !copying.active}
+              canExport={canExportPlan && !copying.active}
             />
 
             {!currentPlan && <CompensationEmptyState />}
@@ -520,7 +595,7 @@ const CompensationPlanPage: React.FC = () => {
 
                 <PositionOverview
                   positions={overviewPositions}
-                  canEdit={canEditPlan}
+                  canEdit={canEditPlan && !copying.active}
                   onGoTo={setActiveTab}
                   onToggleDisabled={handleToggleDisabled}
                 />
@@ -547,11 +622,11 @@ const CompensationPlanPage: React.FC = () => {
                             key={pos.id}
                             position={pos}
                             allPositions={currentPlan.positions}
-                            readOnly={!canEditPlan}
-                            canEditTarget={canEditTarget}
-                            canEditHeadcount={canEditHeadcount}
-                            canDelete={canDeletePosition}
-                            canRename={canRenamePosition}
+                            readOnly={!canEditPlan || copying.active}
+                            canEditTarget={canEditTarget && !copying.active}
+                            canEditHeadcount={canEditHeadcount && !copying.active}
+                            canDelete={canDeletePosition && !copying.active}
+                            canRename={canRenamePosition && !copying.active}
                             onUpdate={(u) => updatePosition(pos.id, u)}
                             onRemove={() => removePosition(pos.id)}
                           />
@@ -568,7 +643,7 @@ const CompensationPlanPage: React.FC = () => {
                           </div>
                         }
                       >
-                        {canAddPosition ? (
+                        {canAddPosition && !copying.active ? (
                           <button
                             onClick={addPosition}
                             className="w-full inline-flex items-center justify-center gap-2 px-4 py-3.5 bg-white border-2 border-dashed border-gray-200 hover:border-blue-400 hover:bg-blue-50/50 rounded-2xl text-sm font-medium text-gray-500 hover:text-blue-600 transition-all active:scale-[0.99]"
@@ -590,9 +665,9 @@ const CompensationPlanPage: React.FC = () => {
         )}
       </div>
 
-      {showMonthPicker && canEditPlan && canAddMonth && (
+      {showMonthPicker && canEditPlan && canAddMonth && !copying.active && (
         <MonthPickerDialog
-          existingMonths={Object.keys(store).sort()}
+          existingMonths={availableMonths}
           onConfirm={handleAddMonth}
           onCancel={() => setShowMonthPicker(false)}
         />
@@ -607,6 +682,32 @@ const CompensationPlanPage: React.FC = () => {
           setShowMonthPicker(true);
         }}
       />
+
+      {/* ⭐ 复制中的全屏遮罩 */}
+      {copying.active && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm select-none"
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl px-8 py-7 flex flex-col items-center gap-3 min-w-[260px]">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+            <div className="text-center">
+              <p className="text-sm font-semibold text-gray-800">
+                正在复制配置
+              </p>
+              {copying.target && (
+                <p className="text-xs text-gray-500 mt-1 tabular-nums">
+                  → {formatMonthLabel(copying.target)}
+                </p>
+              )}
+              <p className="text-[11px] text-gray-400 mt-2">
+                请稍候，正在同步方案与测算设置…
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

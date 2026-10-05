@@ -1,9 +1,11 @@
 import React from 'react';
 import { LayoutGrid, LayoutList, Eye, EyeOff } from 'lucide-react';
+import { PayrollMonthPicker } from './PayrollMonthPicker';
 
 interface Props {
   month: string;
-  months: string[];
+  /** ⭐ 改为「可用月份列表」（该月有薪酬方案配置） */
+  availableMonths: string[];
   viewMode: 'all' | 'department';
   showViewToggle: boolean;
   hideExcluded: boolean;
@@ -11,11 +13,13 @@ interface Props {
   onViewModeChange: (v: 'all' | 'department') => void;
   onHideExcludedChange: (v: boolean) => void;
   hasPlan: boolean;
+  /** 可选月份加载中（可选） */
+  monthsLoading?: boolean;
 }
 
 export const PayrollToolbar: React.FC<Props> = ({
   month,
-  months,
+  availableMonths,
   viewMode,
   showViewToggle,
   hideExcluded,
@@ -23,23 +27,19 @@ export const PayrollToolbar: React.FC<Props> = ({
   onViewModeChange,
   onHideExcludedChange,
   hasPlan,
+  monthsLoading = false,
 }) => (
   <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">
     <div className="flex flex-wrap items-center gap-3">
       <div className="flex items-center gap-2">
         <label className="text-sm font-medium text-gray-600">月份</label>
-        <select
+        {/* ⭐ 换成日历式月份选择器 */}
+        <PayrollMonthPicker
           value={month}
-          onChange={(e) => onMonthChange(e.target.value)}
-          className="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-        >
-          {months.sort().map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-          {!month && <option value="">请选择月份</option>}
-        </select>
+          availableMonths={availableMonths}
+          onChange={onMonthChange}
+          disabled={monthsLoading}
+        />
       </div>
 
       <div className="flex-1" />
