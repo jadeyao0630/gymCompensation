@@ -142,7 +142,7 @@ const MarketingReportPage: React.FC = () => {
           </div>
         </div>
 
-        {/* ⭐ 错误条：有数据时也能看到错误 */}
+        {/* 错误条 */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 text-sm text-red-700 flex items-center gap-2">
             <AlertCircle className="w-4 h-4" />
@@ -150,10 +150,9 @@ const MarketingReportPage: React.FC = () => {
           </div>
         )}
 
-        {/* ⭐ 主体：只根据 hasData 决定显示，不再用 !loading 阻止渲染 */}
+        {/* 主体渲染 */}
         {hasData ? (
           <>
-            {/* ⭐ 顶部细 loading 条，避免整页闪烁 */}
             {loading && (
               <div className="mb-4 flex items-center gap-2 text-xs text-indigo-600">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -176,17 +175,18 @@ const MarketingReportPage: React.FC = () => {
             <OrderDetailTable list={list} />
           </>
         ) : loading && !hasLoadedOnce ? (
-          /* 首次加载中（从没加载成功过）→ 显示全屏 loading */
+          /* 首次加载中 */
           <div className="flex items-center justify-center py-20 text-gray-400">
             <Loader2 className="w-5 h-5 animate-spin mr-2" />
             加载数据中…
           </div>
         ) : (
-          /* 加载过但无数据 or 首次加载失败 → 显示空状态 */
+          /* ⭐ 未获取 vs 无数据 */
           <MarketingEmptyState
             beginDate={beginDate}
             endDate={endDate}
             isLoading={loading}
+            mode={hasLoadedOnce ? 'no-data' : 'idle'}
             onFetch={handleRefresh}
           />
         )}
