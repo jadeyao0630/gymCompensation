@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* ⭐ Tailwind v4：显式扫描 src 目录 */
+@source "./**/*.{ts,tsx}";
+
 html, body, #root { height: 100%; }
 
 body {
@@ -69,4 +72,17 @@ html body #root select {
   color: #0f172a !important;
   -webkit-text-fill-color: #0f172a !important;
   caret-color: #0f172a !important;
+}
+
+/* ============================================================
+ * ⭐ 导航按钮 hover 效果（如果 Tailwind 扫描不到，用 CSS 兜底）
+ * ============================================================ */
+.nav-btn-hover {
+  transition: all 0.2s ease;
+}
+
+.nav-btn-hover:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15);
+  filter: brightness(1.1);
 }

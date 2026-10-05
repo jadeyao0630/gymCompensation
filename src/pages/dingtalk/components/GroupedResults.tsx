@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Building2, ChevronDown, ChevronRight, Store,
 } from 'lucide-react';
@@ -24,20 +24,44 @@ interface Group {
 interface Props {
   grouped: Group[];
   isColVisible: (key: ColumnKey) => boolean;
+  /** ⭐ 选中的类型（扇形图联动） */
+  selectedType?: string | null;
 }
 
-export const GroupedResults: React.FC<Props> = ({ grouped, isColVisible }) => {
+export const GroupedResults: React.FC<Props> = ({
+  grouped,
+  isColVisible,
+  selectedType,
+}) => {
+  /* ⭐ 过滤：只显示选中的类型 */
+  const visibleGroups = selectedType
+    ? grouped.filter((g) => g.typeName === selectedType)
+    : grouped;
+
   const [expandedTypes, setExpandedTypes] = useState<Set<string>>(
-    () => new Set(grouped.map((g) => g.typeName))
+    () => new Set(visibleGroups.map((g) => g.typeName))
   );
   const [expandedUnits, setExpandedUnits] = useState<Set<string>>(
     () =>
       new Set(
-        grouped.flatMap((g) =>
+        visibleGroups.flatMap((g) =>
           g.units.map((u) => `${g.typeName}__${u.unitName}`)
         )
       )
   );
+
+  /* ⭐ 当 selectedType 变化时，重新展开 */
+  useEffect(() => {
+    setExpandedTypes(new Set(visibleGroups.map((g) => g.typeName)));
+    setExpandedUnits(
+      new Set(
+        visibleGroups.flatMap((g) =>
+          g.units.map((u) => `${g.typeName}__${u.unitName}`)
+        )
+      )
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedType]);
 
   const toggleType = (name: string) => {
     setExpandedTypes((prev) => {
@@ -57,9 +81,17 @@ export const GroupedResults: React.FC<Props> = ({ grouped, isColVisible }) => {
     });
   };
 
+  if (visibleGroups.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-10 text-center text-sm text-gray-400">
+        该类型下暂无明细
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      {grouped.map((g) => {
+      {visibleGroups.map((g) => {
         const isTypeExpanded = expandedTypes.has(g.typeName);
         return (
           <div key={g.typeName} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AlertCircle, Loader2, Search } from 'lucide-react';
+import { AlertCircle, Loader2, Search, Store } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 import { getDefaultMonth } from './utils/date';
@@ -13,6 +13,7 @@ import { useDingTalkReport } from './hooks/useDingTalkReport';
 import DingTalkHeader from './components/DingTalkHeader';
 import DingTalkFilterBar from './components/DingTalkFilterBar';
 import GroupedResults from './components/GroupedResults';
+import TypePieChart, { getPieColor } from './components/TypePieChart';
 
 const DingTalkReportPage: React.FC = () => {
   const defaults = useMemo(() => getDefaultMonth(), []);
@@ -21,6 +22,11 @@ const DingTalkReportPage: React.FC = () => {
   const [end, setEnd] = useState(defaults.end);
   const [paymentUnits, setPaymentUnits] = useState<string[]>([]);
   const [templateTypes, setTemplateTypes] = useState<string[]>([]);
+
+  /* ⭐ 选中的类型（全局，配合明细表） */
+  const [selectedType, setSelectedType] = useState<string | null>(null);
+  /* ⭐ 选中的门店（扇形图联动） */
+  const [selectedStore, setSelectedStore] = useState<string | null>(null);
 
   const {
     templates,
@@ -31,11 +37,38 @@ const DingTalkReportPage: React.FC = () => {
 
   const { visibleColumns, toggleColumn, resetColumns, isColVisible } =
     useReportColumns();
-  const { results, loading, error, meta, handleSearch, grouped } =
-    useDingTalkReport();
+  const {
+    results,
+    loading,
+    error,
+    meta,
+    handleSearch,
+    grouped,
+    groupedByStore,
+  } = useDingTalkReport();
 
-  const onSearch = () =>
+  /* ⭐ 门店 × 类型的扇形数据 */
+  const storeCharts = useMemo(
+    () =>
+      groupedByStore.map((s) => ({
+        storeName: s.storeName,
+        totalCount: s.count,
+        totalAmount: s.total,
+        slices: s.types.map((t, i) => ({
+          label: t.typeName,
+          value: t.total,
+          count: t.count,
+          color: getPieColor(i),
+        })),
+      })),
+    [groupedByStore]
+  );
+
+  const onSearch = () => {
+    setSelectedType(null);
+    setSelectedStore(null);
     handleSearch({ start, end, templateTypes, paymentUnits });
+  };
 
   const togglePaymentUnit = (unit: string) => {
     setPaymentUnits((prev) =>
@@ -49,10 +82,24 @@ const DingTalkReportPage: React.FC = () => {
     );
   };
 
-  /* ⭐ 分类全选/取消时直接 set */
   const setTemplateTypesDirect = (names: string[]) => {
     setTemplateTypes(names);
   };
+
+  /* ⭐ 明细过滤：按门店 + 类型 */
+  const filteredGrouped = useMemo(() => {
+    let groups = grouped;
+    if (selectedStore) {
+      groups = groups.map((g) => ({
+        ...g,
+        units: g.units.filter((u) => u.storeName === selectedStore),
+      })).filter((g) => g.units.length > 0);
+    }
+    if (selectedType) {
+      groups = groups.filter((g) => g.typeName === selectedType);
+    }
+    return groups;
+  }, [grouped, selectedStore, selectedType]);
 
   const handleExport = () => {
     if (results.length === 0) {
@@ -61,10 +108,27 @@ const DingTalkReportPage: React.FC = () => {
     }
     const wb = XLSX.utils.book_new();
 
+    let exportResults = results;
+    if (selectedStore) {
+      exportResults = exportResults.filter(
+        (r) => getStoreFromPaymentUnit(r.paymentUnit) === selectedStore
+      );
+    }
+    if (selectedType) {
+      exportResults = exportResults.filter(
+        (r) => r.templateName === selectedType
+      );
+    }
+
+    if (exportResults.length === 0) {
+      alert('当前筛选下无数据');
+      return;
+    }
+
     const rows: any[][] = [
       ['流程类型', '门店', '付款单位', '标题', '事项', '金额', '收款账户', '状态', '创建时间', '完成时间'],
     ];
-    results.forEach((r) => {
+    exportResults.forEach((r) => {
       rows.push([
         r.templateName,
         getStoreFromPaymentUnit(r.paymentUnit),
@@ -86,7 +150,7 @@ const DingTalkReportPage: React.FC = () => {
     XLSX.utils.book_append_sheet(wb, ws1, '明细');
 
     const summaryRows: any[][] = [['流程类型', '门店', '付款单位', '笔数', '金额合计']];
-    grouped.forEach((g) => {
+    filteredGrouped.forEach((g) => {
       g.units.forEach((u) => {
         summaryRows.push([g.typeName, u.storeName, u.unitName, u.count, u.total]);
       });
@@ -95,13 +159,16 @@ const DingTalkReportPage: React.FC = () => {
     ws2['!cols'] = [{ wch: 18 }, { wch: 10 }, { wch: 30 }, { wch: 10 }, { wch: 16 }];
     XLSX.utils.book_append_sheet(wb, ws2, '汇总');
 
-    XLSX.writeFile(wb, `钉钉报销数据_${start}_${end}.xlsx`);
+    const suffix = [
+      selectedStore ? `_${selectedStore}` : '',
+      selectedType ? `_${selectedType}` : '',
+    ].join('');
+    XLSX.writeFile(wb, `钉钉流程报告_${start}_${end}${suffix}.xlsx`);
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50/50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* 头部 */}
         <DingTalkHeader
           loading={loading}
           hasResults={results.length > 0}
@@ -109,7 +176,6 @@ const DingTalkReportPage: React.FC = () => {
           onExport={handleExport}
         />
 
-        {/* 筛选栏 */}
         <DingTalkFilterBar
           start={start}
           end={end}
@@ -154,13 +220,134 @@ const DingTalkReportPage: React.FC = () => {
             </div>
             <h3 className="text-gray-700 font-semibold mb-2">选择条件后点击「查询」</h3>
             <p className="text-sm text-gray-400">
-              系统将拉取钉钉审批流程，按"流程类型 → 付款单位（门店）"分组展示
+              系统将拉取钉钉审批流程，按"门店 → 流程类型 → 付款单位"分组展示
             </p>
           </div>
         )}
 
-        {!loading && !error && grouped.length > 0 && (
-          <GroupedResults grouped={grouped} isColVisible={isColVisible} />
+        {!loading && !error && results.length > 0 && (
+          <>
+            {/* ⭐ 每个门店一个扇形图（按金额） */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+              {storeCharts.map((chart) => {
+                const isStoreSelected = selectedStore === chart.storeName;
+                return (
+                  <div
+                    key={chart.storeName}
+                    className={`bg-white rounded-2xl border shadow-sm p-5 transition ${
+                      isStoreSelected
+                        ? 'border-emerald-300 ring-2 ring-emerald-100'
+                        : 'border-gray-100'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 text-xs font-semibold">
+                          <Store className="w-3.5 h-3.5" />
+                          {chart.storeName}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          {chart.totalCount} 笔 ·{' '}
+                          <span className="font-semibold text-emerald-700 tabular-nums">
+                            ¥{Math.round(chart.totalAmount).toLocaleString('zh-CN')}
+                          </span>
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isStoreSelected && (
+                          <button
+                            onClick={() => {
+                              setSelectedStore(null);
+                              setSelectedType(null);
+                            }}
+                            className="text-[11px] text-gray-500 hover:text-gray-700 underline"
+                          >
+                            清除门店筛选
+                          </button>
+                        )}
+                        <button
+                          onClick={() =>
+                            isStoreSelected
+                              ? (setSelectedStore(null), setSelectedType(null))
+                              : (setSelectedStore(chart.storeName),
+                                setSelectedType(null))
+                          }
+                          className={`text-[11px] px-2 py-1 rounded-lg border transition ${
+                            isStoreSelected
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
+                          }`}
+                        >
+                          {isStoreSelected ? '取消门店筛选' : '仅看该门店'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <TypePieChart
+                      data={chart.slices}
+                      selectedLabel={isStoreSelected ? selectedType : null}
+                      onSelect={(label) => {
+                        if (!isStoreSelected && label) {
+                          /* 点击扇区但未选门店 → 自动选该门店 */
+                          setSelectedStore(chart.storeName);
+                          setSelectedType(label);
+                        } else {
+                          setSelectedType(label);
+                        }
+                      }}
+                      size={200}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ⭐ 当前筛选提示 */}
+            {(selectedStore || selectedType) && (
+              <div className="bg-blue-50 border border-blue-100 rounded-2xl p-3 mb-4 text-xs text-blue-700 flex items-center gap-2 flex-wrap">
+                <span className="font-medium">当前筛选：</span>
+                {selectedStore && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-blue-200">
+                    <Store className="w-3 h-3" />
+                    门店：{selectedStore}
+                    <button
+                      onClick={() => setSelectedStore(null)}
+                      className="ml-1 text-blue-400 hover:text-blue-700"
+                    >
+                      ×
+                    </button>
+                  </span>
+                )}
+                {selectedType && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-blue-200">
+                    类型：{selectedType}
+                    <button
+                      onClick={() => setSelectedType(null)}
+                      className="ml-1 text-blue-400 hover:text-blue-700"
+                    >
+                      ×
+                    </button>
+                  </span>
+                )}
+                <button
+                  onClick={() => {
+                    setSelectedStore(null);
+                    setSelectedType(null);
+                  }}
+                  className="ml-auto text-blue-500 hover:text-blue-700 underline"
+                >
+                  清除全部
+                </button>
+              </div>
+            )}
+
+            {/* ⭐ 明细表（联动） */}
+            <GroupedResults
+              grouped={filteredGrouped}
+              isColVisible={isColVisible}
+              selectedType={null}
+            />
+          </>
         )}
       </div>
     </div>
