@@ -5,14 +5,14 @@ import {
   isPermissionAvailable,
   type PermissionKey,
   type PermissionMeta,
-} from '../constants/permissions';
+} from '../../constants/permissions';
 import {
   fetchUserPermissions,
   saveUserPermissions,
   type UserPermissionConfig,
-} from '../api/permissions';
-import { STORES } from '../constants/stores';
-import type { AdminUserListItem } from '../api/adminAuth';
+} from '../../api/permissions';
+import { STORES } from '../../constants/stores';
+import type { AdminUserListItem } from '../../api/adminAuth';
 
 interface Props {
   user: AdminUserListItem;

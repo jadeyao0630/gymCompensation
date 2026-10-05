@@ -12,7 +12,7 @@ import {
 } from '../utils/constants';
 import type { DingTalkTemplate } from '../../../api/dingtalk';
 import ColumnPicker from './ColumnPicker';
-import { DateRangePicker } from '../../../components/DateRangePicker';
+import { DateRangePicker } from '../../../components/common/DateRangePicker';
 
 interface Props {
   start: string;

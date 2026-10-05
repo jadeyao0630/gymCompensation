@@ -1,5 +1,5 @@
 import React from 'react';
-import type { PayDetailItem } from '../types/compensation';
+import type { PayDetailItem } from '../../types/compensation';
 
 interface PayDetailCellProps {
   /** 收款方式列表 */

@@ -8,8 +8,8 @@ import {
   Layers,
   Wallet,
 } from 'lucide-react';
-import type { GenderSalaryTier } from '../types/compensation';
-import { uid } from '../utils/id';
+import type { GenderSalaryTier } from '../../types/compensation';
+import { uid } from '../../utils/id';
 
 interface GenderTierEditorProps {
   tiers: GenderSalaryTier[];

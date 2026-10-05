@@ -1,6 +1,6 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import RouteGuard from './components/RouteGuard';
+import RouteGuard from './components/common/RouteGuard';
 import LoginPage from './pages/login/LoginPage';
 import CompensationPage from './pages/compensation/CompensationPlanPage';
 import PayrollPage from './pages/payroll/PayrollPage';

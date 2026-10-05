@@ -2,8 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { Loader2, AlertCircle } from 'lucide-react';
 
-import StoreSwitcher from '../../components/StoreSwitcher';
-import StoreStatusBadge from '../../components/StoreStatusBadge';
+import StoreSwitcher from '../../components/layout/StoreSwitcher';
+import StoreStatusBadge from '../../components/layout/StoreStatusBadge';
 import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { getStoreById } from '../../constants/stores';
@@ -13,7 +13,7 @@ import { exportMarketingExcel } from './utils/exportExcel';
 import { useMarketingData } from './hooks/useMarketingData';
 
 import { MarketingHeader } from './components/MarketingHeader';
-import { DateRangePicker } from '../../components/DateRangePicker';   // ⭐ 改为公共组件
+import { DateRangePicker } from '../../components/common/DateRangePicker';   // ⭐ 改为公共组件
 import { SummaryCards } from './components/SummaryCards';
 import { CardBreakdown } from './components/CardBreakdown';
 import { PayTypeBreakdown } from './components/PayTypeBreakdown';

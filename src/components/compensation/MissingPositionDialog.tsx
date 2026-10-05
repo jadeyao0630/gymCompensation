@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AlertTriangle, X, Check } from 'lucide-react';
-import { POSITION_DEFINITIONS } from '../constants/positions';
+import { POSITION_DEFINITIONS } from '../../constants/positions';
 
 interface MissingPositionDialogProps {
   missing: string[];

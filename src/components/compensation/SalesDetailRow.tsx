@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Loader2, AlertCircle } from 'lucide-react';
-import type { PayrollResult } from '../utils/payroll';
-import { needsSaleIdPrefix } from '../utils/payroll';
-import { getCardOrderList, type FinancialFlowItem } from '../api/stats';
+import type { PayrollResult } from '../../utils/payroll';
+import { needsSaleIdPrefix } from '../../utils/payroll';
+import { getCardOrderList, type FinancialFlowItem } from '../../api/stats';
 
 interface Props {
   result: PayrollResult;

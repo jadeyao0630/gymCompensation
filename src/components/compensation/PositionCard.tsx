@@ -8,17 +8,17 @@ import type {
   CourseCommission,
   ClassCommissionMode,
   DepartmentKey,
-} from '../types/compensation';
-import { resolveCalcFlags } from '../types/compensation';
-import { uid } from '../utils/id';
-import { calcTotalBaseSalary } from '../utils/salary';
-import { resolvePerformanceTarget } from '../utils/performance';
-import { useStore } from '../contexts/StoreContext';
+} from '../../types/compensation';
+import { resolveCalcFlags } from '../../types/compensation';
+import { uid } from '../../utils/id';
+import { calcTotalBaseSalary } from '../../utils/salary';
+import { resolvePerformanceTarget } from '../../utils/performance';
+import { useStore } from '../../contexts/StoreContext';
 import {
   fetchCardList,
   resolveCardTypeByPosition,
   type CardItem,
-} from '../api/card';
+} from '../../api/card';
 import TierEditor from './TierEditor';
 import GenderTierEditor from './GenderTierEditor';
 import CourseCommissionEditor from './CourseCommissionEditor';

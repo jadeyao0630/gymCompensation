@@ -1,6 +1,6 @@
 import React from 'react';
-import type { PositionCategory, PositionConfig } from '../types/compensation';
-import { CATEGORY_TABS } from '../constants/categories';
+import type { PositionCategory, PositionConfig } from '../../types/compensation';
+import { CATEGORY_TABS } from '../../constants/categories';
 
 interface CategoryTabsProps {
   positions: PositionConfig[];

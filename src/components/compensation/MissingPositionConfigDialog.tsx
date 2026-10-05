@@ -15,9 +15,9 @@ import type {
   CommissionTier,
   BaseSalaryTier,
   GenderSalaryTier,
-} from '../types/compensation';
-import type { MissingPositionInfo } from '../utils/payroll';
-import { uid } from '../utils/id';
+} from '../../types/compensation';
+import type { MissingPositionInfo } from '../../utils/payroll';
+import { uid } from '../../utils/id';
 
 interface MissingPositionConfigDialogProps {
   missing: string[];

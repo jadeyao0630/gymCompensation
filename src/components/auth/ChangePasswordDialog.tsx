@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, KeyRound, Eye, EyeOff, Loader2, Check } from 'lucide-react';
-import { adminChangePassword } from '../api/adminAuth';
+import { adminChangePassword } from '../../api/adminAuth';
 
 interface Props {
   open: boolean;

@@ -1,9 +1,9 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import { useStore } from '../contexts/StoreContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { useStore } from '../../contexts/StoreContext';
 import { Loader2 } from 'lucide-react';
-import type { PermissionKey } from '../constants/permissions';
+import type { PermissionKey } from '../../constants/permissions';
 
 interface Props {
   children: React.ReactNode;

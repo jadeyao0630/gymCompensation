@@ -1,8 +1,8 @@
 import React from 'react';
 import type { ReactNode } from 'react';
-import { useAuth } from '../contexts/AuthContext';
-import { useStore } from '../contexts/StoreContext';
-import type { PermissionKey } from '../constants/permissions';
+import { useAuth } from '../../contexts/AuthContext';
+import { useStore } from '../../contexts/StoreContext';
+import type { PermissionKey } from '../../constants/permissions';
 
 interface Props {
   permission: PermissionKey;

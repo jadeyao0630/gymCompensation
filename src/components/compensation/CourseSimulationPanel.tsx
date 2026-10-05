@@ -4,8 +4,8 @@ import type {
   CourseCommissionInput,
   CourseCommissionInputs,
   PositionConfig,
-} from '../types/compensation';
-import { getClassCommission } from '../utils/salary';
+} from '../../types/compensation';
+import { getClassCommission } from '../../utils/salary';
 
 interface CourseSimulationPanelProps {
   value: CourseCommissionInputs;
@@ -13,38 +13,39 @@ interface CourseSimulationPanelProps {
   positions: PositionConfig[];
 }
 
-/** 默认课程 */
+/** 默认课程（key 保留为「泳教课」「私教课」，note 作为展示名） */
 export function buildDefaultCourses(): CourseCommissionInputs {
   return {
     泳教课: {
-      courseName: '泳教课',
+      note: '泳教课',
       averagePrice: 300,
       classCount: 0,
-      positionKeyword: '泳教',
+      positionTitle: '泳教',
     },
     私教课: {
-      courseName: '私教课',
+      note: '私教课',
       averagePrice: 400,
       classCount: 0,
-      positionKeyword: '私教',
+      positionTitle: '私教',
     },
   };
 }
 
 /**
- * 找到该课程对应的职位（用于自动取 headcount 和课提）
- * - 泳教课 → 泳教（非经理）
- * - 私教课 → 私教
+ * 找到该课程对应的职位
+ * - 通过 positionTitle 匹配（默认取 title 含关键字且非经理的第一个）
  */
 function findCoursePosition(
-  keyword: string,
+  positionTitle: string,
   positions: PositionConfig[]
 ): PositionConfig | undefined {
+  if (!positionTitle) return undefined;
+  // 精确匹配优先
+  const exact = positions.find((p) => p.title === positionTitle);
+  if (exact) return exact;
+  // 模糊匹配（title 包含即可）
   return positions.find(
-    (p) =>
-      p.title.includes(keyword) &&
-      !p.title.includes('经理') &&
-      p.title !== '泳教经理'
+    (p) => p.title.includes(positionTitle) && !p.title.includes('经理')
   );
 }
 
@@ -53,21 +54,19 @@ const CourseSimulationPanel: React.FC<CourseSimulationPanelProps> = ({
   onChange,
   positions,
 }) => {
-  const courses = Object.values(value);
-
-  const update = (courseName: string, u: Partial<CourseCommissionInput>) => {
-    const cur = value[courseName];
+  const update = (key: string, u: Partial<CourseCommissionInput>) => {
+    const cur = value[key];
     if (!cur) return;
-    onChange({ ...value, [courseName]: { ...cur, ...u } });
+    onChange({ ...value, [key]: { ...cur, ...u } });
   };
 
-  /** 每门课程的完整计算 */
+  /** ⭐ 用 Object.entries 保留 key，依赖 value 而不是新数组 */
   const computed = useMemo(() => {
-    return courses.map((c) => {
-      const position = findCoursePosition(c.positionKeyword, positions);
+    return Object.entries(value).map(([key, c]) => {
+      const position = findCoursePosition(c.positionTitle, positions);
       const headcount = position?.headcount ?? 0;
 
-      // 从对应职位的当前业绩目标命中档里取课提
+      // 从对应职位命中档取课提
       const classInfo = position
         ? getClassCommission(position, positions)
         : { mode: 'percent' as const, value: 0 };
@@ -78,15 +77,18 @@ const CourseSimulationPanel: React.FC<CourseSimulationPanelProps> = ({
           : c.classCount * classInfo.value;
 
       return {
-        ...c,
+        key,
+        note: c.note || key,      // ⭐ 兜底：没 note 就用 key
+        positionTitle: c.positionTitle,
+        averagePrice: c.averagePrice,
+        classCount: c.classCount,
         headcount,
         mode: classInfo.mode,
         rate: classInfo.value,
         commission,
       };
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [courses, positions]);
+  }, [value, positions]);
 
   const totalCommission = computed.reduce((s, c) => s + c.commission, 0);
   const formatMoney = (v: number) => `¥${Math.round(v).toLocaleString()}`;
@@ -117,15 +119,20 @@ const CourseSimulationPanel: React.FC<CourseSimulationPanelProps> = ({
       <div className="p-5 space-y-3">
         {computed.map((c) => (
           <div
-            key={c.courseName}
+            key={c.key}
             className="rounded-2xl border border-purple-100 bg-gradient-to-br from-purple-50/50 to-fuchsia-50/30 p-3"
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-gradient-to-br from-purple-400 to-fuchsia-500" />
                 <span className="text-sm font-semibold text-purple-900">
-                  {c.courseName}
+                  {c.note}
                 </span>
+                {c.positionTitle && (
+                  <span className="text-[10px] text-purple-400">
+                    · 关联 {c.positionTitle}
+                  </span>
+                )}
               </div>
               <div className="text-xs text-purple-600">
                 课提：
@@ -138,14 +145,12 @@ const CourseSimulationPanel: React.FC<CourseSimulationPanelProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {/* 均价 */}
               <div className="flex items-center gap-1.5 bg-white rounded-lg border border-gray-100 px-2 py-1.5">
-                <span className="text-[10px] text-gray-500 whitespace-nowrap">
-                  均价
-                </span>
+                <span className="text-[10px] text-gray-500 whitespace-nowrap">均价</span>
                 <input
                   type="number"
                   value={c.averagePrice}
                   onChange={(e) =>
-                    update(c.courseName, {
+                    update(c.key, {
                       averagePrice: parseInt(e.target.value) || 0,
                     })
                   }
@@ -156,14 +161,12 @@ const CourseSimulationPanel: React.FC<CourseSimulationPanelProps> = ({
 
               {/* 节数 */}
               <div className="flex items-center gap-1.5 bg-white rounded-lg border border-gray-100 px-2 py-1.5">
-                <span className="text-[10px] text-gray-500 whitespace-nowrap">
-                  节数
-                </span>
+                <span className="text-[10px] text-gray-500 whitespace-nowrap">节数</span>
                 <input
                   type="number"
                   value={c.classCount}
                   onChange={(e) =>
-                    update(c.courseName, {
+                    update(c.key, {
                       classCount: parseInt(e.target.value) || 0,
                     })
                   }
@@ -178,9 +181,7 @@ const CourseSimulationPanel: React.FC<CourseSimulationPanelProps> = ({
                 title="自动取对应职位人数"
               >
                 <Users className="w-3 h-3 text-gray-400" />
-                <span className="text-[10px] text-gray-500 whitespace-nowrap">
-                  人数
-                </span>
+                <span className="text-[10px] text-gray-500 whitespace-nowrap">人数</span>
                 <span className="flex-1 text-xs font-semibold text-gray-700 text-right tabular-nums">
                   {c.headcount}
                 </span>
@@ -196,9 +197,7 @@ const CourseSimulationPanel: React.FC<CourseSimulationPanelProps> = ({
                 ) : (
                   <Hash className="w-3 h-3 text-purple-500" />
                 )}
-                <span className="text-[10px] text-purple-500 whitespace-nowrap">
-                  课提
-                </span>
+                <span className="text-[10px] text-purple-500 whitespace-nowrap">课提</span>
                 <span className="flex-1 text-xs font-semibold text-purple-700 text-right tabular-nums">
                   {c.mode === 'percent'
                     ? `${(c.rate * 100).toFixed(1)}%`

@@ -11,7 +11,7 @@ import {
 import type {
   PositionConfig,
   SimulationResult,
-} from '../types/compensation';
+} from '../../types/compensation';
 
 interface SimulationPanelProps {
   positions: PositionConfig[];

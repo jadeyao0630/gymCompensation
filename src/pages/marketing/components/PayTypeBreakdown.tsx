@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { PieChart as PieIcon, List, CreditCard } from 'lucide-react';
-import { PieChartCard, type PieDatum } from './PieChartCard';
+import { PieChartCard, type PieDatum } from '../../../components/common/PieChartCard';
 
 /* ---------------- 调色板 ---------------- */
 const PALETTE = [

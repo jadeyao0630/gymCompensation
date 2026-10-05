@@ -19,13 +19,13 @@ import type {
   CourseCommissionInputs,
   GenderCountConfig,
   SimulationEmployeeBreakdown,
-} from '../types/compensation';
-import { resolveCalcFlags } from '../types/compensation';
+} from '../../types/compensation';
+import { resolveCalcFlags } from '../../types/compensation';
 import {
   calcSimulation,
   buildShareWeights,
   calcSimulationBreakdown,
-} from '../utils/simulation';
+} from '../../utils/simulation';
 import PayDetailCell from './PayDetailCell';
 
 interface RevenueSliderPanelProps {

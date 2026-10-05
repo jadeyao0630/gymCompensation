@@ -25,13 +25,13 @@ import type {
   CourseCommissionInputs,
   GenderCount,
   GenderCountConfig,
-} from '../types/compensation';
-import { resolveCalcFlags } from '../types/compensation';
-import type { PermissionKey as PermKey } from '../constants/permissions';
-import { buildShareWeights } from '../utils/simulation';
-import { uid } from '../utils/id';
-import { useAuth } from '../contexts/AuthContext';
-import { useStore } from '../contexts/StoreContext';
+} from '../../types/compensation';
+import { resolveCalcFlags } from '../../types/compensation';
+import type { PermissionKey as PermKey } from '../../constants/permissions';
+import { buildShareWeights } from '../../utils/simulation';
+import { uid } from '../../utils/id';
+import { useAuth } from '../../contexts/AuthContext';
+import { useStore } from '../../contexts/StoreContext';
 
 interface SimulationSettingsPanelProps {
   positions: PositionConfig[];
@@ -181,7 +181,7 @@ const SimulationSettingsPanel: React.FC<SimulationSettingsPanelProps> = ({
 
   const updateCourse = (
     id: string,
-    u: Partial<import('../types/compensation').CourseCommissionInput>
+    u: Partial<import('../../types/compensation').CourseCommissionInput>
   ) => {
     if (!canEditCourse) return;
     const cur = courseInputs[id];

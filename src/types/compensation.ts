@@ -1,48 +1,12 @@
+/* ============================================================
+ * 基础类型
+ * ============================================================ */
+
 /* ⭐ 收款方式明细 */
 export interface PayDetailItem {
   pay_type: string;      // "微信" / "现金" / "刷卡"
   amount: string;        // "2000.00"
   pay_type_id: string;   // "1" / "3" / "4"
-}
-
-/* ⭐ 追加到 SimulationEmployeeBreakdown */
-export interface SimulationEmployeeBreakdown {
-  index: number;
-  allocatedRevenue: number;
-  hitBaseThreshold?: number;
-  baseSalary: number;
-  hitCommissionThreshold?: number;
-  commissionRate: number;
-  commission: number;
-  /* ⭐ 新增 */
-  payDetail?: PayDetailItem[];
-}
-
-/* ⭐ 追加到 SimulationPositionBreakdown（如果还没有） */
-export interface SimulationPositionBreakdown {
-  positionId: string;
-  title: string;
-  headcount: number;
-  baseSalary: number;
-  allocatedRevenue: number;
-  commissionRate: number;
-  commission: number;
-  perEmployee?: SimulationEmployeeBreakdown[];
-  /* ⭐ 新增 */
-  payDetail?: PayDetailItem[];
-}
-
-/* ⭐ 追加到 SimulationCourseBreakdown */
-export interface SimulationCourseBreakdown {
-  courseName: string;
-  averagePrice: number;
-  classCount: number;
-  headcount: number;
-  mode: 'percent' | 'fixed';
-  value: number;
-  commission: number;
-  /* ⭐ 新增 */
-  payDetail?: PayDetailItem[];
 }
 
 export type PositionCategory =
@@ -54,6 +18,10 @@ export type PositionCategory =
 export type ClassCommissionMode = 'percent' | 'fixed';
 
 export type DepartmentKey = '会籍' | '私教' | '泳教' | '运营';
+
+/* ============================================================
+ * 阶梯 / 佣金 / 底薪
+ * ============================================================ */
 
 export interface CommissionTier {
   id: string;
@@ -108,6 +76,10 @@ export interface PositionCalcFlags {
   includeClassCommission?: boolean;
 }
 
+/* ============================================================
+ * 职位配置
+ * ============================================================ */
+
 export interface PositionConfig {
   id: string;
   title: string;
@@ -147,6 +119,10 @@ export interface PositionConfig {
   baseSalaryTiered?: boolean;
 }
 
+/* ============================================================
+ * 月度方案
+ * ============================================================ */
+
 export interface MonthlyCompensationPlan {
   month: string;
   periodLabel: string;
@@ -156,6 +132,10 @@ export interface MonthlyCompensationPlan {
 }
 
 export type CompensationStore = Record<string, MonthlyCompensationPlan>;
+
+/* ============================================================
+ * 课提测算输入
+ * ============================================================ */
 
 export interface CourseCommissionInput {
   /** ⭐ 备注（原 courseName，改为备注） */
@@ -168,6 +148,10 @@ export interface CourseCommissionInput {
 
 export type CourseCommissionInputs = Record<string, CourseCommissionInput>;
 
+/* ============================================================
+ * 测算输入
+ * ============================================================ */
+
 export interface SimulationInput {
   propertyFee: number;
   electricityFee: number;
@@ -175,6 +159,25 @@ export interface SimulationInput {
   waterFee: number;
   networkFee: number;
   otherFee: number;
+}
+
+/* ============================================================
+ * 测算结果（⭐ 合并重复定义，保留 payDetail）
+ * ============================================================ */
+
+/** ⭐ 单人分摊业绩明细 */
+export interface SimulationEmployeeBreakdown {
+  index: number;
+  allocatedRevenue: number;
+  /** 命中的底薪门槛 */
+  hitBaseThreshold?: number;
+  baseSalary: number;
+  /** 命中的销提门槛 */
+  hitCommissionThreshold?: number;
+  commissionRate: number;
+  commission: number;
+  /** ⭐ 收款方式明细 */
+  payDetail?: PayDetailItem[];
 }
 
 export interface SimulationPositionBreakdown {
@@ -185,6 +188,10 @@ export interface SimulationPositionBreakdown {
   allocatedRevenue: number;
   commissionRate: number;
   commission: number;
+  /** ⭐ 单人分摊明细 */
+  perEmployee?: SimulationEmployeeBreakdown[];
+  /** ⭐ 收款方式明细（职位级汇总） */
+  payDetail?: PayDetailItem[];
 }
 
 export interface SimulationCourseBreakdown {
@@ -195,6 +202,8 @@ export interface SimulationCourseBreakdown {
   mode: ClassCommissionMode;
   value: number;
   commission: number;
+  /** ⭐ 收款方式明细 */
+  payDetail?: PayDetailItem[];
 }
 
 export interface SimulationResult {
@@ -208,6 +217,10 @@ export interface SimulationResult {
   courseBreakdown: SimulationCourseBreakdown[];
 }
 
+/* ============================================================
+ * 业绩分配 / 性别人数
+ * ============================================================ */
+
 export type RevenueShareConfig = Record<string, number>;
 
 export interface GenderCount {
@@ -217,6 +230,10 @@ export interface GenderCount {
 }
 
 export type GenderCountConfig = Record<string, GenderCount>;
+
+/* ============================================================
+ * 工具函数
+ * ============================================================ */
 
 export function resolveCalcFlags(
   position: PositionConfig | undefined
@@ -229,29 +246,4 @@ export function resolveCalcFlags(
     includeClassAmount: f.includeClassAmount ?? true,
     includeClassCommission: f.includeClassCommission ?? true,
   };
-}
-
-/** ⭐ 单人分摊业绩明细 */
-export interface SimulationEmployeeBreakdown {
-  index: number;
-  allocatedRevenue: number;
-  /** 命中的底薪门槛 */
-  hitBaseThreshold?: number;
-  baseSalary: number;
-  /** 命中的销提门槛 */
-  hitCommissionThreshold?: number;
-  commissionRate: number;
-  commission: number;
-}
-
-export interface SimulationPositionBreakdown {
-  positionId: string;
-  title: string;
-  headcount: number;
-  baseSalary: number;
-  allocatedRevenue: number;
-  commissionRate: number;
-  commission: number;
-  /** ⭐ 单人分摊明细 */
-  perEmployee?: SimulationEmployeeBreakdown[];
 }

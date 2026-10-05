@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar, X, Check, ChevronLeft, ChevronRight, Copy, Loader2 } from 'lucide-react';
-import { formatMonthLabel } from '../utils/format';
+import { formatMonthLabel } from '../../utils/format';
 
 interface MonthPickerDialogProps {
   defaultValue?: string;

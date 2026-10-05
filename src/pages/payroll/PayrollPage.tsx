@@ -14,13 +14,13 @@ import {
   saveStaffStatus,
   type StaffStatusItem,
 } from '../../api/payrollStatus';
-import MissingPositionConfigDialog from '../../components/MissingPositionConfigDialog';
-import StoreSwitcher from '../../components/StoreSwitcher';
-import StoreStatusBadge from '../../components/StoreStatusBadge';
+import MissingPositionConfigDialog from '../../components/compensation/MissingPositionConfigDialog';
+import StoreSwitcher from '../../components/layout/StoreSwitcher';
+import StoreStatusBadge from '../../components/layout/StoreStatusBadge';
 import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { getStoreById } from '../../constants/stores';
-import { PositionEditDialog } from '../../components/PositionEditDialog';
+import { PositionEditDialog } from '../../components/compensation/PositionEditDialog';
 
 import { usePayrollStorage } from '../../hooks/usePayrollStorage';
 import { usePayrollCalculation } from '../../hooks/usePayrollCalculation';

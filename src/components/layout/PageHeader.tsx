@@ -1,7 +1,7 @@
 import React from 'react';
 import { Sparkles } from 'lucide-react';
 import NavButtons from './NavButtons';
-import UserMenu from './UserMenu';
+import UserMenu from './../auth/UserMenu';
 
 interface PageHeaderProps {
   selectedMonth?: string;

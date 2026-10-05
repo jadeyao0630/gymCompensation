@@ -7,9 +7,9 @@ import {
   User as UserIcon,
   Shield,
 } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
-import ChangePasswordDialog from './ChangePasswordDialog';
-import UserManageDialog from './UserManageDialog';
+import { useAuth } from '../../contexts/AuthContext';
+import ChangePasswordDialog from './../auth/ChangePasswordDialog';
+import UserManageDialog from './../auth/UserManageDialog';
 
 interface Props {
   /** ⭐ 亮色头部（白底）用 light；深色头部（渐变）用 dark */

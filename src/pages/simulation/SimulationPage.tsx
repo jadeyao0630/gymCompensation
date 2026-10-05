@@ -7,13 +7,13 @@ import type {
   SimulationResult,
 } from '../../types/compensation';
 import { calcSimulation } from '../../utils/simulation';
-import SimulationSettingsPanel from '../../components/SimulationSettingsPanel';
-import RevenueSliderPanel from '../../components/RevenueSliderPanel';
-import StoreSwitcher from '../../components/StoreSwitcher';
-import StoreStatusBadge from '../../components/StoreStatusBadge';
-import { SimulationHeader } from '../../components/SimulationHeader';
-import { SimulationEmptyState } from '../../components/SimulationEmptyState';
-import { MonthPicker } from '../../components/MonthPicker';
+import SimulationSettingsPanel from '../../components/compensation/SimulationSettingsPanel';
+import RevenueSliderPanel from '../../components/compensation/RevenueSliderPanel';
+import StoreSwitcher from '../../components/layout/StoreSwitcher';
+import StoreStatusBadge from '../../components/layout/StoreStatusBadge';
+import { SimulationHeader } from '../../components/layout/SimulationHeader';
+import { SimulationEmptyState } from '../../components/compensation/SimulationEmptyState';
+import { MonthPicker } from '../../components/common/MonthPicker';
 import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { getStoreById } from '../../constants/stores';

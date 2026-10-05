@@ -1,6 +1,6 @@
 import React from 'react';
 import { LayoutGrid, LayoutList, Eye, EyeOff } from 'lucide-react';
-import { MonthPicker } from '../../../components/MonthPicker';
+import { MonthPicker } from '../../../components/common/MonthPicker';
 
 interface Props {
   month: string;

@@ -18,7 +18,7 @@ import {
 } from './PayrollBadges';
 import { exportEmployeePayrollToExcel } from '../../../utils/exportPayroll';
 import ClassMemberDetailRow from './ClassMemberDetailRow';
-import SalesDetailRow from '../../../components/SalesDetailRow';
+import SalesDetailRow from '../../../components/compensation/SalesDetailRow';
 
 interface Props {
   results: PayrollResult[];

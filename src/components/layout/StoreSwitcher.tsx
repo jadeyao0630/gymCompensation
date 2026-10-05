@@ -1,9 +1,9 @@
 import React from 'react';
 import { Store } from 'lucide-react';
-import { useStore } from '../contexts/StoreContext';
-import { useAuth } from '../contexts/AuthContext';
-import { STORES } from '../constants/stores';
-import type { UserPermissionConfig } from '../constants/permissions';
+import { useStore } from '../../contexts/StoreContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { STORES } from '../../constants/stores';
+import type { UserPermissionConfig } from '../../constants/permissions';
 
 /** ⭐ 判断某门店对当前用户是否可用 */
 function isStoreAvailable(

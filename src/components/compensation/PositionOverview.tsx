@@ -6,8 +6,8 @@ import {
   EyeOff,
   Eye,
 } from 'lucide-react';
-import type { PositionConfig, PositionCategory } from '../types/compensation';
-import { POSITION_DEFINITIONS } from '../constants/positions';
+import type { PositionConfig, PositionCategory } from '../../types/compensation';
+import { POSITION_DEFINITIONS } from '../../constants/positions';
 
 interface PositionOverviewProps {
   positions: PositionConfig[];

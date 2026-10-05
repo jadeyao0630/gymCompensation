@@ -1,7 +1,7 @@
 import React from 'react';
 import { GitBranch, Loader2, Download, RefreshCw } from 'lucide-react';
-import NavButtons from '../../../components/NavButtons';
-import UserMenu from '../../../components/UserMenu';
+import NavButtons from '../../../components/layout/NavButtons';
+import UserMenu from '../../../components/auth/UserMenu';
 
 interface Props {
   loading?: boolean;

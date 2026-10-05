@@ -25,7 +25,7 @@ import {
   DEPT_DETAIL_FIELDS,
 } from './PayrollBadges';
 import ClassMemberDetailRow from './ClassMemberDetailRow';
-import SalesDetailRow from '../../../components/SalesDetailRow';
+import SalesDetailRow from '../../../components/compensation/SalesDetailRow';
 
 interface Props {
   allResults: PayrollResult[];

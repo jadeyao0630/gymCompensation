@@ -1,8 +1,8 @@
 import React from 'react';
 import { Plus, Trash2, Percent, Hash, BookOpen } from 'lucide-react';
-import type { CourseCommission, ClassCommissionMode } from '../types/compensation';
-import { uid } from '../utils/id';
-import type { CardItem } from '../api/card';
+import type { CourseCommission, ClassCommissionMode } from '../../types/compensation';
+import { uid } from '../../utils/id';
+import type { CardItem } from '../../api/card';
 
 interface CourseCommissionEditorProps {
   courses: CourseCommission[];

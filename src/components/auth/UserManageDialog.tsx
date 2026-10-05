@@ -19,8 +19,8 @@ import {
   adminDeleteUser,
   adminResetUserPassword,
   type AdminUserListItem,
-} from '../api/adminAuth';
-import { useAuth } from '../contexts/AuthContext';
+} from '../../api/adminAuth';
+import { useAuth } from '../../contexts/AuthContext';
 import UserPermissionDialog from './UserPermissionDialog';
 
 interface Props {

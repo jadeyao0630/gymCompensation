@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { Loader2, AlertCircle } from 'lucide-react';
-import StoreSwitcher from '../../components/StoreSwitcher';
-import StoreStatusBadge from '../../components/StoreStatusBadge';
+import StoreSwitcher from '../../components/layout/StoreSwitcher';
+import StoreStatusBadge from '../../components/layout/StoreStatusBadge';
 import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { getStoreById } from '../../constants/stores';
@@ -15,7 +15,7 @@ import { MonthlyEmptyState } from './components/MonthlyEmptyState';
 import { MonthlySummaryCards } from './components/MonthlySummaryCards';
 import { MonthlyDetailPanels } from './components/MonthlyDetailPanels';
 import { MonthlyProfitPanel } from './components/MonthlyProfitPanel';
-import { MonthPicker } from '../../components/MonthPicker';
+import { MonthPicker } from '../../components/common/MonthPicker';
 
 const MonthlyReportPage: React.FC = () => {
   const { storeId } = useStore();

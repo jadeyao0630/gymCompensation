@@ -4,7 +4,7 @@ import type {
   CommissionTier,
   BaseSalaryTier,
   ClassCommissionMode,
-} from '../types/compensation';
+} from '../../types/compensation';
 
 type Mode = 'commission' | 'base';
 

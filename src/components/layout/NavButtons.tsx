@@ -8,8 +8,8 @@ import {
   TrendingUp,
   GitBranch,
 } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
-import { useStore } from '../contexts/StoreContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { useStore } from '../../contexts/StoreContext';
 
 type ActiveKey =
   | 'config'
