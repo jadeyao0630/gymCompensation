@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 
 import StoreSwitcher from '../../components/layout/StoreSwitcher';
 import StoreStatusBadge from '../../components/layout/StoreStatusBadge';
@@ -13,7 +13,7 @@ import { exportMarketingExcel } from './utils/exportExcel';
 import { useMarketingData } from './hooks/useMarketingData';
 
 import { MarketingHeader } from './components/MarketingHeader';
-import { DateRangePicker } from '../../components/common/DateRangePicker';   // ⭐ 改为公共组件
+import { DateRangePicker } from '../../components/common/DateRangePicker';
 import { SummaryCards } from './components/SummaryCards';
 import { CardBreakdown } from './components/CardBreakdown';
 import { PayTypeBreakdown } from './components/PayTypeBreakdown';
@@ -21,6 +21,7 @@ import { MarketerBreakdown } from './components/MarketerBreakdown';
 import { OrderDetailTable } from './components/OrderDetailTable';
 import { FrontMoneySection, type FrontMoneyFilter } from './components/FrontMoneySection';
 import { FrontMoneyDialog } from './components/FrontMoneyDialog';
+import { MarketingEmptyState } from './components/MarketingEmptyState';
 
 const MarketingReportPage: React.FC = () => {
   const { storeId } = useStore();
@@ -33,6 +34,7 @@ const MarketingReportPage: React.FC = () => {
     beginDate, endDate,
     loading, error,
     list, frontMoneyList,
+    hasLoadedOnce,
     handleQuick, handleDateChange, handleRefresh,
   } = useMarketingData();
 
@@ -68,19 +70,38 @@ const MarketingReportPage: React.FC = () => {
           <StoreStatusBadge dbOnline saveStatus="idle" lastSavedAt={null} />
         </div>
 
-        {/* ⭐ 日期范围：使用公共 DateRangePicker */}
+        {/* 日期范围 + 获取按钮 */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <DateRangePicker
-              start={beginDate}
-              end={endDate}
-              onChange={handleDateChange}
-              label="日期范围"
-              size="md"
-            />
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="w-full sm:w-[320px] shrink-0">
+              <DateRangePicker
+                start={beginDate}
+                end={endDate}
+                onChange={handleDateChange}
+                label="日期范围"
+                size="md"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={loading}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white text-sm font-semibold shadow-md transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> 获取中…
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4" /> 获取
+                </>
+              )}
+            </button>
           </div>
 
-          {/* 快捷区间（点击即拉数据，保留原行为） */}
+          {/* 快捷区间 */}
           <div className="mt-3 flex items-center gap-1.5 flex-wrap">
             <span className="text-[11px] text-gray-400 mr-1">快捷：</span>
             <button
@@ -121,22 +142,25 @@ const MarketingReportPage: React.FC = () => {
           </div>
         </div>
 
-        {loading && (
-          <div className="flex items-center justify-center py-12 text-gray-400">
-            <Loader2 className="w-5 h-5 animate-spin mr-2" />
-            加载数据中…
-          </div>
-        )}
-
-        {!loading && error && (
+        {/* ⭐ 错误条：有数据时也能看到错误 */}
+        {error && (
           <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 text-sm text-red-700 flex items-center gap-2">
             <AlertCircle className="w-4 h-4" />
             {error}
           </div>
         )}
 
-        {!loading && !error && (
+        {/* ⭐ 主体：只根据 hasData 决定显示，不再用 !loading 阻止渲染 */}
+        {hasData ? (
           <>
+            {/* ⭐ 顶部细 loading 条，避免整页闪烁 */}
+            {loading && (
+              <div className="mb-4 flex items-center gap-2 text-xs text-indigo-600">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                正在刷新数据…
+              </div>
+            )}
+
             <SummaryCards summary={summary} />
 
             <FrontMoneySection
@@ -151,6 +175,20 @@ const MarketingReportPage: React.FC = () => {
             <MarketerBreakdown summary={summary} />
             <OrderDetailTable list={list} />
           </>
+        ) : loading && !hasLoadedOnce ? (
+          /* 首次加载中（从没加载成功过）→ 显示全屏 loading */
+          <div className="flex items-center justify-center py-20 text-gray-400">
+            <Loader2 className="w-5 h-5 animate-spin mr-2" />
+            加载数据中…
+          </div>
+        ) : (
+          /* 加载过但无数据 or 首次加载失败 → 显示空状态 */
+          <MarketingEmptyState
+            beginDate={beginDate}
+            endDate={endDate}
+            isLoading={loading}
+            onFetch={handleRefresh}
+          />
         )}
       </div>
 
