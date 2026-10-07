@@ -27,7 +27,7 @@ export async function fetchPlanByMonth(
   return res.data.data as MonthlyCompensationPlan | null;
 }
 
-/** 保存方案 */
+/** ⭐ 保存方案（带上 departmentRewards） */
 export async function savePlan(
   storeId: string,
   plan: MonthlyCompensationPlan
@@ -37,6 +37,8 @@ export async function savePlan(
     month: plan.month,
     periodLabel: plan.periodLabel,
     positions: plan.positions,
+    /* ⭐ 部门奖金持久化 */
+    departmentRewards: plan.departmentRewards ?? {},
   });
   return res.data.data;
 }
@@ -58,7 +60,7 @@ export async function initStorePlans(storeId: string) {
   };
 }
 
-/** ⭐ 复制方案（同门店，fromMonth → toMonth） */
+/** 复制方案（同门店，fromMonth → toMonth） */
 export async function copyPlan(
   storeId: string,
   fromMonth: string,
@@ -85,7 +87,6 @@ export interface SimulationSetting {
   otherFee: number;
 }
 
-/** 读取测算设置 */
 export async function fetchSimulationSetting(
   storeId: string,
   month: string
@@ -96,7 +97,6 @@ export async function fetchSimulationSetting(
   return res.data.data as SimulationSetting;
 }
 
-/** 保存测算设置 */
 export async function saveSimulationSetting(
   storeId: string,
   month: string,
@@ -110,7 +110,6 @@ export async function saveSimulationSetting(
   return res.data;
 }
 
-/** ⭐ 复制测算设置 */
 export async function copySimulationSetting(
   storeId: string,
   fromMonth: string,

@@ -6,9 +6,16 @@ import {
   UserCheck,
   UserX,
   UserPlus,
+  Gift,
+  MinusCircle,
+  Plus,
 } from 'lucide-react';
 import type { PayrollResult } from '../../../utils/payroll';
-import type { MonthlyCompensationPlan } from '../../../types/compensation';
+import type {
+  MonthlyCompensationPlan,
+  RewardsCatalog,
+  StaffRewardRef,
+} from '../../../types/compensation';
 import {
   GenderBadge,
   ManagerBadge,
@@ -19,6 +26,11 @@ import {
 import { exportEmployeePayrollToExcel } from '../../../utils/exportPayroll';
 import ClassMemberDetailRow from './ClassMemberDetailRow';
 import SalesDetailRow from '../../../components/compensation/SalesDetailRow';
+import QuickRewardPopover from './QuickRewardPopover';
+import {
+  rewardSourceLabel,
+  rewardTriggerLabel,
+} from '../../../utils/payroll/rewardStyle';
 
 interface Props {
   results: PayrollResult[];
@@ -36,9 +48,7 @@ interface Props {
   } | null;
   hideExcluded: boolean;
   canExportPersonal: boolean;
-  /** ⭐ 新人集合 */
   newbieSet: Set<string>;
-  /** ⭐ 切换新人 */
   onToggleNewbie: (staffId: string) => void;
   onToggleExclude: (staffId: string) => void;
   onEditPosition: (r: PayrollResult) => void;
@@ -46,6 +56,9 @@ interface Props {
     staffId: string,
     updates: { fullAttendance: boolean; absentDays: number }
   ) => void;
+  rewardsCatalog?: RewardsCatalog;
+  canEditRewards?: boolean;
+  onSaveStaffRewards?: (staffId: string, next: StaffRewardRef[]) => void;
 }
 
 const IncludeIconButton: React.FC<{
@@ -72,7 +85,6 @@ const IncludeIconButton: React.FC<{
   </button>
 );
 
-/* ⭐ 新人切换按钮 */
 const NewbieIconButton: React.FC<{
   isNewbie: boolean;
   onToggle: () => void;
@@ -154,6 +166,9 @@ export const PayrollAllTable: React.FC<Props> = ({
   onToggleExclude,
   onEditPosition,
   onUpdateAttendance,
+  rewardsCatalog = [],
+  canEditRewards = false,
+  onSaveStaffRewards,
 }) => {
   const excludedCount = results.filter((r) =>
     excludedSet.has(r.staffId)
@@ -185,8 +200,25 @@ export const PayrollAllTable: React.FC<Props> = ({
     });
   };
 
-  /* ⭐ 列数：新人列 +1 */
-  const COLS = canExportPersonal ? 14 : 13;
+  const [expandedRewardKeys, setExpandedRewardKeys] = useState<Set<string>>(
+    new Set()
+  );
+  const toggleRewardExpand = (key: string) => {
+    setExpandedRewardKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const [quickRewardFor, setQuickRewardFor] = useState<string | null>(null);
+
+  const COLS = canExportPersonal ? 15 : 14;
+
+  const rewardsTotalAll = results
+    .filter((r) => !excludedSet.has(r.staffId))
+    .reduce((s, r) => s + (r.rewardsTotal ?? 0), 0);
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -221,6 +253,7 @@ export const PayrollAllTable: React.FC<Props> = ({
               <th className="px-4 py-3 text-right font-medium">底薪</th>
               <th className="px-4 py-3 text-right font-medium">销提</th>
               <th className="px-4 py-3 text-right font-medium">课提</th>
+              <th className="px-4 py-3 text-right font-medium">奖金 / 扣款</th>
               <th className="px-4 py-3 text-right font-medium">合计</th>
               {canExportPersonal && (
                 <th className="px-4 py-3 text-center font-medium">导出</th>
@@ -248,8 +281,18 @@ export const PayrollAllTable: React.FC<Props> = ({
                 const hasDetails = (r.classMemberDetail || []).length > 0;
                 const isSalesExpanded = expandedSalesKeys.has(rowKey);
                 const isNewbie = newbieSet.has(r.staffId);
-
+                const isRewardsExpanded = expandedRewardKeys.has(rowKey);
+                /* ⭐ 判断依据：是否有奖金条目，而不是金额是否为 0 */
+                const hasRewards = (r.rewards?.length ?? 0) > 0;
+                const rewardsTotal = r.rewardsTotal ?? 0;
+                const isRewardsNegative = rewardsTotal < 0;
                 const canClickClass = hasDetails;
+                const isQuickOpen = quickRewardFor === r.staffId;
+
+                const currentStaffRewards: StaffRewardRef[] =
+                  plan?.staffRewards?.[String(r.staffId)] ||
+                  plan?.staffRewards?.[r.staffId] ||
+                  [];
 
                 return (
                   <React.Fragment key={rowKey}>
@@ -265,7 +308,6 @@ export const PayrollAllTable: React.FC<Props> = ({
                         />
                       </td>
 
-                      {/* ⭐ 新人按钮 */}
                       <td className="px-3 py-3 text-center">
                         <NewbieIconButton
                           isNewbie={isNewbie}
@@ -359,11 +401,6 @@ export const PayrollAllTable: React.FC<Props> = ({
                         {canClickClass ? (
                           <button
                             onClick={() => toggleExpand(rowKey)}
-                            title={
-                              isExpanded
-                                ? '收起消课明细'
-                                : `展开消课明细（${(r.classMemberDetail || []).length} 条）`
-                            }
                             className={`font-medium transition hover:underline ${
                               isExpanded
                                 ? 'text-purple-800'
@@ -381,11 +418,6 @@ export const PayrollAllTable: React.FC<Props> = ({
                         {canClickClass ? (
                           <button
                             onClick={() => toggleExpand(rowKey)}
-                            title={
-                              isExpanded
-                                ? '收起消课明细'
-                                : `展开消课明细（${(r.classMemberDetail || []).length} 条）`
-                            }
                             className={`font-medium transition hover:underline ${
                               isExpanded
                                 ? 'text-purple-800'
@@ -421,11 +453,6 @@ export const PayrollAllTable: React.FC<Props> = ({
                         {canClickClass ? (
                           <button
                             onClick={() => toggleExpand(rowKey)}
-                            title={
-                              isExpanded
-                                ? '收起消课明细'
-                                : `展开消课明细（${(r.classMemberDetail || []).length} 条）`
-                            }
                             className={`font-medium transition hover:underline ${
                               isExpanded
                                 ? 'text-violet-900'
@@ -436,6 +463,66 @@ export const PayrollAllTable: React.FC<Props> = ({
                           </button>
                         ) : (
                           fmtMoney(r.classCommission)
+                        )}
+                      </td>
+
+                      {/* ⭐ 奖金 / 扣款列：有奖金条目就显示（金额 0 也显示） */}
+                      <td className="px-4 py-3 text-right tabular-nums relative">
+                        <div className="inline-flex items-center gap-1 justify-end">
+                          {hasRewards ? (
+                            <button
+                              onClick={() => toggleRewardExpand(rowKey)}
+                              title="点击查看奖金 / 扣款明细"
+                              className={`inline-flex items-center gap-1 font-medium transition hover:underline ${
+                                isRewardsNegative
+                                  ? isRewardsExpanded
+                                    ? 'text-rose-800'
+                                    : 'text-rose-600 hover:text-rose-800'
+                                  : isRewardsExpanded
+                                  ? 'text-amber-800'
+                                  : 'text-amber-600 hover:text-amber-800'
+                              }`}
+                            >
+                              {isRewardsNegative ? (
+                                <MinusCircle className="w-3.5 h-3.5" />
+                              ) : (
+                                <Gift className="w-3.5 h-3.5" />
+                              )}
+                              {fmtMoney(rewardsTotal)}
+                            </button>
+                          ) : (
+                            <span className="text-gray-300">—</span>
+                          )}
+
+                          {canEditRewards && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setQuickRewardFor(
+                                  isQuickOpen ? null : r.staffId
+                                );
+                              }}
+                              title="添加/编辑个人奖金 / 扣款"
+                              className="inline-flex items-center justify-center w-5 h-5 rounded-full border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+
+                        {isQuickOpen && (
+                          <QuickRewardPopover
+                            staffId={r.staffId}
+                            staffName={r.staffName}
+                            catalog={rewardsCatalog}
+                            current={currentStaffRewards}
+                            onSave={(next: StaffRewardRef[]) => {
+                              if (onSaveStaffRewards) {
+                                onSaveStaffRewards(r.staffId, next);
+                              }
+                            }}
+                            onClose={() => setQuickRewardFor(null)}
+                          />
                         )}
                       </td>
 
@@ -477,6 +564,69 @@ export const PayrollAllTable: React.FC<Props> = ({
                     {isExpanded && hasDetails && (
                       <ClassMemberDetailRow result={r} colSpan={COLS} />
                     )}
+
+                    {/* 奖金明细展开 */}
+                    {isRewardsExpanded && hasRewards && (
+                      <tr>
+                        <td
+                          colSpan={COLS}
+                          className="px-4 py-3 bg-amber-50/40 border-t border-amber-100"
+                        >
+                          <div className="text-xs font-semibold text-amber-800 mb-2 flex items-center gap-1.5">
+                            <Gift className="w-3.5 h-3.5" /> 奖金 / 扣款明细
+                          </div>
+                          <div className="space-y-1">
+                            {(r.rewards || []).map((h, i) => {
+                              const isDeduction =
+                                h.amount < 0 || h.type === 'deduction';
+                              return (
+                                <div
+                                  key={i}
+                                  className={`flex items-center gap-3 text-xs rounded-lg px-3 py-1.5 border ${
+                                    isDeduction
+                                      ? 'bg-rose-50/70 border-rose-100'
+                                      : 'bg-white border-amber-100'
+                                  }`}
+                                >
+                                  <span
+                                    className={`font-medium ${
+                                      isDeduction
+                                        ? 'text-rose-900'
+                                        : 'text-gray-800'
+                                    }`}
+                                  >
+                                    {h.name}
+                                  </span>
+                                  <span
+                                    className={`font-semibold tabular-nums ${
+                                      isDeduction
+                                        ? 'text-rose-700'
+                                        : 'text-amber-700'
+                                    }`}
+                                  >
+                                    {isDeduction ? '-' : '+'}¥
+                                    {Math.abs(
+                                      Math.round(h.amount)
+                                    ).toLocaleString()}
+                                  </span>
+                                  <span className="text-gray-400">
+                                    {rewardSourceLabel(h)}
+                                  </span>
+                                  <span className="text-gray-400">
+                                    {rewardTriggerLabel(h)}
+                                  </span>
+                                  {h.note && (
+                                    <span className="text-gray-400">
+                                      · {h.note}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                   </React.Fragment>
                 );
               })
@@ -497,6 +647,13 @@ export const PayrollAllTable: React.FC<Props> = ({
               </td>
               <td className="px-4 py-3 text-right tabular-nums text-violet-700">
                 {fmtMoney(summary?.classCommission)}
+              </td>
+              <td
+                className={`px-4 py-3 text-right tabular-nums ${
+                  rewardsTotalAll < 0 ? 'text-rose-700' : 'text-amber-700'
+                }`}
+              >
+                {fmtMoney(rewardsTotalAll)}
               </td>
               <td className="px-4 py-3 text-right tabular-nums text-emerald-700">
                 {fmtMoney(summary?.total)}

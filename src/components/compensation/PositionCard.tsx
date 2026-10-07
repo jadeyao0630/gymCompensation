@@ -22,6 +22,8 @@ import {
 import TierEditor from './TierEditor';
 import GenderTierEditor from './GenderTierEditor';
 import CourseCommissionEditor from './CourseCommissionEditor';
+import PositionRewardsEditor from './PositionRewardsEditor';
+import type { PositionRewardRef, RewardsCatalog } from '../../types/compensation';
 
 const ALL_DEPTS: DepartmentKey[] = ['会籍', '私教', '泳教', '运营'];
 const DEFAULT_STORE_DEPTS: DepartmentKey[] = ['会籍', '私教', '泳教'];
@@ -116,6 +118,8 @@ interface PositionCardProps {
   canRename?: boolean;   // ⭐ 新增
   onUpdate: (updates: Partial<PositionConfig>) => void;
   onRemove: () => void;
+  /** ⭐ 全局奖金库 */
+  rewardsCatalog?: RewardsCatalog;
 }
 
 const PositionCard: React.FC<PositionCardProps> = ({
@@ -128,6 +132,7 @@ const PositionCard: React.FC<PositionCardProps> = ({
   canRename = true,      // ⭐ 默认允许，向下兼容
   onUpdate,
   onRemove,
+  rewardsCatalog,
 }) => {
   const { storeId } = useStore();
 
@@ -582,6 +587,13 @@ const PositionCard: React.FC<PositionCardProps> = ({
             onChange={updateCourseCommissions}
             cardOptions={cardOptions}
             loadingCards={loadingCards}
+          />
+          {/* ⭐ 职位级奖金 */}
+          <PositionRewardsEditor
+            rewards={position.rewards || []}
+            catalog={rewardsCatalog || []}
+            readOnly={readOnly}
+            onChange={(next: PositionRewardRef[]) => onUpdate({ rewards: next })}
           />
         </div>
       )}

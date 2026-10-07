@@ -1,10 +1,9 @@
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import type { PayrollResult } from './payroll';
 import type { MonthlyCompensationPlan } from '../types/compensation';
 import { getDepartmentOf, needsSaleIdPrefix } from './payroll';
 import { getCardOrderList } from '../api/stats';
 
-/** 'YYYY-MM' → { begin_date: 'YYYY-MM-01', end_date: 'YYYY-MM-月末' } */
 function getMonthRange(month: string): { begin_date: string; end_date: string } {
   const [y, m] = month.split('-').map(Number);
   const first = new Date(y, m - 1, 1);
@@ -16,7 +15,6 @@ function getMonthRange(month: string): { begin_date: string; end_date: string } 
   return { begin_date: fmt(first), end_date: fmt(last) };
 }
 
-/* ⭐ 收款方式：格式化为 "微信 ¥2,000 + 现金 ¥3,000" */
 function formatPayDetail(
   payDetail?: Array<{ pay_type: string; amount: string; pay_type_id: string }>
 ): string {
@@ -26,7 +24,6 @@ function formatPayDetail(
     .join(' + ');
 }
 
-/* ⭐ 业绩归属：格式化为多行字符串，每行 "姓名[主/协] 占比 金额" */
 function formatMarketers(
   marketers?: Array<{
     name: string;
@@ -44,6 +41,18 @@ function formatMarketers(
     .join('\n');
 }
 
+const SOURCE_LABEL: Record<string, string> = {
+  position: '职位',
+  department: '部门',
+  staff: '个人',
+};
+const TRIGGER_LABEL: Record<string, string> = {
+  auto: '自动命中',
+  manual: '手动勾选',
+};
+
+const RED_FONT = { font: { color: { rgb: 'C00000' } } };
+
 export async function exportEmployeePayrollToExcel(
   result: PayrollResult,
   plan: MonthlyCompensationPlan,
@@ -52,7 +61,6 @@ export async function exportEmployeePayrollToExcel(
 ): Promise<void> {
   const wb = XLSX.utils.book_new();
   const dept = getDepartmentOf(result.positionTitle);
-  const isCoach = dept === '泳教' || dept === '私教';
   const isOpsManager = result.positionTitle === '运营主管';
 
   /* ============== Sheet 1：汇总 ============== */
@@ -76,6 +84,7 @@ export async function exportEmployeePayrollToExcel(
     summaryRows.push(['底薪', result.baseSalary]);
     summaryRows.push(['销提（佣金）', result.salesCommission]);
     summaryRows.push(['缺勤扣款', -result.absentDeduction]);
+    summaryRows.push(['奖金 / 扣款合计', result.rewardsTotal ?? 0]);
     summaryRows.push(['合计', result.total]);
   } else {
     summaryRows.push(['销售金额', result.salesAmount]);
@@ -86,14 +95,110 @@ export async function exportEmployeePayrollToExcel(
     summaryRows.push(['销提', result.salesCommission]);
     summaryRows.push(['课提', result.classCommission]);
     summaryRows.push(['缺勤扣款', -result.absentDeduction]);
+    summaryRows.push(['奖金 / 扣款合计', result.rewardsTotal ?? 0]);
     summaryRows.push(['合计', result.total]);
   }
 
+  if (result.rewards && result.rewards.length > 0) {
+    summaryRows.push([]);
+    summaryRows.push(['奖金 / 扣款明细']);
+    summaryRows.push(['名称', '金额', '类型', '来源', '触发方式', '备注']);
+    result.rewards.forEach((h) => {
+      const isDeduction = h.amount < 0 || h.type === 'deduction';
+      summaryRows.push([
+        h.name,
+        h.amount,
+        isDeduction ? '扣款' : '奖励',
+        SOURCE_LABEL[h.source] ?? h.source,
+        TRIGGER_LABEL[h.trigger] ?? h.trigger,
+        h.note ?? '',
+      ]);
+    });
+  }
+
   const ws1 = XLSX.utils.aoa_to_sheet(summaryRows);
-  ws1['!cols'] = [{ wch: 18 }, { wch: 18 }];
+  ws1['!cols'] = [
+    { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 24 }, { wch: 24 },
+  ];
+
+  /* ⭐ 奖金/扣款合计行负数标红 */
+  if ((result.rewardsTotal ?? 0) < 0) {
+    const range = XLSX.utils.decode_range(ws1['!ref'] || 'A1');
+    for (let R = 0; R <= range.e.r; R++) {
+      const labelAddr = XLSX.utils.encode_cell({ r: R, c: 0 });
+      const labelCell = ws1[labelAddr];
+      if (labelCell && labelCell.v === '奖金 / 扣款合计') {
+        const valAddr = XLSX.utils.encode_cell({ r: R, c: 1 });
+        if (ws1[valAddr]) ws1[valAddr].s = RED_FONT;
+        break;
+      }
+    }
+  }
+
+  /* ⭐ 明细区每行扣款标红 */
+  if (result.rewards && result.rewards.length > 0) {
+    const range = XLSX.utils.decode_range(ws1['!ref'] || 'A1');
+    for (let R = 0; R <= range.e.r; R++) {
+      const typeAddr = XLSX.utils.encode_cell({ r: R, c: 2 });
+      const typeCell = ws1[typeAddr];
+      if (typeCell && typeCell.v === '扣款') {
+        for (let C = 0; C <= 5; C++) {
+          const addr = XLSX.utils.encode_cell({ r: R, c: C });
+          if (ws1[addr]) ws1[addr].s = RED_FONT;
+        }
+      }
+    }
+  }
+
   XLSX.utils.book_append_sheet(wb, ws1, '汇总');
 
-  /* ============== Sheet 2：消课明细 ============== */
+  /* ============== Sheet 2：奖金明细 ============== */
+  if (result.rewards && result.rewards.length > 0) {
+    const rewardRows: any[][] = [
+      ['薪酬奖金 / 扣款明细'],
+      ['月份', month],
+      ['姓名', result.staffName],
+      ['岗位', result.positionTitle],
+      ['部门', dept],
+      [],
+      ['名称', '金额', '类型', '来源', '触发方式', '备注'],
+    ];
+    result.rewards.forEach((h) => {
+      const isDeduction = h.amount < 0 || h.type === 'deduction';
+      rewardRows.push([
+        h.name,
+        h.amount,
+        isDeduction ? '扣款' : '奖励',
+        SOURCE_LABEL[h.source] ?? h.source,
+        TRIGGER_LABEL[h.trigger] ?? h.trigger,
+        h.note ?? '',
+      ]);
+    });
+    rewardRows.push([]);
+    rewardRows.push(['合计', result.rewardsTotal ?? 0, '', '', '', '']);
+
+    const wsReward = XLSX.utils.aoa_to_sheet(rewardRows);
+    wsReward['!cols'] = [
+      { wch: 22 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 12 }, { wch: 30 },
+    ];
+
+    /* ⭐ 标红扣款行 */
+    const range = XLSX.utils.decode_range(wsReward['!ref'] || 'A1');
+    for (let R = 0; R <= range.e.r; R++) {
+      const typeAddr = XLSX.utils.encode_cell({ r: R, c: 2 });
+      const typeCell = wsReward[typeAddr];
+      if (typeCell && typeCell.v === '扣款') {
+        for (let C = 0; C <= 5; C++) {
+          const addr = XLSX.utils.encode_cell({ r: R, c: C });
+          if (wsReward[addr]) wsReward[addr].s = RED_FONT;
+        }
+      }
+    }
+
+    XLSX.utils.book_append_sheet(wb, wsReward, '奖金明细');
+  }
+
+  /* ============== Sheet 3：消课明细 ============== */
   const details = result.classMemberDetail || [];
   if (details.length > 0) {
     const rates = result.courseCommissionRates || {};
@@ -175,9 +280,7 @@ export async function exportEmployeePayrollToExcel(
         '',
         Number(groupAmount.toFixed(2)),
         '',
-        Number(
-          (classCommissionDetail[course] ?? groupCommission).toFixed(2)
-        ),
+        Number((classCommissionDetail[course] ?? groupCommission).toFixed(2)),
         '',
       ]);
       detailRows.push([]);
@@ -201,20 +304,13 @@ export async function exportEmployeePayrollToExcel(
 
     const ws2 = XLSX.utils.aoa_to_sheet(detailRows);
     ws2['!cols'] = [
-      { wch: 22 },
-      { wch: 14 },
-      { wch: 14 },
-      { wch: 10 },
-      { wch: 10 },
-      { wch: 12 },
-      { wch: 14 },
-      { wch: 12 },
-      { wch: 12 },
+      { wch: 22 }, { wch: 14 }, { wch: 14 }, { wch: 10 }, { wch: 10 },
+      { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 },
     ];
     XLSX.utils.book_append_sheet(wb, ws2, '消课明细');
   }
 
-  /* ============== Sheet 3：销售明细（⭐ 含收款方式 + 业绩归属） ============== */
+  /* ============== Sheet 4：销售明细 ============== */
   try {
     const { begin_date, end_date } = getMonthRange(month);
     const saleId = needsSaleIdPrefix(result.positionTitle)
@@ -233,23 +329,13 @@ export async function exportEmployeePayrollToExcel(
     if (list.length > 0) {
       const myName = (result.staffName || '').trim();
 
-      /* ⭐ 表头：新增"收款方式"和"业绩归属" */
       const rows: any[][] = [
-        [
-          '会员名',
-          '卡种',
-          '收款方式',
-          '业绩归属',
-          '卡金额',
-          '本人业绩',
-          '日期',
-        ],
+        ['会员名', '卡种', '收款方式', '业绩归属', '卡金额', '本人业绩', '日期'],
       ];
 
       let totalAmount = 0;
       let totalCardAmount = 0;
 
-      /* ⭐ 收款方式汇总 */
       const paySummary = new Map<
         string,
         { pay_type: string; amount: number }
@@ -263,7 +349,6 @@ export async function exportEmployeePayrollToExcel(
         totalAmount += performanceAmount;
         totalCardAmount += Number(item.amount || 0);
 
-        /* 累计收款方式 */
         (item.pay_detail || []).forEach((p) => {
           const key = String(p.pay_type_id || p.pay_type);
           const cur = paySummary.get(key);
@@ -275,9 +360,7 @@ export async function exportEmployeePayrollToExcel(
         rows.push([
           item.username || '',
           item.card_name || '',
-          /* ⭐ 该笔订单的收款方式 */
           formatPayDetail(item.pay_detail),
-          /* ⭐ 该笔订单的业绩归属 */
           formatMarketers(item.marketers_detail),
           Number(item.amount || 0),
           performanceAmount,
@@ -285,46 +368,25 @@ export async function exportEmployeePayrollToExcel(
         ]);
       });
 
-      /* 表尾合计行 */
       rows.push([
-        '合计',
-        '',
-        '',
-        '',
+        '合计', '', '', '',
         Number(totalCardAmount.toFixed(2)),
         Number(totalAmount.toFixed(2)),
         '',
       ]);
 
-      /* ⭐ 收款方式汇总小表（放在最后几行） */
       rows.push([]);
       rows.push(['收款方式汇总', '', '', '', '', '', '']);
       paySummary.forEach((v) => {
-        rows.push([
-          v.pay_type,
-          '',
-          '',
-          '',
-          '',
-          Number(v.amount.toFixed(2)),
-          '',
-        ]);
+        rows.push([v.pay_type, '', '', '', '', Number(v.amount.toFixed(2)), '']);
       });
 
       const wsSales = XLSX.utils.aoa_to_sheet(rows);
-
-      /* ⭐ 列宽 */
       wsSales['!cols'] = [
-        { wch: 14 },  // 会员名
-        { wch: 20 },  // 卡种
-        { wch: 28 },  // 收款方式
-        { wch: 40 },  // 业绩归属（多人时较宽）
-        { wch: 12 },  // 卡金额
-        { wch: 12 },  // 本人业绩
-        { wch: 18 },  // 日期
+        { wch: 14 }, { wch: 20 }, { wch: 28 }, { wch: 40 },
+        { wch: 12 }, { wch: 12 }, { wch: 18 },
       ];
 
-      /* ⭐ 对"收款方式"和"业绩归属"列设置 wrapText，多行正常显示 */
       const wrapCols = ['C', 'D'];
       const range = XLSX.utils.decode_range(wsSales['!ref'] || 'A1');
       for (let R = range.s.r; R <= range.e.r; R++) {
@@ -345,7 +407,7 @@ export async function exportEmployeePayrollToExcel(
     console.warn('[export] 拉销售明细失败，跳过', e);
   }
 
-  /* ============== Sheet 4：课提汇总 ============== */
+  /* ============== Sheet 5：课提汇总 ============== */
   if (
     result.classCommissionDetail &&
     Object.keys(result.classCommissionDetail).length > 0
@@ -360,7 +422,7 @@ export async function exportEmployeePayrollToExcel(
     XLSX.utils.book_append_sheet(wb, ws3, '课提汇总');
   }
 
-  /* ============== Sheet 5：岗位配置 ============== */
+  /* ============== Sheet 6：岗位配置 ============== */
   const pos = plan.positions.find((p) => p.title === result.positionTitle);
   if (pos) {
     const cfgRows: any[][] = [['配置项', '值']];
@@ -388,6 +450,30 @@ export async function exportEmployeePayrollToExcel(
     } else if (pos.oldClassFee !== undefined) {
       cfgRows.push(['老课费用', `${pos.oldClassFee} 元/节`]);
     }
+    if (pos.rewards && pos.rewards.length > 0) {
+      cfgRows.push(['职位奖金 / 扣款', '']);
+      pos.rewards.forEach((ref) => {
+        cfgRows.push([`  ID`, ref.rewardId]);
+      });
+    }
+    if (plan.departmentRewards) {
+      const deptKey = dept as '会籍' | '私教' | '泳教' | '运营';
+      const list = plan.departmentRewards[deptKey];
+      if (list && list.length > 0) {
+        cfgRows.push([`部门奖金 / 扣款（${dept}）`, '']);
+        list.forEach((ref) => {
+          cfgRows.push([`  ID`, ref.rewardId]);
+        });
+      }
+    }
+    const staffRefs = plan.staffRewards?.[result.staffId];
+    if (staffRefs && staffRefs.length > 0) {
+      cfgRows.push(['个人奖金 / 扣款', '']);
+      staffRefs.forEach((ref) => {
+        cfgRows.push([`  ID`, ref.rewardId]);
+      });
+    }
+
     const ws4 = XLSX.utils.aoa_to_sheet(cfgRows);
     ws4['!cols'] = [{ wch: 24 }, { wch: 24 }];
     XLSX.utils.book_append_sheet(wb, ws4, '岗位配置');

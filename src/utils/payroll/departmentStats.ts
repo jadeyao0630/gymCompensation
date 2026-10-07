@@ -19,6 +19,7 @@ export function calcDepartmentStats(
         baseSalary: 0,
         salesCommission: 0,
         classCommission: 0,
+        rewardsTotal: 0,        // ⭐
         total: 0,
         configuredHeadcount: 0,
       });
@@ -38,10 +39,14 @@ export function calcDepartmentStats(
     const dept = getDepartmentOf(r.positionTitle);
     const s = ensure(dept);
 
+    /* ⭐ 无论什么职位，奖金都计入部门奖金合计 */
+    const rewardsTotal = r.rewardsTotal ?? 0;
+
     if (r.positionTitle === '运营主管') {
       s.baseSalary += r.baseSalary;
       s.salesAmount += r.salesAmount;
       s.salesCommission += r.salesCommission;
+      s.rewardsTotal += rewardsTotal;      // ⭐
       s.total += r.total;
       continue;
     }
@@ -54,7 +59,8 @@ export function calcDepartmentStats(
       s.baseSalary += r.baseSalary;
       s.salesCommission += r.salesCommission;
       s.classCommission += r.classCommission;
-      s.total += r.baseSalary + r.salesCommission + r.classCommission;
+      s.rewardsTotal += rewardsTotal;      // ⭐
+      s.total += r.baseSalary + r.salesCommission + r.classCommission + rewardsTotal;  // ⭐ 加奖金
       continue;
     }
 
@@ -64,7 +70,8 @@ export function calcDepartmentStats(
     s.baseSalary += r.baseSalary;
     s.salesCommission += r.salesCommission;
     s.classCommission += r.classCommission;
-    s.total += r.total;
+    s.rewardsTotal += rewardsTotal;        // ⭐
+    s.total += r.total;                    // r.total 已含奖金
   }
 
   const order: Department[] = ['会籍', '私教', '泳教', '运营'];

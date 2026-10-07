@@ -3,13 +3,16 @@ import {
   User, UserRound, Sparkles, Crown, Store, Flower2, Music,
   Music2, Waves, Dumbbell, Users, ConciergeBell, Brush, Sliders,
 } from 'lucide-react';
-import type { PayrollResult } from '../../utils/payroll';
+import type { PayrollResult } from '../../../utils/payroll';
 
-/* 格式化 */
+/* ⭐ 格式化：只对 null / undefined 显示 '—'，0 正常显示 */
 export const fmtMoney = (v: number | undefined | null): string =>
-  !v || Number.isNaN(v) ? '—' : `¥${v.toLocaleString()}`;
+  v == null || Number.isNaN(v)
+    ? '—'
+    : `¥${Math.round(v).toLocaleString('zh-CN')}`;
+
 export const fmtNumber = (v: number | undefined | null): string =>
-  !v || Number.isNaN(v) ? '—' : String(v);
+  v == null || Number.isNaN(v) ? '—' : String(v);
 
 /* ---------------- 徽章 ---------------- */
 export const GenderBadge: React.FC<{ gender: PayrollResult['gender'] }> = ({ gender }) => {
@@ -69,7 +72,7 @@ export const PositionBadge: React.FC<{ title: string }> = ({ title }) => {
 };
 
 /* ---------------- 部门样式 ---------------- */
-import type { Department } from '../../utils/payroll';
+import type { Department } from '../../../utils/payroll';
 export const DEPT_STYLE: Record<Department, { icon: React.ReactNode; gradient: string; text: string; lightBg: string; border: string }> = {
   会籍: { icon: <Users className="w-4 h-4" />, gradient: 'from-blue-500 to-indigo-500', text: 'text-blue-700', lightBg: 'bg-blue-50', border: 'border-blue-200' },
   私教: { icon: <Dumbbell className="w-4 h-4" />, gradient: 'from-violet-500 to-purple-500', text: 'text-violet-700', lightBg: 'bg-violet-50', border: 'border-violet-200' },

@@ -77,6 +77,61 @@ export interface PositionCalcFlags {
 }
 
 /* ============================================================
+ * ⭐ 奖金 / 扣款
+ * ============================================================ */
+
+export type RewardMode = 'manual' | 'condition';
+
+export type RewardConditionType =
+  | 'fullAttendance'
+  | 'performance'
+  | 'salesAmount'
+  | 'classCount'
+  | 'custom';
+
+export interface RewardDefinition {
+  id: string;
+  name: string;
+  amount: number;
+  note?: string;
+  mode: RewardMode;
+  conditionType?: RewardConditionType;
+  conditionValue?: number;
+  enabledByDefault?: boolean;
+  /** ⭐ 类型：奖励（默认）/ 扣款 */
+  type?: 'reward' | 'deduction';
+}
+
+export type RewardsCatalog = RewardDefinition[];
+
+/** ⭐ 职位级 / 部门级奖金引用 */
+export interface PositionRewardRef {
+  rewardId: string;
+  amountOverride?: number;
+  /** manual 类：是否启用 */
+  enabled?: boolean;
+  /** 备注 */
+  note?: string;
+}
+
+/**
+ * ⭐ 个人奖金引用（含内联自定义持久字段）
+ * - rewardId 指向奖金库：走奖金库
+ * - customName 非空：内联自定义，不依赖奖金库
+ */
+export interface StaffRewardRef extends PositionRewardRef {
+  /** ⭐ 内联自定义：名称（空则视为奖金库条目） */
+  customName?: string;
+  /** ⭐ 内联自定义：类型（默认 deduction） */
+  customType?: 'reward' | 'deduction';
+}
+
+/** 部门奖金挂载表 */
+export type DepartmentRewards = Partial<
+  Record<DepartmentKey, PositionRewardRef[]>
+>;
+
+/* ============================================================
  * 职位配置
  * ============================================================ */
 
@@ -117,6 +172,9 @@ export interface PositionConfig {
   commissionTiered?: boolean;
   /** ⭐ 底薪是否按阶梯（false = 统一值，只用第一条） */
   baseSalaryTiered?: boolean;
+
+  /** ⭐ 职位级奖金（该职位下所有员工） */
+  rewards?: PositionRewardRef[];
 }
 
 /* ============================================================
@@ -129,6 +187,12 @@ export interface MonthlyCompensationPlan {
   positions: PositionConfig[];
   importedFrom?: string;
   importedAt?: string;
+
+  /** ⭐ 该月个人专属奖金（key = staffId） */
+  staffRewards?: Record<string, StaffRewardRef[]>;
+
+  /** ⭐ 该月部门奖金（key = 部门名） */
+  departmentRewards?: DepartmentRewards;
 }
 
 export type CompensationStore = Record<string, MonthlyCompensationPlan>;
@@ -162,7 +226,7 @@ export interface SimulationInput {
 }
 
 /* ============================================================
- * 测算结果（⭐ 合并重复定义，保留 payDetail）
+ * 测算结果
  * ============================================================ */
 
 /** ⭐ 单人分摊业绩明细 */

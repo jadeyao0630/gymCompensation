@@ -1,6 +1,6 @@
 import React, { memo, useState } from 'react';
 import { Percent, Hash } from 'lucide-react';
-import type { PayrollResult } from '../../utils/payroll';
+import type { PayrollResult } from '../../../utils/payroll';
 import { usePayrollActions } from './PayrollActionsContext';
 
 interface Props {

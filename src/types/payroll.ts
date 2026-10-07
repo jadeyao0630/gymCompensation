@@ -58,6 +58,21 @@ export interface EmployeePerformance {
 }
 
 /* ============================================================
+ * ⭐ 奖金命中项
+ * ============================================================ */
+export interface RewardHit {
+  rewardId: string;
+  name: string;                        // ⭐ 显示用
+  amount: number;                      // 生效金额
+  source: 'position' | 'staff' | 'department';      // 职位级 / 个人级
+  trigger: 'auto' | 'manual';          // 自动命中 / 手动勾选
+  note?: string;
+
+  /** ⭐ 类型：奖励 / 扣款 */
+  type?: 'reward' | 'deduction';
+}
+
+/* ============================================================
  * 单人薪酬计算结果
  * ============================================================ */
 export interface PayrollResult {
@@ -88,6 +103,11 @@ export interface PayrollResult {
   fullAttendance: boolean;
   absentDays: number;
   absentDeduction: number;
+
+  /** ⭐ 奖金明细 */
+  rewards?: RewardHit[];
+  /** ⭐ 奖金合计 */
+  rewardsTotal?: number;
 
   total: number;
   payDetail?: PayDetailItem[];
@@ -134,9 +154,10 @@ export interface DepartmentStats {
   baseSalary: number;
   salesCommission: number;
   classCommission: number;
+  /** ⭐ 奖金合计 */
+  rewardsTotal: number;
   total: number;
   configuredHeadcount: number;
 }
 
-/* 便于工具函数引用 */
 export type { PositionConfig };

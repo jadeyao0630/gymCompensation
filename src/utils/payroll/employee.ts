@@ -1,10 +1,25 @@
-import type { PositionConfig, GenderSalaryTier } from '../../types/compensation';
+import type {
+  PositionConfig,
+  GenderSalaryTier,
+  RewardsCatalog,
+  StaffRewardRef,
+  DepartmentRewards,
+} from '../../types/compensation';
 import { resolveCalcFlags } from '../../types/compensation';
 import { isManagerTitle } from '../../constants/positions';
-import type { EmployeePerformance, PayrollResult, Gender, CourseCommissionRate } from '../../types/payroll';
+import type {
+  EmployeePerformance,
+  PayrollResult,
+  Gender,
+  CourseCommissionRate,
+} from '../../types/payroll';
 import { sortByThreshold, findHitTier } from './tier';
+import { applyRewards } from './rewards';
 
-function resolveGenderBase(gender: Gender | undefined, hit: GenderSalaryTier): number {
+function resolveGenderBase(
+  gender: Gender | undefined,
+  hit: GenderSalaryTier
+): number {
   const g: Gender = gender ?? 'male';
   if (g === 'female' && hit.female !== 0) return hit.female;
   if (g === 'newbie' && hit.newbie !== 0) return hit.newbie;
@@ -13,12 +28,30 @@ function resolveGenderBase(gender: Gender | undefined, hit: GenderSalaryTier): n
   return 0;
 }
 
+export interface CalcEmployeeOptions {
+  rewardsCatalog?: RewardsCatalog;
+  staffRewards?: StaffRewardRef[];
+  departmentRewards?: DepartmentRewards;
+}
+
 export function calcEmployeePayroll(
   position: PositionConfig,
   perf: EmployeePerformance,
-  isNewbie = false
+  isNewbie = false,
+  options: CalcEmployeeOptions = {}
 ): PayrollResult {
-  /* 运营主管 */
+  /* ⭐ 奖金计算（含职位 / 部门 / 个人 三级） */
+  const { rewards, rewardsTotal } = applyRewards(
+    position,
+    perf,
+    options.rewardsCatalog || [],
+    options.staffRewards,
+    options.departmentRewards
+  );
+
+  /* ============================================================
+   * 运营主管特例
+   * ============================================================ */
   if (position.title === '运营主管') {
     const managerSalesBase = perf.managerSalesBase ?? 0;
     const rate =
@@ -37,7 +70,10 @@ export function calcEmployeePayroll(
         ? (baseSalary / 30) * absentDays
         : 0;
 
-    const total = Math.max(0, baseSalary + opsCommission - absentDeduction);
+    const total = Math.max(
+      0,
+      baseSalary + opsCommission - absentDeduction + rewardsTotal
+    );
     const gender: Gender = perf.gender ?? 'male';
 
     return {
@@ -64,11 +100,16 @@ export function calcEmployeePayroll(
       fullAttendance,
       absentDays,
       absentDeduction,
+      rewards,
+      rewardsTotal,
       total,
       payDetail: perf.payDetail ?? [],
     };
   }
 
+  /* ============================================================
+   * 普通职位
+   * ============================================================ */
   const flags = resolveCalcFlags(position);
   const isSwimCoach = position.title.includes('泳教');
 
@@ -117,7 +158,9 @@ export function calcEmployeePayroll(
       const oldClassFees = position.oldClassFees ?? [];
       const hitOldFee = (() => {
         if (oldClassFees.length > 0) {
-          const sorted = [...oldClassFees].sort((a, b) => a.threshold - b.threshold);
+          const sorted = [...oldClassFees].sort(
+            (a, b) => a.threshold - b.threshold
+          );
           let hit = sorted[0];
           for (const f of sorted) {
             if (perf.salesAmount >= f.threshold) hit = f;
@@ -133,7 +176,10 @@ export function calcEmployeePayroll(
         if (isOld && hitOldFee !== undefined) {
           courseCommissionRates[course] = { rate: hitOldFee, mode: 'fixed' };
         } else if (classRate > 0) {
-          courseCommissionRates[course] = { rate: classRate, mode: 'percent' };
+          courseCommissionRates[course] = {
+            rate: classRate,
+            mode: 'percent',
+          };
         }
       });
     } else {
@@ -143,10 +189,15 @@ export function calcEmployeePayroll(
           const rule =
             courseCommissions.find((c) => c.courseName === course) ||
             courseCommissions.find(
-              (c) => course.includes(c.courseName) || c.courseName.includes(course)
+              (c) =>
+                course.includes(c.courseName) ||
+                c.courseName.includes(course)
             );
           if (rule) {
-            courseCommissionRates[course] = { rate: rule.value, mode: rule.mode };
+            courseCommissionRates[course] = {
+              rate: rule.value,
+              mode: rule.mode,
+            };
           }
         });
       }
@@ -175,7 +226,8 @@ export function calcEmployeePayroll(
         const fee = mode === 'percent' ? m.amount * value : m.signNum * value;
 
         classCommission += fee;
-        classCommissionDetail[course] = (classCommissionDetail[course] ?? 0) + fee;
+        classCommissionDetail[course] =
+          (classCommissionDetail[course] ?? 0) + fee;
       });
     } else if (perf.classByCourse) {
       Object.entries(perf.classByCourse).forEach(([course, v]) => {
@@ -229,9 +281,15 @@ export function calcEmployeePayroll(
     fullAttendance,
     absentDays,
     absentDeduction,
+    rewards,
+    rewardsTotal,
     total: Math.max(
       0,
-      baseSalary + salesCommission + classCommission - absentDeduction
+      baseSalary +
+        salesCommission +
+        classCommission -
+        absentDeduction +
+        rewardsTotal
     ),
     payDetail: perf.payDetail ?? [],
   };

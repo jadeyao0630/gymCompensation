@@ -2,14 +2,23 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Plus, Undo2, AlertCircle, Users, Wallet, Briefcase, Loader2,
+  Gift, Users as UsersIcon, Building2,
 } from 'lucide-react';
-import type { PositionCategory, MonthlyCompensationPlan, PositionConfig } from '../../types/compensation';
+import type {
+  PositionCategory,
+  MonthlyCompensationPlan,
+  PositionConfig,
+  StaffRewardRef,
+  DepartmentRewards,
+} from '../../types/compensation';
 import { getCategoryLabel } from '../../constants/categories';
 import { uid } from '../../utils/id';
 import { formatMonthLabel } from '../../utils/format';
 import { parseCompensationExcel } from '../../utils/excelParser';
 import { calcTotalBaseSalary } from '../../utils/salary';
-import { deletePlan, copyPlan, copySimulationSetting, fetchPlanByMonth } from '../../api/compensation';
+import {
+  deletePlan, copyPlan, copySimulationSetting, fetchPlanByMonth,
+} from '../../api/compensation';
 import PageHeader from '../../components/layout/PageHeader';
 import Toolbar from '../../components/layout/Toolbar';
 import StatCard from '../../components/common/StatCard';
@@ -22,8 +31,12 @@ import StoreStatusBadge from '../../components/layout/StoreStatusBadge';
 import PermissionGate from '../../components/common/PermissionGate';
 import { CompensationGuideDialog } from '../../components/compensation/CompensationGuideDialog';
 import { CompensationEmptyState } from '../../components/compensation/CompensationEmptyState';
+import RewardsCatalogDialog from '../../components/compensation/RewardsCatalogDialog';
+import StaffRewardsDialog from '../../components/compensation/StaffRewardsDialog';
+import DepartmentRewardsDialog from '../../components/compensation/DepartmentRewardsDialog';
 import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useRewardsCatalog } from '../../hooks/useRewardsCatalog';
 import { useCompensationPlan } from './hooks/useCompensationPlan';
 
 const CompensationPlanPage: React.FC = () => {
@@ -34,11 +47,23 @@ const CompensationPlanPage: React.FC = () => {
 
   const {
     fullStore, setFullStore,
-    persistPlan, persistLocalOnly,         // ⭐ 复制模式用 persistLocalOnly
+    persistPlan, persistLocalOnly,
     pushUndo, handleUndo, undoDepth,
     dbOnline, saveStatus, lastSavedAt, showGuide, setShowGuide,
     isInitialSelectDoneRef,
   } = useCompensationPlan(storeId);
+
+  /* ⭐ 奖金库 */
+  const {
+    catalog: rewardsCatalog,
+    addReward,
+    updateReward,
+    removeReward,
+  } = useRewardsCatalog();
+
+  const [showCatalogDialog, setShowCatalogDialog] = useState(false);
+  const [showStaffRewardsDialog, setShowStaffRewardsDialog] = useState(false);
+  const [showDeptRewardsDialog, setShowDeptRewardsDialog] = useState(false);
 
   const [selectedMonth, setSelectedMonth] = useState<string>(searchParams.get('month') || '');
   const [activeTab, setActiveTab] = useState<PositionCategory>('membership');
@@ -66,7 +91,6 @@ const CompensationPlanPage: React.FC = () => {
   const canRenamePosition = canViewPlan && hasPermission('position:rename', storeId);
   const canEditHeadcount = canViewPlan && hasPermission('headcount:edit', storeId);
 
-  /* ⭐ 月份可选：用 Object.keys(store) */
   const availableMonths = useMemo(() => Object.keys(store).sort(), [store]);
 
   /* 选中月份 */
@@ -216,6 +240,8 @@ const CompensationPlanPage: React.FC = () => {
           positions: parsed.positions.map((p: any) => ({ ...p, id: p.id || uid() })),
           importedFrom: `JSON: ${file.name}`,
           importedAt: new Date().toISOString(),
+          staffRewards: parsed.staffRewards,
+          departmentRewards: parsed.departmentRewards,
         };
       } else {
         plan = await parseCompensationExcel(file, month, formatMonthLabel(month));
@@ -244,18 +270,12 @@ const CompensationPlanPage: React.FC = () => {
     }
   };
 
-  /* ============================================================
-   * ⭐ handleAddMonth
-   *  空白：本地写入 → 完成
-   *  复制：遮罩 → 本地乐观写入（persistLocalOnly） → 并行落库
-   *        成功 → 关遮罩 + 切月；失败 → 回滚本地
-   * ============================================================ */
   const handleAddMonth = async (month: string, copyFrom?: string, copySimulation?: boolean) => {
     if (copying.active) return;
     if (!canEditPlan) return alert('无权限：设置方案');
     if (!canAddMonth) return alert('无权限：新增月份');
 
-    /* ---------- 空白新增 ---------- */
+    /* 空白新增 */
     if (!copyFrom) {
       setShowMonthPicker(false);
 
@@ -281,7 +301,7 @@ const CompensationPlanPage: React.FC = () => {
       return;
     }
 
-    /* ---------- 复制新增 ---------- */
+    /* 复制新增 */
     const srcPlan = store[copyFrom];
     if (!srcPlan) return alert('源月份方案不存在');
 
@@ -295,11 +315,9 @@ const CompensationPlanPage: React.FC = () => {
     setShowMonthPicker(false);
     setCopying({ active: true, target: month });
 
-    /* 保存旧状态，失败时回滚 */
     const prevPlan = existedPlan ? JSON.parse(JSON.stringify(existedPlan)) : undefined;
 
     try {
-      /* 1) 本地乐观写入（不触发 savePlan） */
       const cloned: MonthlyCompensationPlan = {
         ...JSON.parse(JSON.stringify(srcPlan)),
         month,
@@ -310,9 +328,8 @@ const CompensationPlanPage: React.FC = () => {
 
       if (hasRealPlan) pushUndo(month, existedPlan, '覆盖新建（复制）');
       pushUndo(month, cloned, `复制自 ${copyFrom}`);
-      persistLocalOnly(month, cloned);           // ⭐ 只写本地，后端交给 copyPlan
+      persistLocalOnly(month, cloned);
 
-      /* 2) 并行落库，等全部完成 */
       if (dbOnline) {
         await Promise.all([
           copyPlan(storeId, copyFrom, month),
@@ -322,18 +339,15 @@ const CompensationPlanPage: React.FC = () => {
         ]);
       }
 
-      /* 3) 成功后切月 */
       setSelectedMonth(month);
       fetchedKeyRef.current = '';
       navigate(`/compensation?month=${month}`, { replace: true });
     } catch (e: any) {
       console.error('[handleAddMonth] 复制失败', e);
 
-      /* 4) 失败回滚本地 */
       if (prevPlan) {
         persistLocalOnly(month, prevPlan);
       } else {
-        // 之前没有这个月 → 直接从 store 里删除
         setFullStore((prev) => {
           const curStore = { ...(prev[storeId] || {}) };
           delete curStore[month];
@@ -350,9 +364,6 @@ const CompensationPlanPage: React.FC = () => {
     }
   };
 
-  /* ============================================================
-   * ⭐ removeMonth：删除后自动切到「下一个有效月」
-   * ============================================================ */
   const removeMonth = async () => {
     if (copying.active) return;
     if (!canEditPlan) return alert('无权限：设置方案');
@@ -491,6 +502,16 @@ const CompensationPlanPage: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const handleStaffRewardsChange = (next: Record<string, StaffRewardRef[]>) => {
+    if (!selectedMonth || !currentPlan) return;
+    updatePlan({ staffRewards: next }, '修改个人奖金');
+  };
+
+  const handleDepartmentRewardsChange = (next: DepartmentRewards) => {
+    if (!selectedMonth || !currentPlan) return;
+    updatePlan({ departmentRewards: next }, '修改部门奖金');
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -501,9 +522,7 @@ const CompensationPlanPage: React.FC = () => {
             <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-amber-50 to-orange-50 flex items-center justify-center mb-5">
               <AlertCircle className="w-8 h-8 text-amber-500" />
             </div>
-            <h3 className="text-gray-700 font-semibold mb-1">
-              无权限：查看方案
-            </h3>
+            <h3 className="text-gray-700 font-semibold mb-1">无权限：查看方案</h3>
             <p className="text-sm text-gray-400">
               请联系管理员分配「查看方案」权限
             </p>
@@ -535,6 +554,34 @@ const CompensationPlanPage: React.FC = () => {
                       {undoDepth}
                     </span>
                   )}
+                </button>
+              )}
+
+              <button
+                onClick={() => setShowCatalogDialog(true)}
+                disabled={copying.active}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 transition disabled:opacity-50"
+              >
+                <Gift className="w-3 h-3" /> 奖金库
+              </button>
+
+              {currentPlan && (
+                <button
+                  onClick={() => setShowStaffRewardsDialog(true)}
+                  disabled={copying.active || !canEditPlan}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100 transition disabled:opacity-50"
+                >
+                  <UsersIcon className="w-3 h-3" /> 个人奖金
+                </button>
+              )}
+
+              {currentPlan && (
+                <button
+                  onClick={() => setShowDeptRewardsDialog(true)}
+                  disabled={copying.active || !canEditPlan}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100 transition disabled:opacity-50"
+                >
+                  <Building2 className="w-3 h-3" /> 部门奖金
                 </button>
               )}
 
@@ -622,6 +669,7 @@ const CompensationPlanPage: React.FC = () => {
                             key={pos.id}
                             position={pos}
                             allPositions={currentPlan.positions}
+                            rewardsCatalog={rewardsCatalog}
                             readOnly={!canEditPlan || copying.active}
                             canEditTarget={canEditTarget && !copying.active}
                             canEditHeadcount={canEditHeadcount && !copying.active}
@@ -683,7 +731,38 @@ const CompensationPlanPage: React.FC = () => {
         }}
       />
 
-      {/* ⭐ 复制中的全屏遮罩 */}
+      {showCatalogDialog && (
+        <RewardsCatalogDialog
+          open={showCatalogDialog}
+          catalog={rewardsCatalog}
+          onAdd={addReward}
+          onUpdate={updateReward}
+          onRemove={removeReward}
+          onClose={() => setShowCatalogDialog(false)}
+        />
+      )}
+
+      {showStaffRewardsDialog && currentPlan && selectedMonth && (
+        <StaffRewardsDialog
+          open={showStaffRewardsDialog}
+          plan={currentPlan}
+          catalog={rewardsCatalog}
+          staffOptions={[]}
+          onChange={handleStaffRewardsChange}
+          onClose={() => setShowStaffRewardsDialog(false)}
+        />
+      )}
+
+      {showDeptRewardsDialog && currentPlan && selectedMonth && (
+        <DepartmentRewardsDialog
+          open={showDeptRewardsDialog}
+          catalog={rewardsCatalog}
+          value={currentPlan.departmentRewards || {}}
+          onChange={handleDepartmentRewardsChange}
+          onClose={() => setShowDeptRewardsDialog(false)}
+        />
+      )}
+
       {copying.active && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm select-none"
@@ -693,9 +772,7 @@ const CompensationPlanPage: React.FC = () => {
           <div className="bg-white rounded-2xl shadow-2xl px-8 py-7 flex flex-col items-center gap-3 min-w-[260px]">
             <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
             <div className="text-center">
-              <p className="text-sm font-semibold text-gray-800">
-                正在复制配置
-              </p>
+              <p className="text-sm font-semibold text-gray-800">正在复制配置</p>
               {copying.target && (
                 <p className="text-xs text-gray-500 mt-1 tabular-nums">
                   → {formatMonthLabel(copying.target)}

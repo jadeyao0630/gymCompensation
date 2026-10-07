@@ -4,6 +4,8 @@ import { AlertTriangle, ArrowLeft, Calculator } from 'lucide-react';
 import type {
   MonthlyCompensationPlan,
   CompensationStore,
+  RewardsCatalog,
+  StaffRewardRef,
 } from '../../types/compensation';
 import { usePayroll } from '../../hooks/usePayroll';
 import type { PayrollResult, Department } from '../../utils/payroll';
@@ -14,6 +16,7 @@ import {
   saveStaffStatus,
   type StaffStatusItem,
 } from '../../api/payrollStatus';
+import { loadRewardsCatalog } from '../../utils/payrollStorage';
 import MissingPositionConfigDialog from '../../components/compensation/MissingPositionConfigDialog';
 import StoreSwitcher from '../../components/layout/StoreSwitcher';
 import StoreStatusBadge from '../../components/layout/StoreStatusBadge';
@@ -59,7 +62,6 @@ const PayrollPage: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('department');
   const [hideExcluded, setHideExcluded] = useState<boolean>(true);
 
-  /* ⭐ 新增：可用月份列表（该月有薪酬方案配置） */
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
   const [monthsLoading, setMonthsLoading] = useState(false);
 
@@ -69,6 +71,8 @@ const PayrollPage: React.FC = () => {
     会籍: true, 私教: true, 泳教: true, 运营: true,
   });
   const [editingStaff, setEditingStaff] = useState<PayrollResult | null>(null);
+
+  const [rewardsCatalog, setRewardsCatalog] = useState<RewardsCatalog>([]);
 
   const fetchedKeyRef = useRef<string>('');
   const initializedRef = useRef(false);
@@ -83,17 +87,17 @@ const PayrollPage: React.FC = () => {
     ? store[selectedMonth]
     : undefined;
 
-  /* ⭐ 拉取可用月份列表 = 后端方案月 ∪ 本地缓存月 */
+  useEffect(() => {
+    setRewardsCatalog(loadRewardsCatalog());
+  }, [storeId]);
+
   useEffect(() => {
     if (!storeId) return;
     let cancelled = false;
     setMonthsLoading(true);
     (async () => {
-      /* 1) 本地缓存（导入后即使后端还没同步，也能立刻可选） */
       const localMonths = Object.keys(fullStore[storeId] || {});
       let remoteMonths: string[] = [];
-
-      /* 2) 后端方案列表 */
       try {
         const plans = await fetchPlanList(storeId);
         remoteMonths = (plans || [])
@@ -102,14 +106,8 @@ const PayrollPage: React.FC = () => {
       } catch (e) {
         console.warn('[PayrollPage] 拉取可用月份列表失败，使用本地缓存', e);
       }
-
       if (cancelled) return;
-
-      /* 3) 合并 + 去重 + 排序 */
-      const merged = Array.from(
-        new Set([...remoteMonths, ...localMonths])
-      ).sort();
-
+      const merged = Array.from(new Set([...remoteMonths, ...localMonths])).sort();
       setAvailableMonths(merged);
       setMonthsLoading(false);
     })();
@@ -258,9 +256,17 @@ const PayrollPage: React.FC = () => {
         baseSalary: acc.baseSalary + r.baseSalary,
         salesCommission: acc.salesCommission + r.salesCommission,
         classCommission: acc.classCommission + r.classCommission,
+        rewardsTotal: acc.rewardsTotal + (r.rewardsTotal ?? 0),
         total: acc.total + r.total,
       }),
-      { headcount: 0, baseSalary: 0, salesCommission: 0, classCommission: 0, total: 0 }
+      {
+        headcount: 0,
+        baseSalary: 0,
+        salesCommission: 0,
+        classCommission: 0,
+        rewardsTotal: 0,
+        total: 0,
+      }
     );
   }, [allResults, excludedSet]);
 
@@ -297,25 +303,95 @@ const PayrollPage: React.FC = () => {
     calcSavePosition(staffId, newTitle, overrides, setOverridesByStore);
   };
 
+  /* 通用：调用 run 并更新结果 */
+  const runAndUpdate = async (planToUse: MonthlyCompensationPlan) => {
+    const catalog = loadRewardsCatalog();
+    setRewardsCatalog(catalog);
+
+    const res = await run(
+      selectedMonth,
+      planToUse,
+      overrides,
+      opsViewEnabled,
+      newbieSet,
+      {
+        rewardsCatalog: catalog,
+        staffRewards: planToUse.staffRewards || {},
+        departmentRewards: planToUse.departmentRewards,
+      }
+    );
+
+    const filteredResults = opsViewEnabled
+      ? res.results
+      : res.results.filter((r) => r.positionTitle !== '运营主管');
+
+    if (res.missingPositions.length > 0) {
+      setMissing(res.missingPositions);
+      setMissingDialogOpen(true);
+    }
+    setResultsByStore((prev) => ({ ...prev, [storeId]: filteredResults }));
+    setPerformancesByStore((prev) => ({ ...prev, [storeId]: res.performances }));
+  };
+
   const handleRun = async () => {
     if (!currentPlan || !selectedMonth) {
       alert('请先选择月份，并确保该月已有配置');
       return;
     }
     try {
-      const res = await run(selectedMonth, currentPlan, overrides, opsViewEnabled, newbieSet);
-      const filteredResults = opsViewEnabled
-        ? res.results
-        : res.results.filter((r) => r.positionTitle !== '运营主管');
-
-      if (res.missingPositions.length > 0) {
-        setMissing(res.missingPositions);
-        setMissingDialogOpen(true);
-      }
-      setResultsByStore((prev) => ({ ...prev, [storeId]: filteredResults }));
-      setPerformancesByStore((prev) => ({ ...prev, [storeId]: res.performances }));
+      await runAndUpdate(currentPlan);
     } catch (e) {
       console.error('[handleRun] 失败:', e);
+    }
+  };
+
+  /* ⭐ 保存个人奖金 → 写回 plan → 重算 */
+  const handleSaveStaffRewards = async (
+    staffId: string,
+    next: StaffRewardRef[]
+  ) => {
+    if (!currentPlan || !selectedMonth) {
+      console.warn('[handleSaveStaffRewards] 无 currentPlan，跳过');
+      return;
+    }
+
+    const sid = String(staffId ?? '').trim();
+    if (!sid) {
+      console.warn('[handleSaveStaffRewards] sid 为空，跳过');
+      return;
+    }
+
+    /* 归一所有 key 为字符串 */
+    const mergedStaffRewards: Record<string, StaffRewardRef[]> = {};
+    Object.keys(currentPlan.staffRewards || {}).forEach((k) => {
+      mergedStaffRewards[String(k).trim()] = currentPlan.staffRewards![k];
+    });
+
+    if (next.length === 0) {
+      delete mergedStaffRewards[sid];
+    } else {
+      mergedStaffRewards[sid] = next;
+    }
+
+    const nextPlan: MonthlyCompensationPlan = {
+      ...currentPlan,
+      staffRewards: mergedStaffRewards,
+    };
+
+    console.log('[handleSaveStaffRewards] sid =', sid);
+    console.log('[handleSaveStaffRewards] next =', JSON.stringify(next));
+    console.log(
+      '[handleSaveStaffRewards] merged keys =',
+      Object.keys(mergedStaffRewards)
+    );
+
+    /* 本地立即写 */
+    savePlanToStorage(storeId, selectedMonth, nextPlan);
+
+    try {
+      await runAndUpdate(nextPlan);
+    } catch (e) {
+      console.error('[handleSaveStaffRewards] 重算失败', e);
     }
   };
 
@@ -352,21 +428,21 @@ const PayrollPage: React.FC = () => {
     setMissingDialogOpen(false);
 
     try {
-      const res = await run(selectedMonth, nextPlan, overrides, opsViewEnabled, newbieSet);
-      const filteredResults = opsViewEnabled ? res.results : res.results.filter((r) => r.positionTitle !== '运营主管');
-      setResultsByStore((prev) => ({ ...prev, [storeId]: filteredResults }));
-      setPerformancesByStore((prev) => ({ ...prev, [storeId]: res.performances }));
+      await runAndUpdate(nextPlan);
     } catch (e) {
       console.error('[重新计算失败]', e);
     }
   };
 
   const storeName = getStoreById(storeId)?.name || '';
-  const excludedCount = allResults.length - allResults.filter((r) => !excludedSet.has(r.staffId)).length;
+  const excludedCount =
+    allResults.length - allResults.filter((r) => !excludedSet.has(r.staffId)).length;
 
   const payrollActions = useMemo(() => ({
     updateMemberCommission: handleUpdateMemberCommission,
   }), [handleUpdateMemberCommission]);
+
+  const canEditRewards = hasPermission('plan:edit', storeId);
 
   return (
     <PayrollActionsProvider value={payrollActions}>
@@ -386,11 +462,7 @@ const PayrollPage: React.FC = () => {
 
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <StoreSwitcher />
-            <StoreStatusBadge
-              dbOnline={true}
-              saveStatus="idle"
-              lastSavedAt={null}
-            />
+            <StoreStatusBadge dbOnline saveStatus="idle" lastSavedAt={null} />
             <div className="flex-1" />
           </div>
 
@@ -411,8 +483,15 @@ const PayrollPage: React.FC = () => {
             onHideExcludedChange={setHideExcluded}
           />
 
-          {error && <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 text-sm text-red-700">{error}</div>}
-          <PayrollMissingAlert missing={missing} onOpenDialog={() => setMissingDialogOpen(true)} />
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+          <PayrollMissingAlert
+            missing={missing}
+            onOpenDialog={() => setMissingDialogOpen(true)}
+          />
           <PayrollSummary summary={summary} />
 
           {allResults.length > 0 && viewMode === 'all' && (
@@ -431,6 +510,9 @@ const PayrollPage: React.FC = () => {
               onToggleExclude={toggleExclude}
               onEditPosition={setEditingStaff}
               onUpdateAttendance={updateAttendance}
+              rewardsCatalog={rewardsCatalog}
+              canEditRewards={canEditRewards}
+              onSaveStaffRewards={handleSaveStaffRewards}
             />
           )}
 
@@ -451,6 +533,9 @@ const PayrollPage: React.FC = () => {
               onToggleExclude={toggleExclude}
               onEditPosition={setEditingStaff}
               onUpdateAttendance={updateAttendance}
+              rewardsCatalog={rewardsCatalog}
+              canEditRewards={canEditRewards}
+              onSaveStaffRewards={handleSaveStaffRewards}
             />
           )}
 
@@ -460,7 +545,9 @@ const PayrollPage: React.FC = () => {
                 <Calculator className="w-6 h-6 text-emerald-500" />
               </div>
               <h3 className="font-semibold text-gray-700 mb-1">暂无计算结果</h3>
-              <p className="text-sm text-gray-400 mb-4">点击「开始计算」按钮，根据本月配置拉取数据并计算薪酬</p>
+              <p className="text-sm text-gray-400 mb-4">
+                点击「开始计算」按钮，根据本月配置拉取数据并计算薪酬
+              </p>
               <button
                 onClick={handleRun}
                 disabled={loading}
@@ -477,7 +564,9 @@ const PayrollPage: React.FC = () => {
                 <AlertTriangle className="w-6 h-6 text-amber-500" />
               </div>
               <h3 className="font-semibold text-gray-700 mb-1">该月份暂无薪酬配置</h3>
-              <p className="text-sm text-gray-400 mb-4">请先到「薪酬配置」页面上传或导入 {selectedMonth || '当月'} 的薪酬方案</p>
+              <p className="text-sm text-gray-400 mb-4">
+                请先到「薪酬配置」页面上传或导入 {selectedMonth || '当月'} 的薪酬方案
+              </p>
               <button
                 onClick={() => navigate('/compensation')}
                 className="inline-flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-xl text-sm font-semibold shadow-sm transition-all"

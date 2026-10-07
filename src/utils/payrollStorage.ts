@@ -1,5 +1,4 @@
-// src/utils/payrollStorage.ts
-import type { CompensationStore } from '../types/compensation';
+import type { CompensationStore, RewardsCatalog } from '../types/compensation';
 import type { PayrollResult, EmployeePerformance } from './payroll';
 
 export const STORAGE_KEY = 'gym_compensation_store_v2';
@@ -61,5 +60,28 @@ export const saveNewbie = (next: Record<string, Set<string>>) => {
     localStorage.setItem(NEWBIE_KEY, JSON.stringify(raw));
   } catch (e) {
     console.error('[payrollStorage] 写新人表失败', e);
+  }
+};
+
+/* ============================================================
+ * ⭐ 奖金库（跨月共享）
+ * ============================================================ */
+const REWARDS_CATALOG_KEY = 'gym_rewards_catalog_v1';
+
+export const loadRewardsCatalog = (): RewardsCatalog => {
+  try {
+    const saved = localStorage.getItem(REWARDS_CATALOG_KEY);
+    return saved ? (JSON.parse(saved) as RewardsCatalog) : [];
+  } catch (e) {
+    console.error('[payrollStorage] 奖金库解析失败', e);
+    return [];
+  }
+};
+
+export const saveRewardsCatalog = (catalog: RewardsCatalog): void => {
+  try {
+    localStorage.setItem(REWARDS_CATALOG_KEY, JSON.stringify(catalog));
+  } catch (e) {
+    console.error('[payrollStorage] 奖金库写入失败', e);
   }
 };

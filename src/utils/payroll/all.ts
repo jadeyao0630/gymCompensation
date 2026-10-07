@@ -1,4 +1,8 @@
-import type { MonthlyCompensationPlan } from '../../types/compensation';
+import type {
+  MonthlyCompensationPlan,
+  RewardsCatalog,
+  DepartmentRewards,
+} from '../../types/compensation';
 import type { EmployeePerformance, PayrollResult } from '../../types/payroll';
 import { isManagerTitle } from '../../constants/positions';
 import { isInvalidId } from './pick';
@@ -6,12 +10,27 @@ import { getDepartmentOf } from './department';
 import { findPositionByTitle, makeEmptyPosition } from './positionFinder';
 import { calcEmployeePayroll } from './employee';
 
+export interface CalcPayrollForAllOptions {
+  opsViewEnabled?: boolean;
+  newbieIds?: Set<string>;
+  rewardsCatalog?: RewardsCatalog;
+  departmentRewards?: DepartmentRewards;
+}
+
 export function calcPayrollForAll(
   plan: MonthlyCompensationPlan,
   performances: EmployeePerformance[],
-  opsViewEnabled = true,
-  newbieIds: Set<string> = new Set()
+  options: CalcPayrollForAllOptions = {}
 ): PayrollResult[] {
+  const {
+    opsViewEnabled = true,
+    newbieIds = new Set<string>(),
+    rewardsCatalog = [],
+    departmentRewards,
+  } = options;
+
+
+
   const results: PayrollResult[] = [];
 
   for (const perf of performances) {
@@ -45,6 +64,9 @@ export function calcPayrollForAll(
     let position = findPositionByTitle(plan.positions, title);
     if (!position) position = makeEmptyPosition(title);
 
+    /* ⭐ 统一 sid 为字符串 */
+    const sid = String(perf.staffId ?? '').trim();
+
     results.push(
       calcEmployeePayroll(
         position,
@@ -56,7 +78,11 @@ export function calcPayrollForAll(
           fullAttendance: perf.fullAttendance ?? true,
           absentDays: perf.absentDays ?? 0,
         },
-        newbieIds.has(perf.staffId)
+        newbieIds.has(sid) || newbieIds.has(perf.staffId as any),
+        {
+          rewardsCatalog,
+          departmentRewards,
+        }
       )
     );
   }
