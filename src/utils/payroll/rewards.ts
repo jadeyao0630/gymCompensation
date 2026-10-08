@@ -51,8 +51,7 @@ export function applyRewards(
     if (!def) return;
 
     const sign = def.type === 'deduction' ? -1 : 1;
-    const rawAmount = ref.amountOverride ?? def.amount;
-    const amount = Math.abs(rawAmount) * sign;
+    const amount = Math.abs(ref.amountOverride ?? def.amount) * sign;
     const note = ref.note ?? def.note;
     const type = def.type ?? 'reward';
 
@@ -84,15 +83,14 @@ export function applyRewards(
   }
 
   tempList.forEach((t) => {
-    if (!t) return;
+    if (!t || !t.name) return;
 
-    /* ⭐ 情况 A：引用奖罚库 */
+    /* ⭐ 情况 A：引用奖罚库（按 def.type 定符号） */
     if (t.rewardId) {
       const def = byId.get(t.rewardId);
       if (!def) return;
       const sign = def.type === 'deduction' ? -1 : 1;
-      const base = Math.abs(t.amount || def.amount || 0);
-      const amount = base * sign;               // 正数 × sign
+      const amount = Math.abs(t.amount || def.amount || 0) * sign;
       hits.push({
         rewardId: t.rewardId,
         name: t.name || def.name,
@@ -105,11 +103,8 @@ export function applyRewards(
       return;
     }
 
-    /* ⭐ 情况 B：纯自定义 */
-    if (!t.name) return;
-    const sign = t.type === 'deduction' ? -1 : 1;
-    const base = Math.abs(Number(t.amount) || 0);
-    const amount = base * sign;                 // 正数 × sign
+    /* ⭐ 情况 B：纯自定义 —— 直接用 amount 符号 */
+    const amount = Number(t.amount) || 0;
     hits.push({
       rewardId: t.id,
       name: t.name,
@@ -117,7 +112,7 @@ export function applyRewards(
       source: 'staff',
       trigger: 'manual',
       note: t.note,
-      type: t.type ?? 'reward',
+      type: amount < 0 ? 'deduction' : 'reward',
     });
   });
 

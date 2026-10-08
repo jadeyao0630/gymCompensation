@@ -61,23 +61,26 @@ export const TempRewardPopover: React.FC<Props> = ({
     };
   }, [onClose]);
 
-  /* ⭐ 从奖罚库添加 */
+  /* ⭐ 从奖罚库添加：amount 带符号（扣款为负） */
   const addFromCatalog = (def: RewardDefinition) => {
-    const sign = def.type === 'deduction' ? -1 : 1;
+    const isDeduction = def.type === 'deduction';
+    const signedAmount = isDeduction
+      ? -Math.abs(def.amount || 0)
+      : Math.abs(def.amount || 0);
     setList((prev) => [
       ...prev,
       {
         id: makeId(),
         rewardId: def.id,
         name: def.name,
-        amount: Math.abs(def.amount) * sign,
+        amount: signedAmount,
         note: def.note,
       },
     ]);
     setShowPicker(false);
   };
 
-  /* ⭐ 自定义添加 */
+  /* ⭐ 自定义添加：amount 0，靠用户填 + type 决定符号 */
   const addCustom = (type: 'reward' | 'deduction') => {
     setList((prev) => [
       ...prev,
@@ -108,16 +111,14 @@ export const TempRewardPopover: React.FC<Props> = ({
     onClose();
   };
 
-  /* 计算行的展示信息 */
+  /* ⭐ 行展示：isDeduction 只看 amount 符号 */
   const rows = useMemo(() => {
     return list.map((r) => {
       const catalogDef = r.rewardId
         ? catalog.find((c) => c.id === r.rewardId)
         : undefined;
       const isCatalog = !!r.rewardId;
-      const isDeduction = isCatalog
-        ? catalogDef?.type === 'deduction'
-        : r.amount < 0 || r.type === 'deduction';
+      const isDeduction = r.amount < 0;
       return { r, catalogDef, isCatalog, isDeduction };
     });
   }, [list, catalog]);
@@ -165,6 +166,7 @@ export const TempRewardPopover: React.FC<Props> = ({
                 </span>
               )}
 
+              {/* 类型下拉：只改 amount 符号 */}
               {!isCatalog && (
                 <select
                   value={isDeduction ? 'deduction' : 'reward'}
@@ -201,6 +203,7 @@ export const TempRewardPopover: React.FC<Props> = ({
                 />
               )}
 
+              {/* 金额输入：按 isDeduction 存正负 */}
               <div
                 className={`flex items-center gap-1 border rounded px-1.5 py-1 bg-white ${
                   isDeduction ? 'border-rose-200' : 'border-gray-200'
@@ -218,7 +221,9 @@ export const TempRewardPopover: React.FC<Props> = ({
                   value={Math.abs(r.amount)}
                   onChange={(e) => {
                     const abs = Math.abs(parseInt(e.target.value) || 0);
-                    update(idx, { amount: isDeduction ? -abs : abs });
+                    update(idx, {
+                      amount: isDeduction ? -abs : abs,
+                    });
                   }}
                   className="w-16 text-xs font-semibold bg-transparent focus:outline-none tabular-nums"
                 />
@@ -243,7 +248,7 @@ export const TempRewardPopover: React.FC<Props> = ({
         </div>
       )}
 
-      {/* ⭐ 从奖罚库选：弹出选择面板 */}
+      {/* 从奖罚库选择面板 */}
       {showPicker && (
         <div className="mb-2 border border-indigo-100 rounded-xl bg-indigo-50/40 p-2 max-h-64 overflow-y-auto">
           <div className="flex items-center justify-between px-1 pb-1 mb-1 border-b border-indigo-100">

@@ -5,6 +5,7 @@ import { getCardOrderList, type FinancialFlowItem } from '../../../api/stats';
 import { usePayroll } from '../../../hooks/usePayroll';
 import type { PayrollResult } from '../../../utils/payroll';
 import { loadRewardsCatalog } from '../../../utils/payrollStorage';
+import { useAppData } from '../../../contexts/AppDataContext';
 import {
   aggregateOrders,
   getIncomeAmount,
@@ -32,15 +33,65 @@ const EMPTY_COST: FixedCostDetail = {
 };
 
 export function useMonthlyReport(storeId: string, selectedMonth: string) {
-  /* ---------- 数据状态 ---------- */
+  const { data: appData, update: updateAppData } = useAppData();
+
+  /* ⭐ key = `${storeId}_${month}`，月份/门店切换自动隔离 */
+  const cacheKey = `${storeId}_${selectedMonth}`;
+
+  /* ---------- 局部状态 ---------- */
   const [hasLoaded, setHasLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [payrollResults, setPayrollResults] = useState<PayrollResult[]>([]);
-  const [orderList, setOrderList] = useState<FinancialFlowItem[]>([]);
-  const [fixedCost, setFixedCost] = useState(0);
-  const [fixedCostDetail, setFixedCostDetail] =
-    useState<FixedCostDetail>(EMPTY_COST);
+
+  /* ---------- payrollResults：全局 store ---------- */
+  const payrollResults = appData.monthlyPayrollByKey[cacheKey] || [];
+  const setPayrollResults = useCallback(
+    (updater: React.SetStateAction<PayrollResult[]>) => {
+      updateAppData('monthlyPayrollByKey', (prev) => {
+        const cur = prev[cacheKey] || [];
+        const next =
+          typeof updater === 'function' ? (updater as any)(cur) : updater;
+        return { ...prev, [cacheKey]: next };
+      });
+    },
+    [updateAppData, cacheKey]
+  );
+
+  /* ---------- orderList：全局 store ---------- */
+  const orderList = appData.monthlyOrdersByKey[cacheKey] || [];
+  const setOrderList = useCallback(
+    (updater: React.SetStateAction<FinancialFlowItem[]>) => {
+      updateAppData('monthlyOrdersByKey', (prev) => {
+        const cur = prev[cacheKey] || [];
+        const next =
+          typeof updater === 'function' ? (updater as any)(cur) : updater;
+        return { ...prev, [cacheKey]: next };
+      });
+    },
+    [updateAppData, cacheKey]
+  );
+
+  /* ---------- fixedCostDetail：全局 store（刷新后不丢） ---------- */
+  const fixedCostDetail: FixedCostDetail =
+    appData.monthlyFixedCostByKey[cacheKey] || EMPTY_COST;
+
+  const fixedCost =
+    fixedCostDetail.propertyFee +
+    fixedCostDetail.electricityFee +
+    fixedCostDetail.rent +
+    fixedCostDetail.waterFee +
+    fixedCostDetail.networkFee +
+    fixedCostDetail.otherFee;
+
+  const setFixedCostDetail = useCallback(
+    (next: FixedCostDetail) => {
+      updateAppData('monthlyFixedCostByKey', (prev) => ({
+        ...prev,
+        [cacheKey]: next,
+      }));
+    },
+    [updateAppData, cacheKey]
+  );
 
   /* ---------- 薪酬计算 Hook ---------- */
   const username = import.meta.env.VITE_TEST_USERNAME || '';
@@ -51,13 +102,9 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     busId: storeId,
   });
 
-  /* ---------- 重置 ---------- */
+  /* ---------- 重置（仅局部状态；全局 store 按 key 隔离，不清） ---------- */
   const reset = useCallback(() => {
     setHasLoaded(false);
-    setPayrollResults([]);
-    setOrderList([]);
-    setFixedCost(0);
-    setFixedCostDetail(EMPTY_COST);
     setError('');
   }, []);
 
@@ -114,21 +161,12 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
             otherFee: Number(sim?.otherFee || 0),
           };
           setFixedCostDetail(detail);
-          setFixedCost(
-            detail.propertyFee +
-              detail.electricityFee +
-              detail.rent +
-              detail.waterFee +
-              detail.networkFee +
-              detail.otherFee
-          );
         } catch (e) {
           console.warn('[MonthlyReport] 拉测算设置失败', e);
-          setFixedCost(0);
           setFixedCostDetail(EMPTY_COST);
         }
 
-        /* ⭐ 5) 薪酬计算（含新人 + 排除 + 奖罚） */
+        /* 5) 薪酬计算（含奖罚） */
         if (plan) {
           try {
             const catalog = loadRewardsCatalog();
@@ -166,20 +204,39 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
         setLoading(false);
       }
     },
-    [storeId, run]
+    [storeId, run, setOrderList, setPayrollResults, setFixedCostDetail]
   );
 
-  /* ---------- 门店切换重置 ---------- */
+  /* ---------- 门店切换 → 重置局部状态 ---------- */
   useEffect(() => {
     reset();
   }, [storeId, reset]);
 
-  /* ---------- 月份切换重置 ---------- */
+  /* ---------- 月份切换 → 重置局部状态（全局 store 按 key 隔离） ---------- */
   useEffect(() => {
-    if (!hasLoaded) return;
-    reset();
+    setHasLoaded(false);
+    setError('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMonth]);
+
+  /* ⭐ 从全局 store 恢复 hasLoaded（刷新 / 切回已加载月份） */
+  useEffect(() => {
+    if (!storeId || !selectedMonth) return;
+    const key = `${storeId}_${selectedMonth}`;
+    const hasPayroll = (appData.monthlyPayrollByKey[key]?.length || 0) > 0;
+    const hasOrders = (appData.monthlyOrdersByKey[key]?.length || 0) > 0;
+    const hasFixed = !!appData.monthlyFixedCostByKey[key];
+    // 有任一缓存即视为已加载过
+    if (hasPayroll || hasOrders || hasFixed) {
+      setHasLoaded(true);
+    }
+  }, [
+    storeId,
+    selectedMonth,
+    appData.monthlyPayrollByKey,
+    appData.monthlyOrdersByKey,
+    appData.monthlyFixedCostByKey,
+  ]);
 
   /* ---------- 汇总计算 ---------- */
   const payrollSummary = useMemo(() => {
@@ -190,7 +247,7 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
         salesCommission: acc.salesCommission + r.salesCommission,
         classCommission: acc.classCommission + r.classCommission,
         absentDeduction: acc.absentDeduction + r.absentDeduction,
-        rewardsTotal: acc.rewardsTotal + (r.rewardsTotal ?? 0),   // ⭐ 新增
+        rewardsTotal: acc.rewardsTotal + (r.rewardsTotal ?? 0),
         total: acc.total + r.total,
       }),
       {
@@ -199,7 +256,7 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
         salesCommission: 0,
         classCommission: 0,
         absentDeduction: 0,
-        rewardsTotal: 0,     // ⭐ 新增
+        rewardsTotal: 0,
         total: 0,
       }
     );

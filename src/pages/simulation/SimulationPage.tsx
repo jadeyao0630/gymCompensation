@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
+import React, { useEffect, useMemo } from 'react';
+import { useNavigate, Navigate } from 'react-router-dom';
 import { Undo2 } from 'lucide-react';
 import type {
   CompensationStore,
@@ -18,16 +18,19 @@ import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { getStoreById } from '../../constants/stores';
 import { useSimulation } from '../../hooks/useSimulation';
+import { usePersistedMonth } from '../../hooks/usePersistedMonth';
 
 const SimulationPage: React.FC = () => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { storeId } = useStore();
   const { hasPermission } = useAuth();
 
   const opsViewEnabled = hasPermission('ops:view', storeId);
-  const [selectedMonth, setSelectedMonth] = useState<string>(
-    searchParams.get('month') || ''
+
+  /* ⭐ 页面级月份持久化：key = gym_simulation_month_v1_<storeId> */
+  const { month: selectedMonth, setMonth: setSelectedMonth } = usePersistedMonth(
+    'simulation',
+    storeId
   );
 
   const {
@@ -43,7 +46,9 @@ const SimulationPage: React.FC = () => {
     ? store[selectedMonth]
     : undefined;
 
+  /* ⭐ 首次进入：若无持久化月份，回退到最近可用月份或当前月 */
   useEffect(() => {
+    if (selectedMonth) return;
     const months = Object.keys(fullStore[storeId] || {}).sort();
     if (months.length > 0) {
       setSelectedMonth(months[months.length - 1]);
@@ -55,11 +60,6 @@ const SimulationPage: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId]);
-
-  useEffect(() => {
-    const m = searchParams.get('month');
-    if (m) setSelectedMonth(m);
-  }, [searchParams]);
 
   const simResult: SimulationResult = useMemo(() => {
     if (!currentPlan) {
@@ -96,7 +96,6 @@ const SimulationPage: React.FC = () => {
           selectedMonth={selectedMonth}
         />
 
-        {/* ⭐ 顶部工具行：门店 + 连接状态 + 撤销 */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <StoreSwitcher />
           <StoreStatusBadge
@@ -131,7 +130,6 @@ const SimulationPage: React.FC = () => {
           <div className="flex-1" />
         </div>
 
-        {/* ⭐ 月份选择条 */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">
           <div className="flex flex-wrap items-center gap-3">
             <label className="text-sm font-medium text-gray-600">月份</label>

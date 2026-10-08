@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { Loader2, AlertCircle } from 'lucide-react';
 import StoreSwitcher from '../../components/layout/StoreSwitcher';
@@ -16,6 +16,7 @@ import { MonthlySummaryCards } from './components/MonthlySummaryCards';
 import { MonthlyDetailPanels } from './components/MonthlyDetailPanels';
 import { MonthlyProfitPanel } from './components/MonthlyProfitPanel';
 import { MonthPicker } from '../../components/common/MonthPicker';
+import { usePersistedMonth } from '../../hooks/usePersistedMonth';
 
 const MonthlyReportPage: React.FC = () => {
   const { storeId } = useStore();
@@ -24,10 +25,11 @@ const MonthlyReportPage: React.FC = () => {
   const canView = hasPermission('report:monthly:view', storeId);
   const storeName = getStoreById(storeId)?.name || '门店';
 
-  const [selectedMonth, setSelectedMonth] = useState<string>(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
+  /* ⭐ 页面级月份持久化：key = gym_monthly_month_v1_<storeId> */
+  const { month: selectedMonth, changeMonth } = usePersistedMonth(
+    'monthly',
+    storeId
+  );
 
   const {
     hasLoaded,
@@ -44,6 +46,7 @@ const MonthlyReportPage: React.FC = () => {
     fetchAll,
   } = useMonthlyReport(storeId, selectedMonth);
 
+  const handleMonthChange = changeMonth;
   const handleFetch = () => fetchAll(selectedMonth);
 
   const handleExport = () => {
@@ -71,7 +74,6 @@ const MonthlyReportPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-rose-50 via-white to-orange-50/50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* 头部 */}
         <MonthlyHeader
           storeName={storeName}
           isLoading={loading}
@@ -81,7 +83,6 @@ const MonthlyReportPage: React.FC = () => {
           onExport={handleExport}
         />
 
-        {/* ⭐ 顶部工具行：门店 + 连接状态 + 月份选择器 */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <StoreSwitcher />
           <StoreStatusBadge
@@ -94,7 +95,7 @@ const MonthlyReportPage: React.FC = () => {
             <label className="text-sm font-medium text-gray-600">月份</label>
             <MonthPicker
               value={selectedMonth}
-              onChange={setSelectedMonth}
+              onChange={handleMonthChange}
               disabled={loading}
               allowAnyMonth
               showDot={false}
@@ -107,7 +108,6 @@ const MonthlyReportPage: React.FC = () => {
           <div className="flex-1" />
         </div>
 
-        {/* 空状态 */}
         {!hasLoaded && !loading && !error && (
           <MonthlyEmptyState
             month={selectedMonth}
@@ -116,7 +116,6 @@ const MonthlyReportPage: React.FC = () => {
           />
         )}
 
-        {/* 加载中 */}
         {loading && (
           <div className="flex items-center justify-center py-12 text-gray-400">
             <Loader2 className="w-5 h-5 animate-spin mr-2" />
@@ -124,7 +123,6 @@ const MonthlyReportPage: React.FC = () => {
           </div>
         )}
 
-        {/* 错误 */}
         {!loading && error && (
           <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 text-sm text-red-700 flex items-center gap-2">
             <AlertCircle className="w-4 h-4" />
@@ -132,14 +130,13 @@ const MonthlyReportPage: React.FC = () => {
           </div>
         )}
 
-        {/* 主体 */}
         {!loading && !error && hasLoaded && (
           <>
             <MonthlySummaryCards
               marketing={marketingSummary}
               payrollTotal={payrollSummary.total}
               payrollHeadcount={payrollSummary.headcount}
-              payrollRewardsTotal={payrollSummary.rewardsTotal ?? 0}   /* ⭐ 新增 */
+              payrollRewardsTotal={payrollSummary.rewardsTotal ?? 0}
               fixedCost={fixedCost}
               profit={profit}
               isProfit={isProfit}

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { AlertCircle, Loader2, Search, Store } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -13,6 +13,7 @@ import { extractAmount, extractItems, extractPayeeAccount } from './utils/extrac
 import { useDingTalkTemplates } from './hooks/useDingTalkTemplates';
 import { useReportColumns } from './hooks/useReportColumns';
 import { useDingTalkReport } from './hooks/useDingTalkReport';
+import { usePersistedMonth } from '../../hooks/usePersistedMonth';
 
 import DingTalkHeader from './components/DingTalkHeader';
 import DingTalkFilterBar from './components/DingTalkFilterBar';
@@ -23,19 +24,43 @@ const DingTalkReportPage: React.FC = () => {
   const { storeId } = useStore();
   const { hasPermission } = useAuth();
 
-  /* ⭐ 独立权限校验 */
   const canView = hasPermission('report:dingtalk:view', storeId);
 
+  /* ⭐ 页面级月份持久化：key = gym_dingtalk_month_v1_<storeId> */
+  const { month: selectedMonth, setMonth: setSelectedMonth } =
+    usePersistedMonth('dingtalk', storeId);
+
+  /* 由 selectedMonth 派生 start/end；用户手动改日期时不写回月份，只作临时查询 */
   const defaults = useMemo(() => getDefaultMonth(), []);
 
   const [start, setStart] = useState(defaults.start);
   const [end, setEnd] = useState(defaults.end);
+
+  /* ⭐ 月份变化 → 同步 start/end */
+  useEffect(() => {
+    if (!selectedMonth) return;
+    const [y, m] = selectedMonth.split('-').map(Number);
+    const first = `${selectedMonth}-01`;
+    const lastDay = new Date(y, m, 0).getDate();
+    const last = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
+    setStart(first);
+    setEnd(last);
+  }, [selectedMonth]);
+
+  /* ⭐ 用户手动改日期时，反向推导月份写回持久化（可选） */
+  const handleStartChange = (v: string) => {
+    setStart(v);
+    if (v && /^\d{4}-\d{2}/.test(v)) setSelectedMonth(v.slice(0, 7));
+  };
+  const handleEndChange = (v: string) => {
+    setEnd(v);
+    if (v && /^\d{4}-\d{2}/.test(v)) setSelectedMonth(v.slice(0, 7));
+  };
+
   const [paymentUnits, setPaymentUnits] = useState<string[]>([]);
   const [templateTypes, setTemplateTypes] = useState<string[]>([]);
 
-  /* 选中的类型（配合扇形图 + 明细表） */
   const [selectedType, setSelectedType] = useState<string | null>(null);
-  /* 选中的门店（扇形图联动） */
   const [selectedStore, setSelectedStore] = useState<string | null>(null);
 
   const {
@@ -57,7 +82,6 @@ const DingTalkReportPage: React.FC = () => {
     groupedByStore,
   } = useDingTalkReport();
 
-  /* 门店 × 类型的扇形数据 */
   const storeCharts = useMemo(
     () =>
       groupedByStore.map((s) => ({
@@ -96,7 +120,6 @@ const DingTalkReportPage: React.FC = () => {
     setTemplateTypes(names);
   };
 
-  /* 明细过滤：按门店 + 类型 */
   const filteredGrouped = useMemo(() => {
     let groups = grouped;
     if (selectedStore) {
@@ -178,7 +201,6 @@ const DingTalkReportPage: React.FC = () => {
     XLSX.writeFile(wb, `钉钉流程报告_${start}_${end}${suffix}.xlsx`);
   };
 
-  /* ⭐ 无权限 → 跳转 */
   if (!canView) {
     return <Navigate to="/no-permission" replace />;
   }
@@ -204,8 +226,8 @@ const DingTalkReportPage: React.FC = () => {
           loading={loading}
           meta={meta}
           visibleColumns={visibleColumns}
-          onStartChange={setStart}
-          onEndChange={setEnd}
+          onStartChange={handleStartChange}
+          onEndChange={handleEndChange}
           onTogglePaymentUnit={togglePaymentUnit}
           onSetPaymentUnits={setPaymentUnits}
           onToggleTemplateType={toggleTemplateType}
@@ -244,7 +266,6 @@ const DingTalkReportPage: React.FC = () => {
 
         {!loading && !error && results.length > 0 && (
           <>
-            {/* 每个门店一个扇形图（按金额） */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
               {storeCharts.map((chart) => {
                 const isStoreSelected = selectedStore === chart.storeName;
@@ -318,7 +339,6 @@ const DingTalkReportPage: React.FC = () => {
               })}
             </div>
 
-            {/* 当前筛选提示 */}
             {(selectedStore || selectedType) && (
               <div className="bg-blue-50 border border-blue-100 rounded-2xl p-3 mb-4 text-xs text-blue-700 flex items-center gap-2 flex-wrap">
                 <span className="font-medium">当前筛选：</span>
@@ -357,7 +377,6 @@ const DingTalkReportPage: React.FC = () => {
               </div>
             )}
 
-            {/* 明细表（联动） */}
             <GroupedResults
               grouped={filteredGrouped}
               isColVisible={isColVisible}

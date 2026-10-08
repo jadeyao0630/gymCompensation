@@ -1,109 +1,81 @@
 import React, {
   createContext,
+  useCallback,
   useContext,
   useEffect,
-  useRef,
   useState,
 } from 'react';
-import type { ReactNode } from 'react';
-import { DEFAULT_STORE_ID, getStoreById, STORES } from '../constants/stores';
-import type { StoreInfo } from '../constants/stores';
-import { useAuth } from './AuthContext';
-import type { UserPermissionConfig } from '../constants/permissions';
+import { STORES } from '../constants/stores';
 
-const STORAGE_KEY = 'gym_current_store_id';
+const STORE_ID_KEY = 'gym_current_store_id_v1';
 
-interface StoreContextValue {
+interface StoreCtx {
   storeId: string;
-  store: StoreInfo;
   setStoreId: (id: string) => void;
+  /** 所有门店列表（含 id / name） */
+  stores: typeof STORES;
 }
 
-const StoreContext = createContext<StoreContextValue | null>(null);
+const Ctx = createContext<StoreCtx | null>(null);
 
-/* ============================================================
- * ⭐ 判断某门店对当前用户是否可用
- * - 没有任何权限 → 不可用
- * - storeIds 为空数组（全部门店）→ 可用
- * - storeIds 包含当前门店 → 可用
- * ============================================================ */
-function isStoreAvailable(
-  config: UserPermissionConfig,
-  storeId: string
-): boolean {
-  if (config.permissions.length === 0) return false;
-  if (!config.storeIds || config.storeIds.length === 0) return true;
-  return config.storeIds.map(String).includes(String(storeId));
+function getInitialStoreId(): string {
+  /* 1) 优先 localStorage */
+  try {
+    const saved = localStorage.getItem(STORE_ID_KEY);
+    if (saved && STORES.some((s) => s.id === saved)) {
+      return saved;
+    }
+  } catch {}
+
+  /* 2) 其次 URL query ?store_id= */
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get('store_id');
+    if (fromUrl && STORES.some((s) => s.id === fromUrl)) {
+      return fromUrl;
+    }
+  } catch {}
+
+  /* 3) 兜底：第一个门店 */
+  return STORES[0]?.id || '';
 }
 
-function findFirstAvailableStore(
-  config: UserPermissionConfig
-): string | null {
-  for (const s of STORES) {
-    if (isStoreAvailable(config, s.id)) return s.id;
-  }
-  return null;
-}
-
-export const StoreProvider: React.FC<{ children: ReactNode }> = ({
+export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const { isSuperAdmin, config, loading: authLoading } = useAuth();
+  const [storeId, setStoreIdState] = useState<string>(() => getInitialStoreId());
 
-  const [storeId, setStoreIdState] = useState<string>(() => {
-    return localStorage.getItem(STORAGE_KEY) || DEFAULT_STORE_ID;
-  });
+  /* ⭐ 每次变化 → 写 localStorage */
+  const setStoreId = useCallback((id: string) => {
+    if (!id) return;
+    setStoreIdState(id);
+    try {
+      localStorage.setItem(STORE_ID_KEY, id);
+    } catch (e) {
+      console.warn('[StoreContext] 写 localStorage 失败', e);
+    }
+  }, []);
 
-  const autoSwitchedRef = useRef(false);
-
+  /* ⭐ 首次挂载时，如果 storeId 是从 localStorage 恢复的，也同步写一次（保险） */
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, storeId);
+    if (storeId) {
+      try {
+        localStorage.setItem(STORE_ID_KEY, storeId);
+      } catch {}
+    }
   }, [storeId]);
 
-  /* ============================================================
-   * ⭐ 自动切换到可用门店
-   * ============================================================ */
-  useEffect(() => {
-    if (authLoading) return;
-    if (isSuperAdmin) return;
-    if (config.permissions.length === 0) return;
-
-    if (isStoreAvailable(config, storeId)) {
-      autoSwitchedRef.current = false;
-      return;
-    }
-
-    if (autoSwitchedRef.current) return;
-
-    const next = findFirstAvailableStore(config);
-    if (next && next !== storeId) {
-      console.log(
-        `[StoreContext] 当前门店 ${storeId} 无权限，自动切换到 ${next}`
-      );
-      autoSwitchedRef.current = true;
-      setStoreIdState(next);
-    }
-  }, [authLoading, isSuperAdmin, config, storeId]);
-
-  const store = getStoreById(storeId) || getStoreById(DEFAULT_STORE_ID)!;
-
-  const setStoreId = (id: string) => {
-    const valid = getStoreById(id);
-    if (valid) {
-      autoSwitchedRef.current = false;
-      setStoreIdState(id);
-    }
+  const value: StoreCtx = {
+    storeId,
+    setStoreId,
+    stores: STORES,
   };
 
-  return (
-    <StoreContext.Provider value={{ storeId, store, setStoreId }}>
-      {children}
-    </StoreContext.Provider>
-  );
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 };
 
-export function useStore(): StoreContextValue {
-  const ctx = useContext(StoreContext);
-  if (!ctx) throw new Error('useStore must be used within StoreProvider');
+export function useStore(): StoreCtx {
+  const ctx = useContext(Ctx);
+  if (!ctx) throw new Error('[useStore] 必须在 <StoreProvider> 内使用');
   return ctx;
 }

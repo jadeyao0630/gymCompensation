@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   Plus, Undo2, AlertCircle, Users, Wallet, Briefcase, Loader2,
   Gift, Building2,
@@ -36,10 +36,10 @@ import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRewardsCatalog } from '../../hooks/useRewardsCatalog';
 import { useCompensationPlan } from './hooks/useCompensationPlan';
+import { usePersistedMonth } from '../../hooks/usePersistedMonth';
 
 const CompensationPlanPage: React.FC = () => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { storeId } = useStore();
   const { hasPermission } = useAuth();
 
@@ -61,7 +61,12 @@ const CompensationPlanPage: React.FC = () => {
   const [showCatalogDialog, setShowCatalogDialog] = useState(false);
   const [showDeptRewardsDialog, setShowDeptRewardsDialog] = useState(false);
 
-  const [selectedMonth, setSelectedMonth] = useState<string>(searchParams.get('month') || '');
+  /* ⭐ 页面级月份持久化：key = gym_compensation_month_v1_<storeId> */
+  const { month: selectedMonth, setMonth: setSelectedMonth } = usePersistedMonth(
+    'compensation',
+    storeId
+  );
+
   const [activeTab, setActiveTab] = useState<PositionCategory>('membership');
   const [importing, setImporting] = useState(false);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
@@ -88,21 +93,18 @@ const CompensationPlanPage: React.FC = () => {
 
   const availableMonths = useMemo(() => Object.keys(store).sort(), [store]);
 
+  /* ⭐ 首次进入：若还没有持久化月份，则选最近可用月份 */
   useEffect(() => {
     if (isInitialSelectDoneRef.current) return;
+    if (selectedMonth) {
+      isInitialSelectDoneRef.current = true;
+      return;
+    }
     if (availableMonths.length > 0) {
       setSelectedMonth(availableMonths[availableMonths.length - 1]);
       isInitialSelectDoneRef.current = true;
     }
-  }, [storeId, availableMonths, isInitialSelectDoneRef]);
-
-  useEffect(() => {
-    const m = searchParams.get('month');
-    if (m) {
-      setSelectedMonth(m);
-      isInitialSelectDoneRef.current = true;
-    }
-  }, [searchParams, isInitialSelectDoneRef]);
+  }, [storeId, availableMonths, isInitialSelectDoneRef, selectedMonth, setSelectedMonth]);
 
   useEffect(() => {
     fetchedKeyRef.current = '';
