@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Calculator } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Calculator, Loader2 } from 'lucide-react';
 import type {
   MonthlyCompensationPlan,
   CompensationStore,
   RewardsCatalog,
-  StaffRewardRef,
+  TempReward,
 } from '../../types/compensation';
 import { usePayroll } from '../../hooks/usePayroll';
 import type { PayrollResult, Department } from '../../utils/payroll';
@@ -73,6 +73,12 @@ const PayrollPage: React.FC = () => {
   const [editingStaff, setEditingStaff] = useState<PayrollResult | null>(null);
 
   const [rewardsCatalog, setRewardsCatalog] = useState<RewardsCatalog>([]);
+
+  /* ⭐ 保存奖罚时的全屏遮罩 */
+  const [savingTemp, setSavingTemp] = useState<{
+    active: boolean;
+    staffName?: string;
+  }>({ active: false });
 
   const fetchedKeyRef = useRef<string>('');
   const initializedRef = useRef(false);
@@ -303,7 +309,6 @@ const PayrollPage: React.FC = () => {
     calcSavePosition(staffId, newTitle, overrides, setOverridesByStore);
   };
 
-  /* 通用：调用 run 并更新结果 */
   const runAndUpdate = async (planToUse: MonthlyCompensationPlan) => {
     const catalog = loadRewardsCatalog();
     setRewardsCatalog(catalog);
@@ -316,8 +321,8 @@ const PayrollPage: React.FC = () => {
       newbieSet,
       {
         rewardsCatalog: catalog,
-        staffRewards: planToUse.staffRewards || {},
         departmentRewards: planToUse.departmentRewards,
+        tempRewardsByStaff: planToUse.tempRewards,
       }
     );
 
@@ -345,53 +350,47 @@ const PayrollPage: React.FC = () => {
     }
   };
 
-  /* ⭐ 保存个人奖金 → 写回 plan → 重算 */
-  const handleSaveStaffRewards = async (
+  /* ⭐ 保存奖罚 + 全屏遮罩（最少 400ms） */
+  const handleSaveTempRewards = async (
     staffId: string,
-    next: StaffRewardRef[]
+    next: TempReward[]
   ) => {
-    if (!currentPlan || !selectedMonth) {
-      console.warn('[handleSaveStaffRewards] 无 currentPlan，跳过');
-      return;
-    }
+    if (!currentPlan || !selectedMonth) return;
 
-    const sid = String(staffId ?? '').trim();
-    if (!sid) {
-      console.warn('[handleSaveStaffRewards] sid 为空，跳过');
-      return;
-    }
+    const sid = String(staffId).trim();
+    const staffName =
+      allResults.find((r) => String(r.staffId).trim() === sid)?.staffName ||
+      staffId;
 
-    /* 归一所有 key 为字符串 */
-    const mergedStaffRewards: Record<string, StaffRewardRef[]> = {};
-    Object.keys(currentPlan.staffRewards || {}).forEach((k) => {
-      mergedStaffRewards[String(k).trim()] = currentPlan.staffRewards![k];
-    });
-
-    if (next.length === 0) {
-      delete mergedStaffRewards[sid];
-    } else {
-      mergedStaffRewards[sid] = next;
-    }
-
-    const nextPlan: MonthlyCompensationPlan = {
-      ...currentPlan,
-      staffRewards: mergedStaffRewards,
-    };
-
-    console.log('[handleSaveStaffRewards] sid =', sid);
-    console.log('[handleSaveStaffRewards] next =', JSON.stringify(next));
-    console.log(
-      '[handleSaveStaffRewards] merged keys =',
-      Object.keys(mergedStaffRewards)
-    );
-
-    /* 本地立即写 */
-    savePlanToStorage(storeId, selectedMonth, nextPlan);
+    setSavingTemp({ active: true, staffName });
+    const startedAt = Date.now();
 
     try {
+      const merged: Record<string, TempReward[]> = {};
+      Object.keys(currentPlan.tempRewards || {}).forEach((k) => {
+        merged[String(k)] = currentPlan.tempRewards![k];
+      });
+      if (next.length === 0) delete merged[sid];
+      else merged[sid] = next;
+
+      const nextPlan: MonthlyCompensationPlan = {
+        ...currentPlan,
+        tempRewards: merged,
+      };
+
+      savePlanToStorage(storeId, selectedMonth, nextPlan);
       await runAndUpdate(nextPlan);
     } catch (e) {
-      console.error('[handleSaveStaffRewards] 重算失败', e);
+      console.error('[handleSaveTempRewards] 重算失败', e);
+    } finally {
+      /* ⭐ 保证最少展示 400ms，避免一闪而过 */
+      const elapsed = Date.now() - startedAt;
+      const remain = Math.max(0, 400 - elapsed);
+      if (remain > 0) {
+        setTimeout(() => setSavingTemp({ active: false }), remain);
+      } else {
+        setSavingTemp({ active: false });
+      }
     }
   };
 
@@ -441,8 +440,6 @@ const PayrollPage: React.FC = () => {
   const payrollActions = useMemo(() => ({
     updateMemberCommission: handleUpdateMemberCommission,
   }), [handleUpdateMemberCommission]);
-
-  const canEditRewards = hasPermission('plan:edit', storeId);
 
   return (
     <PayrollActionsProvider value={payrollActions}>
@@ -494,6 +491,7 @@ const PayrollPage: React.FC = () => {
           />
           <PayrollSummary summary={summary} />
 
+          {/* ⭐ 有结果 → 显示表格 */}
           {allResults.length > 0 && viewMode === 'all' && (
             <PayrollAllTable
               results={allResults}
@@ -511,8 +509,8 @@ const PayrollPage: React.FC = () => {
               onEditPosition={setEditingStaff}
               onUpdateAttendance={updateAttendance}
               rewardsCatalog={rewardsCatalog}
-              canEditRewards={canEditRewards}
-              onSaveStaffRewards={handleSaveStaffRewards}
+              tempRewardsByStaff={currentPlan?.tempRewards}
+              onSaveTempRewards={handleSaveTempRewards}
             />
           )}
 
@@ -534,36 +532,56 @@ const PayrollPage: React.FC = () => {
               onEditPosition={setEditingStaff}
               onUpdateAttendance={updateAttendance}
               rewardsCatalog={rewardsCatalog}
-              canEditRewards={canEditRewards}
-              onSaveStaffRewards={handleSaveStaffRewards}
+              tempRewardsByStaff={currentPlan?.tempRewards}
+              onSaveTempRewards={handleSaveTempRewards}
             />
           )}
 
-          {!loading && allResults.length === 0 && currentPlan && (
+          {/* ⭐ 无结果 + 有配置 → 保留空状态卡（loading 期间也显示） */}
+          {allResults.length === 0 && currentPlan && (
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-12 text-center">
               <div className="w-14 h-14 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-4">
-                <Calculator className="w-6 h-6 text-emerald-500" />
+                {loading ? (
+                  <Loader2 className="w-6 h-6 text-emerald-500 animate-spin" />
+                ) : (
+                  <Calculator className="w-6 h-6 text-emerald-500" />
+                )}
               </div>
-              <h3 className="font-semibold text-gray-700 mb-1">暂无计算结果</h3>
+              <h3 className="font-semibold text-gray-700 mb-1">
+                {loading ? '正在计算…' : '暂无计算结果'}
+              </h3>
               <p className="text-sm text-gray-400 mb-4">
-                点击「开始计算」按钮，根据本月配置拉取数据并计算薪酬
+                {loading
+                  ? '正在拉取订单、员工状态、计算薪酬与成本…'
+                  : '点击「开始计算」按钮，根据本月配置拉取数据并计算薪酬'}
               </p>
               <button
                 onClick={handleRun}
                 disabled={loading}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97]"
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <Calculator className="w-4 h-4" /> 开始计算
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> 计算中…
+                  </>
+                ) : (
+                  <>
+                    <Calculator className="w-4 h-4" /> 开始计算
+                  </>
+                )}
               </button>
             </div>
           )}
 
-          {!loading && !currentPlan && (
+          {/* ⭐ 无配置 → 去配置 */}
+          {!currentPlan && (
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-12 text-center">
               <div className="w-14 h-14 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
                 <AlertTriangle className="w-6 h-6 text-amber-500" />
               </div>
-              <h3 className="font-semibold text-gray-700 mb-1">该月份暂无薪酬配置</h3>
+              <h3 className="font-semibold text-gray-700 mb-1">
+                该月份暂无薪酬配置
+              </h3>
               <p className="text-sm text-gray-400 mb-4">
                 请先到「薪酬配置」页面上传或导入 {selectedMonth || '当月'} 的薪酬方案
               </p>
@@ -596,6 +614,32 @@ const PayrollPage: React.FC = () => {
             if (editingStaff) handleSavePosition(editingStaff.staffId, newTitle);
           }}
         />
+
+        {/* ⭐ 保存奖罚时的全屏遮罩 */}
+        {savingTemp.active && (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm select-none"
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <div className="bg-white rounded-2xl shadow-2xl px-8 py-7 flex flex-col items-center gap-3 min-w-[260px]">
+              <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+              <div className="text-center">
+                <p className="text-sm font-semibold text-gray-800">
+                  正在保存奖罚并重算
+                </p>
+                {savingTemp.staffName && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    → {savingTemp.staffName}
+                  </p>
+                )}
+                <p className="text-[11px] text-gray-400 mt-2">
+                  请稍候，正在同步方案与计算薪酬…
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </PayrollActionsProvider>
   );

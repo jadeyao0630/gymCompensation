@@ -18,16 +18,11 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 const TRIGGER_LABEL: Record<string, string> = {
   auto: '自动命中',
-  manual: '手动勾选',
+  manual: '手动添加',
 };
 
-/* ⭐ 深红字体样式 */
+/* ⭐ 深红字体 */
 const RED_FONT = { font: { color: { rgb: 'C00000' } } };
-/* ⭐ 浅红背景 + 深红字体（用于整行） */
-const RED_ROW_STYLE = {
-  font: { color: { rgb: 'C00000' } },
-  fill: { fgColor: { rgb: 'FEE2E2' } },
-};
 
 export function exportPayrollTableToExcel({
   allResults,
@@ -77,7 +72,6 @@ export function exportPayrollTableToExcel({
   const ws1 = XLSX.utils.aoa_to_sheet(summaryRows);
   ws1['!cols'] = [{ wch: 18 }, { wch: 18 }];
 
-  /* ⭐ 「奖金/扣款合计」行，负数标红 */
   if (summary.rewardsTotal < 0) {
     const cellAddr = 'B11';
     if (ws1[cellAddr]) ws1[cellAddr].s = RED_FONT;
@@ -134,8 +128,7 @@ export function exportPayrollTableToExcel({
     { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 12 },
   ];
 
-  /* ⭐ 奖金列为负 → 红字 */
-  const rewardColIdx = allHeader.indexOf('奖金 / 扣款');   // 14
+  const rewardColIdx = allHeader.indexOf('奖金 / 扣款');
   allResults.forEach((r, i) => {
     const rowIdx = i + 1;
     if ((r.rewardsTotal ?? 0) < 0 && rewardColIdx >= 0) {
@@ -143,7 +136,6 @@ export function exportPayrollTableToExcel({
       if (ws2[addr]) ws2[addr].s = RED_FONT;
     }
   });
-  /* 表尾奖金合计负数也标红 */
   if (summary.rewardsTotal < 0 && rewardColIdx >= 0) {
     const tailRowIdx = allRows.length - 1;
     const addr = XLSX.utils.encode_cell({ r: tailRowIdx, c: rewardColIdx });
@@ -214,7 +206,6 @@ export function exportPayrollTableToExcel({
     { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 12 },
   ];
 
-  /* ⭐ 按部门 sheet 里，扫描 "奖金 / 扣款" 列（索引 12）的负数单元格标红 */
   const deptRewardColIdx = 12;
   const range3 = XLSX.utils.decode_range(ws3['!ref'] || 'A1');
   for (let R = range3.s.r; R <= range3.e.r; R++) {
@@ -266,7 +257,6 @@ export function exportPayrollTableToExcel({
     { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 12 },
     { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 12 },
   ];
-  /* ⭐ 部门汇总"奖金"列标红负数 */
   const deptSumRewardColIdx = 8;
   const range4 = XLSX.utils.decode_range(ws4['!ref'] || 'A1');
   for (let R = range4.s.r; R <= range4.e.r; R++) {
@@ -278,7 +268,7 @@ export function exportPayrollTableToExcel({
   }
   XLSX.utils.book_append_sheet(wb, ws4, '部门汇总');
 
-  /* ============== Sheet 5：奖金明细 ============== */
+  /* ============== Sheet 5：奖金 / 扣款明细 ============== */
   const rewardRows: any[][] = [
     ['姓名', '部门', '名称', '金额', '类型', '来源', '触发方式', '备注'],
   ];
@@ -320,10 +310,8 @@ export function exportPayrollTableToExcel({
     { wch: 8 }, { wch: 8 }, { wch: 10 }, { wch: 30 },
   ];
 
-  /* ⭐ 奖金明细 sheet：扣款行（type 列 == '扣款'）整行标红 */
   const range5 = XLSX.utils.decode_range(ws5['!ref'] || 'A1');
   for (let R = 1; R <= range5.e.r; R++) {
-    /* 类型列：索引 4（A=0, B=1, ..., E=4） */
     const typeAddr = XLSX.utils.encode_cell({ r: R, c: 4 });
     const typeCell = ws5[typeAddr];
     if (typeCell && typeCell.v === '扣款') {
@@ -338,6 +326,73 @@ export function exportPayrollTableToExcel({
 
   XLSX.utils.book_append_sheet(wb, ws5, '奖金明细');
 
+  /* ============== Sheet 6：临时奖金 / 扣款 ============== */
+  if (plan?.tempRewards && Object.keys(plan.tempRewards).length > 0) {
+    const tempRows: any[][] = [
+      ['姓名', '员工ID', '名称', '金额', '类型', '来源', '备注'],
+    ];
+
+    let tempCount = 0;
+
+    /* 按 included 顺序遍历（只导计入的员工），每人取 plan.tempRewards[staffId] */
+    included.forEach((r) => {
+      const sid = String(r.staffId).trim();
+      const list = plan.tempRewards?.[sid] || [];
+      list.forEach((t) => {
+        const isDeduction = t.type === 'deduction';
+        const rawAmount = Math.abs(Number(t.amount) || 0);
+        const displayAmount = isDeduction ? -rawAmount : rawAmount;
+        const source = t.rewardId ? '奖罚库' : '自定义';
+        tempRows.push([
+          r.staffName || '',
+          sid,
+          t.name,
+          displayAmount,
+          isDeduction ? '扣款' : '奖励',
+          source,
+          t.note ?? '',
+        ]);
+        tempCount++;
+      });
+    });
+
+    /* 表尾合计 */
+    const tempTotal = tempRows
+      .slice(1)
+      .reduce((s, row) => s + (Number(row[3]) || 0), 0);
+
+    tempRows.push([]);
+    tempRows.push(['合计', '', `${tempCount} 条`, tempTotal, '', '', '']);
+
+    const ws6 = XLSX.utils.aoa_to_sheet(tempRows);
+    ws6['!cols'] = [
+      { wch: 12 },  // 姓名
+      { wch: 10 },  // 员工ID
+      { wch: 20 },  // 名称
+      { wch: 12 },  // 金额
+      { wch: 8 },   // 类型
+      { wch: 10 },  // 来源
+      { wch: 30 },  // 备注
+    ];
+
+    /* 扣款行（金额为负）标红 */
+    const range6 = XLSX.utils.decode_range(ws6['!ref'] || 'A1');
+    for (let R = 1; R <= range6.e.r; R++) {
+      const amountAddr = XLSX.utils.encode_cell({ r: R, c: 3 });
+      const amountCell = ws6[amountAddr];
+      if (amountCell && typeof amountCell.v === 'number' && amountCell.v < 0) {
+        /* 整行标红 */
+        for (let C = 0; C <= 6; C++) {
+          const addr = XLSX.utils.encode_cell({ r: R, c: C });
+          if (ws6[addr]) ws6[addr].s = RED_FONT;
+        }
+      }
+    }
+
+    XLSX.utils.book_append_sheet(wb, ws6, '临时奖金');
+  }
+
+  /* ---------- 下载 ---------- */
   const safeName = storeName.replace(/[\\/:*?"<>|]/g, '_');
   const fileName = `${safeName}_${month}_薪酬佣金计算.xlsx`;
   XLSX.writeFile(wb, fileName);

@@ -2,9 +2,9 @@ import type {
   PositionConfig,
   RewardsCatalog,
   RewardDefinition,
-  StaffRewardRef,
   PositionRewardRef,
   DepartmentRewards,
+  TempReward,
 } from '../../types/compensation';
 import type { RewardHit, EmployeePerformance } from '../../types/payroll';
 import { getDepartmentOf } from './department';
@@ -34,8 +34,8 @@ export function applyRewards(
   position: PositionConfig,
   perf: EmployeePerformance,
   catalog: RewardsCatalog,
-  staffRewards: StaffRewardRef[] | undefined,
-  departmentRewards?: DepartmentRewards
+  departmentRewards?: DepartmentRewards,
+  tempRewards?: TempReward[] | Record<string, TempReward[]>
 ): { rewards: RewardHit[]; rewardsTotal: number } {
   const hits: RewardHit[] = [];
   const ctx: RewardContext = {
@@ -46,63 +46,22 @@ export function applyRewards(
 
   const byId = new Map(catalog.map((d) => [d.id, d]));
 
-  const tryRef = (
-    ref: PositionRewardRef | StaffRewardRef,
-    source: 'position' | 'staff' | 'department'
-  ) => {
-    const customName = (ref as StaffRewardRef).customName;
-    const customType = (ref as StaffRewardRef).customType;
-
-    /* ⭐ 内联自定义：customName 非空 */
-    if (customName && customName.trim()) {
-      if (ref.enabled === false) return;
-      const isDeduction = customType === 'deduction';
-      const abs = Math.abs(ref.amountOverride ?? 0);
-      if (abs === 0) return;
-      const amount = isDeduction ? -abs : abs;
-      hits.push({
-        rewardId: ref.rewardId,
-        name: customName,
-        amount,
-        source,
-        trigger: 'manual',
-        note: ref.note,
-        type: isDeduction ? 'deduction' : 'reward',
-      });
-      return;
-    }
-
+  const tryRef = (ref: PositionRewardRef, source: 'position' | 'department') => {
     const def = byId.get(ref.rewardId);
     if (!def) return;
 
     const sign = def.type === 'deduction' ? -1 : 1;
     const rawAmount = ref.amountOverride ?? def.amount;
-    const amount = rawAmount * sign;
+    const amount = Math.abs(rawAmount) * sign;
     const note = ref.note ?? def.note;
     const type = def.type ?? 'reward';
 
     if (def.mode === 'condition') {
       if (matchCondition(def, ctx)) {
-        hits.push({
-          rewardId: def.id,
-          name: def.name,
-          amount,
-          source,
-          trigger: 'auto',
-          note,
-          type,
-        });
+        hits.push({ rewardId: def.id, name: def.name, amount, source, trigger: 'auto', note, type });
       }
     } else if (ref.enabled === true) {
-      hits.push({
-        rewardId: def.id,
-        name: def.name,
-        amount,
-        source,
-        trigger: 'manual',
-        note,
-        type,
-      });
+      hits.push({ rewardId: def.id, name: def.name, amount, source, trigger: 'manual', note, type });
     }
   };
 
@@ -114,7 +73,53 @@ export function applyRewards(
     (list || []).forEach((ref) => tryRef(ref, 'department'));
   }
 
-  (staffRewards || []).forEach((ref) => tryRef(ref, 'staff'));
+  /* ⭐ 临时奖金：兼容数组 / {staffId: TempReward[]} */
+  let tempList: TempReward[] = [];
+  if (Array.isArray(tempRewards)) {
+    tempList = tempRewards;
+  } else if (tempRewards && typeof tempRewards === 'object') {
+    const sid = String(perf.staffId ?? '').trim();
+    const arr = (tempRewards as Record<string, TempReward[]>)[sid];
+    if (Array.isArray(arr)) tempList = arr;
+  }
+
+  tempList.forEach((t) => {
+    if (!t) return;
+
+    /* ⭐ 情况 A：引用奖罚库 */
+    if (t.rewardId) {
+      const def = byId.get(t.rewardId);
+      if (!def) return;
+      const sign = def.type === 'deduction' ? -1 : 1;
+      const base = Math.abs(t.amount || def.amount || 0);
+      const amount = base * sign;               // 正数 × sign
+      hits.push({
+        rewardId: t.rewardId,
+        name: t.name || def.name,
+        amount,
+        source: 'staff',
+        trigger: 'manual',
+        note: t.note ?? def.note,
+        type: def.type ?? 'reward',
+      });
+      return;
+    }
+
+    /* ⭐ 情况 B：纯自定义 */
+    if (!t.name) return;
+    const sign = t.type === 'deduction' ? -1 : 1;
+    const base = Math.abs(Number(t.amount) || 0);
+    const amount = base * sign;                 // 正数 × sign
+    hits.push({
+      rewardId: t.id,
+      name: t.name,
+      amount,
+      source: 'staff',
+      trigger: 'manual',
+      note: t.note,
+      type: t.type ?? 'reward',
+    });
+  });
 
   const rewardsTotal = hits.reduce((s, h) => s + h.amount, 0);
   return { rewards: hits, rewardsTotal };

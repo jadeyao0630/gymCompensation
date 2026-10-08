@@ -114,19 +114,22 @@ export interface PositionRewardRef {
   note?: string;
 }
 
-/**
- * ⭐ 个人奖金引用（含内联自定义持久字段）
- * - rewardId 指向奖金库：走奖金库
- * - customName 非空：内联自定义，不依赖奖金库
- */
-export interface StaffRewardRef extends PositionRewardRef {
-  /** ⭐ 内联自定义：名称（空则视为奖金库条目） */
-  customName?: string;
-  /** ⭐ 内联自定义：类型（默认 deduction） */
-  customType?: 'reward' | 'deduction';
+/** ⭐ 临时奖金 / 扣款（针对个人，一次性，内联，不进奖金库） */
+export interface TempReward {
+  id: string;
+  name: string;
+  /** 正数 = 奖励；负数 = 扣款 */
+  amount: number;
+  note?: string;
+
+  /** ⭐ 引用奖金库时的 ID（不填 = 纯自定义） */
+  rewardId?: string;
+
+  /** ⭐ 自定义时的类型（引用奖金库时由库决定） */
+  type?: 'reward' | 'deduction';
 }
 
-/** 部门奖金挂载表 */
+/** 部门奖金挂载表（key = 部门名） */
 export type DepartmentRewards = Partial<
   Record<DepartmentKey, PositionRewardRef[]>
 >;
@@ -188,11 +191,11 @@ export interface MonthlyCompensationPlan {
   importedFrom?: string;
   importedAt?: string;
 
-  /** ⭐ 该月个人专属奖金（key = staffId） */
-  staffRewards?: Record<string, StaffRewardRef[]>;
-
   /** ⭐ 该月部门奖金（key = 部门名） */
   departmentRewards?: DepartmentRewards;
+
+  /** ⭐ 临时奖金（key = staffId） */
+  tempRewards?: Record<string, TempReward[]>;
 }
 
 export type CompensationStore = Record<string, MonthlyCompensationPlan>;

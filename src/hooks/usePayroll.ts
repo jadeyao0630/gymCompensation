@@ -15,8 +15,8 @@ import { extractErrorMessage } from '../api/client';
 import type {
   MonthlyCompensationPlan,
   RewardsCatalog,
-  StaffRewardRef,
   DepartmentRewards,
+  TempReward,
 } from '../types/compensation';
 import type { StatsRequest, AnyRecord } from '../api/types';
 import {
@@ -127,8 +127,8 @@ interface UsePayrollParams {
 
 export interface RunPayrollOptions {
   rewardsCatalog?: RewardsCatalog;
-  staffRewards?: Record<string, StaffRewardRef[]>;
   departmentRewards?: DepartmentRewards;
+  tempRewardsByStaff?: Record<string, TempReward[]>;
 }
 
 export function usePayroll({ username, password, busId }: UsePayrollParams) {
@@ -152,16 +152,6 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
       options?: RunPayrollOptions
     ): Promise<RunResult> => {
       console.log('[usePayroll] === 开始 ===');
-      const staffRewards = options?.staffRewards ?? plan.staffRewards ?? {};
-      console.log(
-        '[usePayroll] 奖金库条数:',
-        options?.rewardsCatalog?.length ?? 0,
-        '个人奖金 key:',
-        Object.keys(staffRewards),
-        '部门奖金 key:',
-        Object.keys(options?.departmentRewards ?? plan.departmentRewards ?? {})
-      );
-
       setLoading(true);
       setError('');
       setResults([]);
@@ -169,7 +159,6 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
       try {
         await login({ username, password });
 
-        /* 1) 教练列表 */
         let coaches: ReturnType<typeof normalizeCoachList> = [];
         try {
           const coachRes = await getBusCoachList({
@@ -182,7 +171,6 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           console.error('[usePayroll] 拉取教练列表失败:', coachErr);
         }
 
-        /* 2) 运营团队 */
         let marketers: AnyRecord[] = [];
         try {
           const marketerRes = await getMarketersList({
@@ -211,7 +199,6 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           uniqueMarketers.push(m);
         });
 
-        /* 3) 参数 */
         const { s_date, e_date } = getMonthRange(month);
         const payload: StatsRequest = {
           bus_id: busId,
@@ -221,7 +208,6 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           page_size: 1000,
         };
 
-        /* 4) 5 个接口 + 销售明细 */
         const [
           membership,
           swimmingCoach,
@@ -253,7 +239,6 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
 
         const payDetailMap = buildPayDetailMap(cardOrderRes.list);
 
-        /* 5) 分组 */
         const salesGroups: MergeInput[] = [
           { positionTitle: '会籍', records: membershipList },
           { positionTitle: '泳教', records: swimmingCoachList },
@@ -264,10 +249,8 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           ...splitClassByPosition(coachClassList),
         ];
 
-        /* 6) 合并 */
         let performances = mergePerformance(salesGroups, classGroups);
 
-        /* 收款方式 */
         performances = performances.map((p) => {
           const name = (p.staffName || '').trim();
           if (!name) return p;
@@ -276,7 +259,6 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           return { ...p, payDetail: pd };
         });
 
-        /* 职位覆盖 */
         if (overrides && Object.keys(overrides).length > 0) {
           performances = performances.map((p) => {
             const overrideTitle = overrides[p.staffId];
@@ -284,12 +266,10 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           });
         }
 
-        /* 教练信息 */
         if (coaches.length > 0) {
           performances = applyCoachInfo(performances, coaches);
         }
 
-        /* 8) 合并运营团队 */
         const perfIndex = new Map<string, number>();
         performances.forEach((p, i) => perfIndex.set(p.staffId, i));
 
@@ -337,7 +317,6 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           perfIndex.set(id, performances.length - 1);
         });
 
-        /* 9) 补全教练列表里没业绩的员工 */
         const configuredTitles = new Set(plan.positions.map((p) => p.title));
         for (const coach of coaches) {
           if (!coach.id) continue;
@@ -368,7 +347,6 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           perfIndex.set(coach.id, performances.length - 1);
         }
 
-        /* 9.5) 去重 */
         const perfMap = new Map<string, EmployeePerformance>();
         const nameTitleIndex = new Map<string, string>();
         performances.forEach((p) => {
@@ -403,7 +381,6 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
         });
         performances = Array.from(perfMap.values());
 
-        /* 9.6) 去重后再应用一次覆盖 */
         if (overrides && Object.keys(overrides).length > 0) {
           performances = performances.map((p) => {
             const overrideTitle = overrides[p.staffId];
@@ -411,10 +388,8 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           });
         }
 
-        /* 10) 经理 / 店长 汇总 */
         performances = applyManagerPerformance(performances, plan.positions);
 
-        /* 10.5) 店长销售 → 运营主管 */
         const storePerf = performances.find(
           (p) =>
             p.positionTitle === '店长' || p.positionTitle.includes('门店经理')
@@ -426,7 +401,6 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
             : p
         );
 
-        /* 11) 缺失职位 */
         const missingPositions = collectMissingPositions(
           performances,
           plan.positions
@@ -436,12 +410,14 @@ export function usePayroll({ username, password, busId }: UsePayrollParams) {
           plan.positions
         );
 
-        /* 12) ⭐ 计算（含奖金三级） */
         const payroll = calcPayrollForAll(plan, performances, {
           opsViewEnabled,
           newbieIds,
           rewardsCatalog: options?.rewardsCatalog ?? [],
-          departmentRewards: options?.departmentRewards ?? plan.departmentRewards,
+          departmentRewards:
+            options?.departmentRewards ?? plan.departmentRewards,
+          tempRewardsByStaff:
+            options?.tempRewardsByStaff ?? plan.tempRewards,
         });
         setResults(payroll);
 

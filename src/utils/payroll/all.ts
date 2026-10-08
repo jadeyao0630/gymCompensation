@@ -2,6 +2,7 @@ import type {
   MonthlyCompensationPlan,
   RewardsCatalog,
   DepartmentRewards,
+  TempReward,
 } from '../../types/compensation';
 import type { EmployeePerformance, PayrollResult } from '../../types/payroll';
 import { isManagerTitle } from '../../constants/positions';
@@ -15,6 +16,7 @@ export interface CalcPayrollForAllOptions {
   newbieIds?: Set<string>;
   rewardsCatalog?: RewardsCatalog;
   departmentRewards?: DepartmentRewards;
+  tempRewardsByStaff?: Record<string, TempReward[]>;
 }
 
 export function calcPayrollForAll(
@@ -27,9 +29,8 @@ export function calcPayrollForAll(
     newbieIds = new Set<string>(),
     rewardsCatalog = [],
     departmentRewards,
+    tempRewardsByStaff,
   } = options;
-
-
 
   const results: PayrollResult[] = [];
 
@@ -64,8 +65,8 @@ export function calcPayrollForAll(
     let position = findPositionByTitle(plan.positions, title);
     if (!position) position = makeEmptyPosition(title);
 
-    /* ⭐ 统一 sid 为字符串 */
     const sid = String(perf.staffId ?? '').trim();
+    const tempRewards = tempRewardsByStaff?.[sid] || [];
 
     results.push(
       calcEmployeePayroll(
@@ -82,6 +83,7 @@ export function calcPayrollForAll(
         {
           rewardsCatalog,
           departmentRewards,
+          tempRewards,
         }
       )
     );

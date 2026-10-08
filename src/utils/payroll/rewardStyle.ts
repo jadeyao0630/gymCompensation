@@ -25,5 +25,5 @@ export function rewardSourceLabel(h: RewardHit): string {
 
 /** 单条奖金：中文触发方式 */
 export function rewardTriggerLabel(h: RewardHit): string {
-  return h.trigger === 'auto' ? '自动命中' : '手动勾选';
+  return h.trigger === 'auto' ? '自动命中' : '手动添加';
 }

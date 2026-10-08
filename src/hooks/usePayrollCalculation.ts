@@ -10,6 +10,7 @@ import type {
   MonthlyCompensationPlan,
   PositionConfig,
   RewardsCatalog,
+  TempReward,
 } from '../types/compensation';
 import { applyRewards } from '../utils/payroll/rewards';
 import { loadRewardsCatalog } from '../utils/payrollStorage';
@@ -67,12 +68,24 @@ function recomputeRewardsForResult(
     absentDays: nextAbsent,
   };
 
+  /* ⭐ 取该员工的临时奖金 */
+  const sid = String(r.staffId ?? '').trim();
+  const tempRewardsForStaff: TempReward[] =
+    plan.tempRewards?.[sid] || [];
+
+  /* ⭐ 正确传 5 个参数：
+   *   1) position
+   *   2) perf
+   *   3) catalog
+   *   4) departmentRewards（对象）
+   *   5) tempRewardsForStaff（该员工的数组）
+   */
   const { rewards, rewardsTotal } = applyRewards(
     position,
     perf,
     catalog,
-    plan.staffRewards?.[r.staffId],
-    plan.departmentRewards
+    plan.departmentRewards,
+    tempRewardsForStaff
   );
 
   const absentDeduction =
@@ -156,7 +169,6 @@ export function usePayrollCalculation({
           nextMembers[memberIndex] = { ...target, ...patch };
           const recomputed = recomputeClassCommission(r, nextMembers);
 
-          /* 消课金额变化可能触发 classCount 类奖，重算奖金 */
           const base: PayrollResult = {
             ...r,
             classMemberDetail: nextMembers,
@@ -184,7 +196,6 @@ export function usePayrollCalculation({
         const next = list.map((r) => {
           if (r.staffId !== staffId) return r;
 
-          /* 1) 先更新考勤与缺勤扣款 */
           const absentDeduction =
             !updates.fullAttendance &&
             updates.absentDays > 0 &&
@@ -199,7 +210,6 @@ export function usePayrollCalculation({
             absentDeduction,
           };
 
-          /* 2) 用新的考勤状态重算奖金（含全勤类自动命中） */
           return recomputeRewardsForResult(
             withAttendance,
             currentPlan,
@@ -231,15 +241,18 @@ export function usePayrollCalculation({
         );
         if (position) {
           const catalog = loadRewardsCatalog();
-          const staffRewards = currentPlan.staffRewards?.[staffId];
+          const sid = String(staffId).trim();
+          const tempRewardsForStaff: TempReward[] =
+            currentPlan.tempRewards?.[sid] || [];
+
           const newResult = calcEmployeePayroll(
             position,
             perf,
             willBeNewbie,
             {
               rewardsCatalog: catalog,
-              staffRewards,
               departmentRewards: currentPlan.departmentRewards,
+              tempRewards: tempRewardsForStaff,   // ⭐
             }
           );
           setResultsByStore((rPrev) => {
@@ -315,15 +328,18 @@ export function usePayrollCalculation({
       }
 
       const catalog = loadRewardsCatalog();
-      const staffRewards = currentPlan.staffRewards?.[staffId];
+      const sid = String(staffId).trim();
+      const tempRewardsForStaff: TempReward[] =
+        currentPlan.tempRewards?.[sid] || [];
+
       const newResult = calcEmployeePayroll(
         effectivePosition,
         nextPerf,
         newbieSet.has(staffId),
         {
           rewardsCatalog: catalog,
-          staffRewards,
           departmentRewards: currentPlan.departmentRewards,
+          tempRewards: tempRewardsForStaff,   // ⭐
         }
       );
 

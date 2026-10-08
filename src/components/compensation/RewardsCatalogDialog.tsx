@@ -42,9 +42,9 @@ export const RewardsCatalogDialog: React.FC<Props> = ({
             <Gift className="w-5 h-5" />
           </div>
           <div className="flex-1">
-            <h2 className="text-lg font-bold text-gray-900">奖金 / 扣款库</h2>
+            <h2 className="text-lg font-bold text-gray-900">奖罚库</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              跨月共享；可在职位 / 部门 / 个人三级引用
+              跨月共享；可在职位 / 部门 / 临时奖罚金中引用
             </p>
           </div>
           <button
@@ -59,7 +59,7 @@ export const RewardsCatalogDialog: React.FC<Props> = ({
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           {catalog.length === 0 ? (
             <div className="text-center text-sm text-gray-400 py-10">
-              暂无条目，点击下方「新增奖金 / 扣款」创建
+              暂无条目，点击下方「新增奖罚」创建
             </div>
           ) : (
             catalog.map((r) => {
@@ -163,7 +163,7 @@ export const RewardsCatalogDialog: React.FC<Props> = ({
                       }}
                       className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
                     >
-                      <option value="manual">手动勾选</option>
+                      <option value="manual">手动添加</option>
                       <option value="condition">条件触发</option>
                     </select>
 
@@ -219,7 +219,7 @@ export const RewardsCatalogDialog: React.FC<Props> = ({
                   {/* 提示 */}
                   {isCondition && isDeduction && (
                     <p className="mt-2 text-[11px] text-rose-600">
-                      ⚠️ 扣款用「条件触发」不常见；如需手动勾选，请把触发方式改成「手动勾选」。
+                      ⚠️ 扣款用「条件触发」不常见；如需手动添加，请把触发方式改成「手动添加」。
                     </p>
                   )}
 

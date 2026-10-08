@@ -48,7 +48,7 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 const TRIGGER_LABEL: Record<string, string> = {
   auto: '自动命中',
-  manual: '手动勾选',
+  manual: '手动添加',
 };
 
 const RED_FONT = { font: { color: { rgb: 'C00000' } } };
@@ -121,7 +121,6 @@ export async function exportEmployeePayrollToExcel(
     { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 24 }, { wch: 24 },
   ];
 
-  /* ⭐ 奖金/扣款合计行负数标红 */
   if ((result.rewardsTotal ?? 0) < 0) {
     const range = XLSX.utils.decode_range(ws1['!ref'] || 'A1');
     for (let R = 0; R <= range.e.r; R++) {
@@ -135,7 +134,6 @@ export async function exportEmployeePayrollToExcel(
     }
   }
 
-  /* ⭐ 明细区每行扣款标红 */
   if (result.rewards && result.rewards.length > 0) {
     const range = XLSX.utils.decode_range(ws1['!ref'] || 'A1');
     for (let R = 0; R <= range.e.r; R++) {
@@ -182,7 +180,6 @@ export async function exportEmployeePayrollToExcel(
       { wch: 22 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 12 }, { wch: 30 },
     ];
 
-    /* ⭐ 标红扣款行 */
     const range = XLSX.utils.decode_range(wsReward['!ref'] || 'A1');
     for (let R = 0; R <= range.e.r; R++) {
       const typeAddr = XLSX.utils.encode_cell({ r: R, c: 2 });
@@ -450,12 +447,16 @@ export async function exportEmployeePayrollToExcel(
     } else if (pos.oldClassFee !== undefined) {
       cfgRows.push(['老课费用', `${pos.oldClassFee} 元/节`]);
     }
+
+    /* 职位奖金 */
     if (pos.rewards && pos.rewards.length > 0) {
       cfgRows.push(['职位奖金 / 扣款', '']);
       pos.rewards.forEach((ref) => {
         cfgRows.push([`  ID`, ref.rewardId]);
       });
     }
+
+    /* 部门奖金 */
     if (plan.departmentRewards) {
       const deptKey = dept as '会籍' | '私教' | '泳教' | '运营';
       const list = plan.departmentRewards[deptKey];
@@ -466,16 +467,23 @@ export async function exportEmployeePayrollToExcel(
         });
       }
     }
-    const staffRefs = plan.staffRewards?.[result.staffId];
-    if (staffRefs && staffRefs.length > 0) {
-      cfgRows.push(['个人奖金 / 扣款', '']);
-      staffRefs.forEach((ref) => {
-        cfgRows.push([`  ID`, ref.rewardId]);
+
+    /* ⭐ 临时奖金（替代原 staffRewards） */
+    const tempRewards =
+      plan.tempRewards?.[String(result.staffId)] || [];
+    if (tempRewards.length > 0) {
+      cfgRows.push(['临时奖金 / 扣款', '']);
+      tempRewards.forEach((t) => {
+        const isDeduction = t.type === 'deduction';
+        cfgRows.push([
+          `  ${t.name}`,
+          `${isDeduction ? '-' : '+'}¥${Math.abs(t.amount)}${t.note ? ' · ' + t.note : ''}`,
+        ]);
       });
     }
 
     const ws4 = XLSX.utils.aoa_to_sheet(cfgRows);
-    ws4['!cols'] = [{ wch: 24 }, { wch: 24 }];
+    ws4['!cols'] = [{ wch: 24 }, { wch: 40 }];
     XLSX.utils.book_append_sheet(wb, ws4, '岗位配置');
   }
 

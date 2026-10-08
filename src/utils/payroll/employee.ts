@@ -2,8 +2,8 @@ import type {
   PositionConfig,
   GenderSalaryTier,
   RewardsCatalog,
-  StaffRewardRef,
   DepartmentRewards,
+  TempReward,
 } from '../../types/compensation';
 import { resolveCalcFlags } from '../../types/compensation';
 import { isManagerTitle } from '../../constants/positions';
@@ -30,8 +30,8 @@ function resolveGenderBase(
 
 export interface CalcEmployeeOptions {
   rewardsCatalog?: RewardsCatalog;
-  staffRewards?: StaffRewardRef[];
   departmentRewards?: DepartmentRewards;
+  tempRewards?: TempReward[];
 }
 
 export function calcEmployeePayroll(
@@ -40,18 +40,15 @@ export function calcEmployeePayroll(
   isNewbie = false,
   options: CalcEmployeeOptions = {}
 ): PayrollResult {
-  /* ⭐ 奖金计算（含职位 / 部门 / 个人 三级） */
   const { rewards, rewardsTotal } = applyRewards(
     position,
     perf,
     options.rewardsCatalog || [],
-    options.staffRewards,
-    options.departmentRewards
+    options.departmentRewards,
+    options.tempRewards
   );
 
-  /* ============================================================
-   * 运营主管特例
-   * ============================================================ */
+  /* 运营主管 */
   if (position.title === '运营主管') {
     const managerSalesBase = perf.managerSalesBase ?? 0;
     const rate =
@@ -107,9 +104,6 @@ export function calcEmployeePayroll(
     };
   }
 
-  /* ============================================================
-   * 普通职位
-   * ============================================================ */
   const flags = resolveCalcFlags(position);
   const isSwimCoach = position.title.includes('泳教');
 

@@ -1,7 +1,6 @@
 import { api } from './client';
 import type { MonthlyCompensationPlan } from '../types/compensation';
 
-/** 方案列表（某门店所有月份） */
 export async function fetchPlanList(storeId: string) {
   const res = await api.get('/api/compensation/plans', {
     params: { store_id: storeId },
@@ -16,7 +15,6 @@ export async function fetchPlanList(storeId: string) {
   }[];
 }
 
-/** 按门店 + 月份查方案 */
 export async function fetchPlanByMonth(
   storeId: string,
   month: string
@@ -27,7 +25,7 @@ export async function fetchPlanByMonth(
   return res.data.data as MonthlyCompensationPlan | null;
 }
 
-/** ⭐ 保存方案（带上 departmentRewards） */
+/** ⭐ 保存方案（带 departmentRewards + tempRewards） */
 export async function savePlan(
   storeId: string,
   plan: MonthlyCompensationPlan
@@ -37,20 +35,18 @@ export async function savePlan(
     month: plan.month,
     periodLabel: plan.periodLabel,
     positions: plan.positions,
-    /* ⭐ 部门奖金持久化 */
     departmentRewards: plan.departmentRewards ?? {},
+    tempRewards: plan.tempRewards ?? {},       // ⭐
   });
   return res.data.data;
 }
 
-/** 删除方案 */
 export async function deletePlan(storeId: string, month: string) {
   await api.delete('/api/compensation/plan', {
     params: { store_id: storeId, month },
   });
 }
 
-/** 初始化门店 */
 export async function initStorePlans(storeId: string) {
   const res = await api.post('/api/compensation/init', { storeId });
   return res.data.data as {
@@ -60,7 +56,6 @@ export async function initStorePlans(storeId: string) {
   };
 }
 
-/** 复制方案（同门店，fromMonth → toMonth） */
 export async function copyPlan(
   storeId: string,
   fromMonth: string,
@@ -73,10 +68,6 @@ export async function copyPlan(
   });
   return res.data.data as { id: number; positionCount: number };
 }
-
-/* ============================================================
- * 测算设置
- * ============================================================ */
 
 export interface SimulationSetting {
   propertyFee: number;

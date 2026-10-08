@@ -2,13 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Plus, Undo2, AlertCircle, Users, Wallet, Briefcase, Loader2,
-  Gift, Users as UsersIcon, Building2,
+  Gift, Building2,
 } from 'lucide-react';
 import type {
   PositionCategory,
   MonthlyCompensationPlan,
   PositionConfig,
-  StaffRewardRef,
   DepartmentRewards,
 } from '../../types/compensation';
 import { getCategoryLabel } from '../../constants/categories';
@@ -32,7 +31,6 @@ import PermissionGate from '../../components/common/PermissionGate';
 import { CompensationGuideDialog } from '../../components/compensation/CompensationGuideDialog';
 import { CompensationEmptyState } from '../../components/compensation/CompensationEmptyState';
 import RewardsCatalogDialog from '../../components/compensation/RewardsCatalogDialog';
-import StaffRewardsDialog from '../../components/compensation/StaffRewardsDialog';
 import DepartmentRewardsDialog from '../../components/compensation/DepartmentRewardsDialog';
 import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -53,7 +51,6 @@ const CompensationPlanPage: React.FC = () => {
     isInitialSelectDoneRef,
   } = useCompensationPlan(storeId);
 
-  /* ⭐ 奖金库 */
   const {
     catalog: rewardsCatalog,
     addReward,
@@ -62,7 +59,6 @@ const CompensationPlanPage: React.FC = () => {
   } = useRewardsCatalog();
 
   const [showCatalogDialog, setShowCatalogDialog] = useState(false);
-  const [showStaffRewardsDialog, setShowStaffRewardsDialog] = useState(false);
   const [showDeptRewardsDialog, setShowDeptRewardsDialog] = useState(false);
 
   const [selectedMonth, setSelectedMonth] = useState<string>(searchParams.get('month') || '');
@@ -77,7 +73,6 @@ const CompensationPlanPage: React.FC = () => {
   const fetchedKeyRef = useRef<string>('');
   const store = fullStore[storeId] || {};
 
-  /* ⭐ 权限 */
   const canViewPlan = hasPermission('plan:view', storeId);
   const canEditPlan = canViewPlan && hasPermission('plan:edit', storeId);
   const canEditTarget = canViewPlan && hasPermission('target:edit', storeId);
@@ -93,7 +88,6 @@ const CompensationPlanPage: React.FC = () => {
 
   const availableMonths = useMemo(() => Object.keys(store).sort(), [store]);
 
-  /* 选中月份 */
   useEffect(() => {
     if (isInitialSelectDoneRef.current) return;
     if (availableMonths.length > 0) {
@@ -114,7 +108,6 @@ const CompensationPlanPage: React.FC = () => {
     fetchedKeyRef.current = '';
   }, [storeId]);
 
-  /* 拉取方案详情 */
   useEffect(() => {
     if (!selectedMonth) return;
     if (!dbOnline) return;
@@ -177,7 +170,6 @@ const CompensationPlanPage: React.FC = () => {
     0
   );
 
-  /* 操作 */
   const handleSelectMonth = (m: string) => {
     if (copying.active) return;
     isInitialSelectDoneRef.current = true;
@@ -240,7 +232,6 @@ const CompensationPlanPage: React.FC = () => {
           positions: parsed.positions.map((p: any) => ({ ...p, id: p.id || uid() })),
           importedFrom: `JSON: ${file.name}`,
           importedAt: new Date().toISOString(),
-          staffRewards: parsed.staffRewards,
           departmentRewards: parsed.departmentRewards,
         };
       } else {
@@ -275,7 +266,6 @@ const CompensationPlanPage: React.FC = () => {
     if (!canEditPlan) return alert('无权限：设置方案');
     if (!canAddMonth) return alert('无权限：新增月份');
 
-    /* 空白新增 */
     if (!copyFrom) {
       setShowMonthPicker(false);
 
@@ -301,7 +291,6 @@ const CompensationPlanPage: React.FC = () => {
       return;
     }
 
-    /* 复制新增 */
     const srcPlan = store[copyFrom];
     if (!srcPlan) return alert('源月份方案不存在');
 
@@ -502,11 +491,6 @@ const CompensationPlanPage: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const handleStaffRewardsChange = (next: Record<string, StaffRewardRef[]>) => {
-    if (!selectedMonth || !currentPlan) return;
-    updatePlan({ staffRewards: next }, '修改个人奖金');
-  };
-
   const handleDepartmentRewardsChange = (next: DepartmentRewards) => {
     if (!selectedMonth || !currentPlan) return;
     updatePlan({ departmentRewards: next }, '修改部门奖金');
@@ -562,18 +546,8 @@ const CompensationPlanPage: React.FC = () => {
                 disabled={copying.active}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 transition disabled:opacity-50"
               >
-                <Gift className="w-3 h-3" /> 奖金库
+                <Gift className="w-3 h-3" /> 奖罚库
               </button>
-
-              {currentPlan && (
-                <button
-                  onClick={() => setShowStaffRewardsDialog(true)}
-                  disabled={copying.active || !canEditPlan}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100 transition disabled:opacity-50"
-                >
-                  <UsersIcon className="w-3 h-3" /> 个人奖金
-                </button>
-              )}
 
               {currentPlan && (
                 <button
@@ -739,17 +713,6 @@ const CompensationPlanPage: React.FC = () => {
           onUpdate={updateReward}
           onRemove={removeReward}
           onClose={() => setShowCatalogDialog(false)}
-        />
-      )}
-
-      {showStaffRewardsDialog && currentPlan && selectedMonth && (
-        <StaffRewardsDialog
-          open={showStaffRewardsDialog}
-          plan={currentPlan}
-          catalog={rewardsCatalog}
-          staffOptions={[]}
-          onChange={handleStaffRewardsChange}
-          onClose={() => setShowStaffRewardsDialog(false)}
         />
       )}
 
