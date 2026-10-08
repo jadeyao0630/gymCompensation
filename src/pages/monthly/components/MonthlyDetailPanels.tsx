@@ -17,6 +17,7 @@ interface Props {
     salesCommission: number;
     classCommission: number;
     absentDeduction: number;
+    rewardsTotal?: number;   // ⭐ 新增
     total: number;
   };
   fixedCost: number;
@@ -30,6 +31,9 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
   fixedCost,
   fixedCostDetail,
 }) => {
+  const rewardsTotal = payrollSummary.rewardsTotal ?? 0;
+  const hasRewards = Math.abs(rewardsTotal) > 0;
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
       {/* 收入 */}
@@ -87,6 +91,16 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
           <Row label="底薪合计" value={payrollSummary.baseSalary} />
           <Row label="销提合计" value={payrollSummary.salesCommission} />
           <Row label="课提合计" value={payrollSummary.classCommission} />
+
+          {/* ⭐ 奖金 / 扣款 */}
+          {hasRewards && (
+            <Row
+              label="奖金 / 扣款"
+              value={rewardsTotal}
+              color={rewardsTotal < 0 ? 'text-rose-600' : 'text-amber-600'}
+            />
+          )}
+
           <Row
             label="缺勤扣款"
             value={-payrollSummary.absentDeduction}

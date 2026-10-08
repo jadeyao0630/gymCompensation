@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { savePlan } from '../api/compensation';
 import type {
   CompensationStore,
   MonthlyCompensationPlan,
@@ -83,6 +84,7 @@ export function usePayrollStorage() {
     []
   );
 
+  /* ⭐ 只写内存 + localStorage（不落库），保留兼容 */
   const savePlanToStorage = useCallback(
     (sid: string, month: string, plan: MonthlyCompensationPlan) => {
       setFullStore((prev) => {
@@ -92,13 +94,24 @@ export function usePayrollStorage() {
         };
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-          console.log(
-            '[PayrollStorage] 已写入 plan',
-            { sid, month, staffRewardsKeys: Object.keys(plan.staffRewards || {}) }
-          );
         } catch (e) { console.error('[PayrollStorage] 写 fullStore 失败', e); }
         return next;
       });
+    },
+    []
+  );
+
+  /* ⭐ 新增：写内存 + 落库（MySQL），不写 localStorage */
+  const persistPlanToServer = useCallback(
+    async (sid: string, month: string, plan: MonthlyCompensationPlan) => {
+      /* 1) 更新内存（让 UI 立即刷新） */
+      setFullStore((prev) => ({
+        ...prev,
+        [sid]: { ...(prev[sid] || {}), [month]: plan },
+      }));
+
+      /* 2) 落库 MySQL */
+      await savePlan(sid, plan);
     },
     []
   );
@@ -115,5 +128,6 @@ export function usePayrollStorage() {
     persistNewbie,
     persistExcluded,
     savePlanToStorage,
+    persistPlanToServer,       // ⭐ 新增
   };
 }

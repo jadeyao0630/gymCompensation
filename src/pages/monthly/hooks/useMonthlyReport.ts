@@ -4,6 +4,7 @@ import { fetchStaffStatus } from '../../../api/payrollStatus';
 import { getCardOrderList, type FinancialFlowItem } from '../../../api/stats';
 import { usePayroll } from '../../../hooks/usePayroll';
 import type { PayrollResult } from '../../../utils/payroll';
+import { loadRewardsCatalog } from '../../../utils/payrollStorage';
 import {
   aggregateOrders,
   getIncomeAmount,
@@ -127,10 +128,22 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
           setFixedCostDetail(EMPTY_COST);
         }
 
-        /* 5) 薪酬计算（含新人 + 排除过滤） */
+        /* ⭐ 5) 薪酬计算（含新人 + 排除 + 奖罚） */
         if (plan) {
           try {
-            const res = await run(month, plan, {}, true, newbieSet);
+            const catalog = loadRewardsCatalog();
+            const res = await run(
+              month,
+              plan,
+              {},
+              true,
+              newbieSet,
+              {
+                rewardsCatalog: catalog,
+                departmentRewards: plan.departmentRewards,
+                tempRewardsByStaff: plan.tempRewards,
+              }
+            );
             const filtered = (res.results || []).filter(
               (r) => !excludedSet.has(r.staffId)
             );
@@ -177,6 +190,7 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
         salesCommission: acc.salesCommission + r.salesCommission,
         classCommission: acc.classCommission + r.classCommission,
         absentDeduction: acc.absentDeduction + r.absentDeduction,
+        rewardsTotal: acc.rewardsTotal + (r.rewardsTotal ?? 0),   // ⭐ 新增
         total: acc.total + r.total,
       }),
       {
@@ -185,6 +199,7 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
         salesCommission: 0,
         classCommission: 0,
         absentDeduction: 0,
+        rewardsTotal: 0,     // ⭐ 新增
         total: 0,
       }
     );

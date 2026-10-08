@@ -54,6 +54,7 @@ const PayrollPage: React.FC = () => {
     persistNewbie,
     persistExcluded,
     savePlanToStorage,
+    persistPlanToServer,
   } = usePayrollStorage();
 
   const [selectedMonth, setSelectedMonth] = useState<string>(searchParams.get('month') || '');
@@ -351,48 +352,47 @@ const PayrollPage: React.FC = () => {
   };
 
   /* ⭐ 保存奖罚 + 全屏遮罩（最少 400ms） */
-  const handleSaveTempRewards = async (
-    staffId: string,
-    next: TempReward[]
-  ) => {
-    if (!currentPlan || !selectedMonth) return;
+   const handleSaveTempRewards = async (staffId: string, next: TempReward[]) => {
+   if (!currentPlan || !selectedMonth) return;
 
-    const sid = String(staffId).trim();
-    const staffName =
-      allResults.find((r) => String(r.staffId).trim() === sid)?.staffName ||
-      staffId;
+   const sid = String(staffId).trim();
+   const staffName =
+     allResults.find((r) => String(r.staffId).trim() === sid)?.staffName ||
+     staffId;
 
-    setSavingTemp({ active: true, staffName });
-    const startedAt = Date.now();
+   setSavingTemp({ active: true, staffName });
+   const startedAt = Date.now();
 
-    try {
-      const merged: Record<string, TempReward[]> = {};
-      Object.keys(currentPlan.tempRewards || {}).forEach((k) => {
-        merged[String(k)] = currentPlan.tempRewards![k];
-      });
-      if (next.length === 0) delete merged[sid];
-      else merged[sid] = next;
+   try {
+     const merged: Record<string, TempReward[]> = {};
+     Object.keys(currentPlan.tempRewards || {}).forEach((k) => {
+       merged[String(k)] = currentPlan.tempRewards![k];
+     });
+     if (next.length === 0) delete merged[sid];
+     else merged[sid] = next;
 
-      const nextPlan: MonthlyCompensationPlan = {
-        ...currentPlan,
-        tempRewards: merged,
-      };
+     const nextPlan: MonthlyCompensationPlan = {
+       ...currentPlan,
+       tempRewards: merged,
+     };
 
-      savePlanToStorage(storeId, selectedMonth, nextPlan);
-      await runAndUpdate(nextPlan);
-    } catch (e) {
-      console.error('[handleSaveTempRewards] 重算失败', e);
-    } finally {
-      /* ⭐ 保证最少展示 400ms，避免一闪而过 */
-      const elapsed = Date.now() - startedAt;
-      const remain = Math.max(0, 400 - elapsed);
-      if (remain > 0) {
-        setTimeout(() => setSavingTemp({ active: false }), remain);
-      } else {
-        setSavingTemp({ active: false });
-      }
-    }
-  };
+-    savePlanToStorage(storeId, selectedMonth, nextPlan);
++    /* ⭐ 落库 MySQL（写内存 + POST /api/compensation/plan） */
++    await persistPlanToServer(storeId, selectedMonth, nextPlan);
+
+     await runAndUpdate(nextPlan);
+   } catch (e) {
+     console.error('[handleSaveTempRewards] 重算失败', e);
+   } finally {
+     const elapsed = Date.now() - startedAt;
+     const remain = Math.max(0, 400 - elapsed);
+     if (remain > 0) {
+       setTimeout(() => setSavingTemp({ active: false }), remain);
+     } else {
+       setSavingTemp({ active: false });
+     }
+   }
+ };
 
   const handleExportTable = () => {
     if (allResults.length === 0) {

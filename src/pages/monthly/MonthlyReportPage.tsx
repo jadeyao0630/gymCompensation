@@ -96,9 +96,9 @@ const MonthlyReportPage: React.FC = () => {
               value={selectedMonth}
               onChange={setSelectedMonth}
               disabled={loading}
-              allowAnyMonth                    // ⭐ 所有月份都可选，无灰化
-              showDot={false}        // ⭐ 不显示绿点
-              showHint={false}       // ⭐ 不显示底部提示
+              allowAnyMonth
+              showDot={false}
+              showHint={false}
               minYear={new Date().getFullYear() - 10}
               maxYear={new Date().getFullYear() + 1}
             />
@@ -139,6 +139,7 @@ const MonthlyReportPage: React.FC = () => {
               marketing={marketingSummary}
               payrollTotal={payrollSummary.total}
               payrollHeadcount={payrollSummary.headcount}
+              payrollRewardsTotal={payrollSummary.rewardsTotal ?? 0}   /* ⭐ 新增 */
               fixedCost={fixedCost}
               profit={profit}
               isProfit={isProfit}
