@@ -177,7 +177,6 @@ const CompensationPlanPage: React.FC = () => {
     isInitialSelectDoneRef.current = true;
     fetchedKeyRef.current = '';
     setSelectedMonth(m);
-    navigate(`/compensation?month=${m}`, { replace: true });
   };
 
   const handleToggleDisabled = (title: string, disabled: boolean) => {
@@ -289,7 +288,6 @@ const CompensationPlanPage: React.FC = () => {
       persistPlan(month, blank);
       setSelectedMonth(month);
       fetchedKeyRef.current = '';
-      navigate(`/compensation?month=${month}`, { replace: true });
       return;
     }
 
@@ -332,7 +330,6 @@ const CompensationPlanPage: React.FC = () => {
 
       setSelectedMonth(month);
       fetchedKeyRef.current = '';
-      navigate(`/compensation?month=${month}`, { replace: true });
     } catch (e: any) {
       console.error('[handleAddMonth] 复制失败', e);
 
@@ -390,11 +387,6 @@ const CompensationPlanPage: React.FC = () => {
 
     fetchedKeyRef.current = '';
     setSelectedMonth(nextMonth);
-    if (nextMonth) {
-      navigate(`/compensation?month=${nextMonth}`, { replace: true });
-    } else {
-      navigate(`/compensation`, { replace: true });
-    }
   };
 
   const updatePlan = (

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+/**
+ * 页面级月份持久化（完全不依赖 URL，纯 localStorage）
+ * key = `gym_${pageKey}_month_v1_${storeId}`
+ * 每个页面 + 每个门店各自独立，互不覆盖。
+ */
 export function usePersistedMonth(
   pageKey: string,
   storeId: string,
@@ -13,6 +18,7 @@ export function usePersistedMonth(
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   }, [defaultMonth]);
 
+  /** 初始值：只读本页面 + 本门店的 localStorage */
   const [month, setMonthState] = useState<string>(() => {
     try {
       const saved = localStorage.getItem(storageKey);
@@ -21,6 +27,7 @@ export function usePersistedMonth(
     return getDefault();
   });
 
+  /** month 变化 → 写 localStorage */
   useEffect(() => {
     if (!month) return;
     try {
@@ -30,6 +37,7 @@ export function usePersistedMonth(
     }
   }, [month, storageKey]);
 
+  /** 门店切换 → 从该门店该页面的 localStorage 重新读取（不读 URL） */
   const prevStoreRef = useRef(storeId);
   useEffect(() => {
     if (prevStoreRef.current === storeId) return;

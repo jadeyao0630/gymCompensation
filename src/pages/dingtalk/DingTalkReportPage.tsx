@@ -30,7 +30,6 @@ const DingTalkReportPage: React.FC = () => {
   const { month: selectedMonth, setMonth: setSelectedMonth } =
     usePersistedMonth('dingtalk', storeId);
 
-  /* 由 selectedMonth 派生 start/end；用户手动改日期时不写回月份，只作临时查询 */
   const defaults = useMemo(() => getDefaultMonth(), []);
 
   const [start, setStart] = useState(defaults.start);
@@ -47,7 +46,7 @@ const DingTalkReportPage: React.FC = () => {
     setEnd(last);
   }, [selectedMonth]);
 
-  /* ⭐ 用户手动改日期时，反向推导月份写回持久化（可选） */
+  /* 用户手动改日期：只作临时查询，同时把月份写回持久化 */
   const handleStartChange = (v: string) => {
     setStart(v);
     if (v && /^\d{4}-\d{2}/.test(v)) setSelectedMonth(v.slice(0, 7));
@@ -83,18 +82,22 @@ const DingTalkReportPage: React.FC = () => {
   } = useDingTalkReport();
 
   const storeCharts = useMemo(
-    () =>
-      groupedByStore.map((s) => ({
+  () =>
+    groupedByStore
+      .map((s) => ({
         storeName: s.storeName,
         totalCount: s.count,
         totalAmount: s.total,
-        slices: s.types.map((t, i) => ({
-          label: t.typeName,
-          value: t.total,
-          count: t.count,
-          color: getPieColor(i),
-        })),
-      })),
+        slices: s.types
+          .filter((t) => (t.total || 0) > 0)          // ⭐ 过滤金额为 0 的类型
+          .map((t, i) => ({
+            label: t.typeName,
+            value: t.total,
+            count: t.count,
+            color: getPieColor(i),
+          })),
+      }))
+      .filter((c) => c.slices.length > 0),            // ⭐ 过滤没可画数据的门店
     [groupedByStore]
   );
 

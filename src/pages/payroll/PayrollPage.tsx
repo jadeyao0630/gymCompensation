@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Calculator, Loader2 } from 'lucide-react';
 import type {
   MonthlyCompensationPlan,
@@ -42,7 +42,6 @@ type ViewMode = 'all' | 'department';
 
 const PayrollPage: React.FC = () => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { storeId } = useStore();
   const { hasPermission } = useAuth();
   const { data: appData, update: updateAppData } = useAppData();
@@ -216,24 +215,15 @@ const PayrollPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId, selectedMonth]);
 
+  /* ⭐ 首次进入：若无持久化月份，回退到最近可用月份（不读 URL） */
   useEffect(() => {
     if (initializedRef.current) return;
     initializedRef.current = true;
-    const urlMonth = searchParams.get('month');
-    if (urlMonth) { setSelectedMonth(urlMonth); return; }
+    if (selectedMonth) return;
     const months = Object.keys(fullStore[storeId] || {}).sort();
-    if (months.length > 0) { setSelectedMonth(months[months.length - 1]); return; }
+    if (months.length > 0) setSelectedMonth(months[months.length - 1]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId]);
-
-  useEffect(() => {
-    const m = searchParams.get('month');
-    if (m && m !== selectedMonth) {
-      setSelectedMonth(m);
-      fetchedKeyRef.current = '';
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
 
   useEffect(() => { fetchedKeyRef.current = ''; }, [storeId]);
 
@@ -468,7 +458,6 @@ const PayrollPage: React.FC = () => {
             onMonthChange={(m) => {
               setSelectedMonth(m);
               fetchedKeyRef.current = '';
-              navigate(`/payroll?month=${m}`, { replace: true });
             }}
             onViewModeChange={setViewMode}
             onHideExcludedChange={setHideExcluded}

@@ -35,13 +35,34 @@ export function getPieColor(index: number): string {
   return DEFAULT_COLORS[index % DEFAULT_COLORS.length];
 }
 
+/**
+ * 画扇形路径
+ * ⭐ 处理 ratio 接近 1（单块 100%）的情况：
+ *    起点终点重合会导致 A 命令被浏览器忽略，整块消失。
+ *    这里用两段半圆弧拼接成一个整圆。
+ */
 function describeArc(
   cx: number,
   cy: number,
   r: number,
   startAngle: number,
-  endAngle: number
+  endAngle: number,
+  ratio: number
 ): string {
+  // ⭐ 单块 100%：用两段弧画整圆（从 12 点开始，顺时针一圈）
+  if (ratio >= 0.9999) {
+    const topX = cx;
+    const topY = cy - r;
+    const bottomX = cx;
+    const bottomY = cy + r;
+    return [
+      `M ${topX} ${topY}`,
+      `A ${r} ${r} 0 1 1 ${bottomX} ${bottomY}`,
+      `A ${r} ${r} 0 1 1 ${topX} ${topY}`,
+      'Z',
+    ].join(' ');
+  }
+
   const startRad = ((startAngle - 90) * Math.PI) / 180;
   const endRad = ((endAngle - 90) * Math.PI) / 180;
   const x1 = cx + r * Math.cos(startRad);
@@ -129,7 +150,7 @@ const TypePieChart: React.FC<Props> = ({
             return (
               <path
                 key={s.label}
-                d={describeArc(cx, cy, r, s.startAngle, s.endAngle)}
+                d={describeArc(cx, cy, r, s.startAngle, s.endAngle, s.ratio)}
                 fill={s.color}
                 opacity={isDimmed ? 0.35 : 1}
                 stroke="#fff"

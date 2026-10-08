@@ -24,7 +24,10 @@ export function useMarketingData() {
   const [endDate, setEndDate] = useState(initialRange.end);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+
+  /* ⭐ hasLoadedOnce 按门店隔离：切到没拉过的门店时回到「未获取」 */
+  const [loadedStores, setLoadedStores] = useState<Record<string, boolean>>({});
+  const hasLoadedOnce = !!loadedStores[storeId];
 
   /* ⭐ 从全局 store 取数据（页面切换不丢） */
   const list = appData.marketingListByStore[storeId] || [];
@@ -59,7 +62,7 @@ export function useMarketingData() {
     [updateAppData, storeId]
   );
 
-  /** ⭐ 竞态保护：只接受最后一次请求的结果 */
+  /* ⭐ 竞态保护：只接受最后一次请求的结果 */
   const reqIdRef = useRef(0);
 
   const fetchData = useCallback(
@@ -102,7 +105,7 @@ export function useMarketingData() {
 
         setList(orderRes.list || []);
         setFrontMoneyList(frontMoneyRes.list || []);
-        setHasLoadedOnce(true);
+        setLoadedStores((prev) => ({ ...prev, [storeId]: true }));
       } catch (e: any) {
         if (reqId !== reqIdRef.current) return;
         console.error('[MarketingReport] 加载失败', e);
@@ -116,10 +119,14 @@ export function useMarketingData() {
     [storeId, setList, setFrontMoneyList]
   );
 
-  /* 门店切换：自动拉一次 */
+  /* ⭐ 门店切换：只重置状态，不自动拉数据 */
   useEffect(() => {
-    setHasLoadedOnce(false);
-    fetchData(beginDate, endDate);
+    setError('');
+    setLoading(false);
+    // 不改 beginDate/endDate（保留上次范围），也不 fetch
+    // 如需切门店时重置为本月范围，可放开下面两行：
+    // setBeginDate(initialRange.begin);
+    // setEndDate(initialRange.end);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId]);
 

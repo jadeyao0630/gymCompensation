@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { useNavigate, Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { Undo2 } from 'lucide-react';
 import type {
   CompensationStore,
@@ -21,7 +21,6 @@ import { useSimulation } from '../../hooks/useSimulation';
 import { usePersistedMonth } from '../../hooks/usePersistedMonth';
 
 const SimulationPage: React.FC = () => {
-  const navigate = useNavigate();
   const { storeId } = useStore();
   const { hasPermission } = useAuth();
 
@@ -82,7 +81,6 @@ const SimulationPage: React.FC = () => {
 
   const handleMonthChange = (m: string) => {
     setSelectedMonth(m);
-    navigate(`/simulation?month=${m}`, { replace: true });
   };
 
   return (
