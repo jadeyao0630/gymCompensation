@@ -27,7 +27,6 @@ import DingTalkFilterBar from './components/DingTalkFilterBar';
 import GroupedResults from './components/GroupedResults';
 import TypePieChart, { getPieColor } from './components/TypePieChart';
 
-/* ⭐ 判断收款账户是否被排除 */
 function isPayeeExcluded(
   payeeAccount: string | null | undefined,
   excludeAccounts: string[],
@@ -40,21 +39,10 @@ function isPayeeExcluded(
   return false;
 }
 
-/* ============================================================
- * ⭐ 收款账户 → 类别覆盖规则
- *    命中后，该记录的分组类别改为对应的值（不再按 templateName）
- * ============================================================ */
-const PAYEE_CATEGORY_OVERRIDES: Array<{
-  payee: string;         // 精确匹配
-  category: string;      // 覆盖后的类别名
-}> = [
+const PAYEE_CATEGORY_OVERRIDES: Array<{ payee: string; category: string }> = [
   { payee: '山东云优人力资源服务有限公司', category: '薪酬佣金' },
 ];
 
-/**
- * ⭐ 根据收款账户获取「类别覆盖」
- * 返回 null 表示不覆盖，仍用 templateName
- */
 function resolveCategoryOverride(
   payeeAccount: string | null | undefined
 ): string | null {
@@ -72,7 +60,6 @@ const DingTalkReportPage: React.FC = () => {
 
   const canView = hasPermission('report:dingtalk:view', storeId);
 
-  /* 月份持久化 */
   const { month: selectedMonth, setMonth: setSelectedMonth } =
     usePersistedMonth('dingtalk', storeId);
 
@@ -80,7 +67,6 @@ const DingTalkReportPage: React.FC = () => {
   const [start, setStart] = useState(defaults.start);
   const [end, setEnd] = useState(defaults.end);
 
-  /* ⭐ 筛选条件持久化（含收款账户排除规则） */
   const {
     paymentUnits,
     templateTypes,
@@ -173,9 +159,6 @@ const DingTalkReportPage: React.FC = () => {
     setTemplateTypesInHook(names);
   };
 
-  /* ============================================================
-   * ⭐ 前端过滤：收款账户排除
-   * ============================================================ */
   const excludedPayeeIds = useMemo(() => {
     const set = new Set<string>();
     if (excludeAccounts.length === 0 && excludeKeywords.length === 0) return set;
@@ -195,9 +178,6 @@ const DingTalkReportPage: React.FC = () => {
     );
   }, [results, excludedPayeeIds]);
 
-  /* ============================================================
-   * ⭐ 类别覆盖：给每条记录算出最终用于分组的 category
-   * ============================================================ */
   const categorizedResults = useMemo(() => {
     return filteredResults.map((r) => {
       const payee = r.payeeAccount || extractPayeeAccount(r.formValues || {});
@@ -210,10 +190,6 @@ const DingTalkReportPage: React.FC = () => {
     });
   }, [filteredResults]);
 
-  /* ============================================================
-   * ⭐ 分组：如果排除规则 & 类别覆盖都没生效，直接用 hook 的 grouped；
-   *    否则用 categorizedResults 重算
-   * ============================================================ */
   const finalGrouped = useMemo(() => {
     const needRebuild =
       excludedPayeeIds.size > 0 ||
@@ -291,7 +267,6 @@ const DingTalkReportPage: React.FC = () => {
       .filter((g) => g.units.length > 0);
   }, [grouped, categorizedResults, excludedPayeeIds]);
 
-  /* ⭐ 门店饼图数据 */
   const storeCharts = useMemo(() => {
     const needRebuild =
       excludedPayeeIds.size > 0 ||
@@ -365,10 +340,33 @@ const DingTalkReportPage: React.FC = () => {
       .filter((c) => c.slices.length > 0);
   }, [groupedByStore, finalGrouped, excludedPayeeIds, categorizedResults]);
 
+  /* ⭐ 只查缓存 */
   const onSearch = () => {
     setSelectedType(null);
     setSelectedStore(null);
-    handleSearch({ start, end, templateTypes, paymentUnits, onlyApproved });
+    handleSearch({
+      start,
+      end,
+      templateTypes,
+      paymentUnits,
+      onlyApproved,
+      sync: 0,
+    });
+  };
+
+  /* ⭐ 同步并查询 */
+  const onSyncAndSearch = () => {
+    if (!confirm('将从钉钉同步未完成的流程，可能耗时较长。是否继续？')) return;
+    setSelectedType(null);
+    setSelectedStore(null);
+    handleSearch({
+      start,
+      end,
+      templateTypes,
+      paymentUnits,
+      onlyApproved,
+      sync: 1,
+    });
   };
 
   const filteredGrouped = useMemo(() => {
@@ -397,14 +395,11 @@ const DingTalkReportPage: React.FC = () => {
     let exportResults = categorizedResults;
     if (selectedStore) {
       exportResults = exportResults.filter(
-        (c) =>
-          getStoreFromPaymentUnit(c.item.paymentUnit) === selectedStore
+        (c) => getStoreFromPaymentUnit(c.item.paymentUnit) === selectedStore
       );
     }
     if (selectedType) {
-      exportResults = exportResults.filter(
-        (c) => c.category === selectedType
-      );
+      exportResults = exportResults.filter((c) => c.category === selectedType);
     }
 
     if (exportResults.length === 0) {
@@ -467,6 +462,7 @@ const DingTalkReportPage: React.FC = () => {
           loading={loading}
           hasResults={filteredResults.length > 0}
           onSearch={onSearch}
+          onSyncAndSearch={onSyncAndSearch}
           onExport={handleExport}
         />
 
@@ -493,6 +489,7 @@ const DingTalkReportPage: React.FC = () => {
           onSetTemplateTypes={handleSetTemplateTypes}
           onRefreshTemplates={refreshTemplates}
           onSearch={onSearch}
+          onSyncAndSearch={onSyncAndSearch}
           onToggleColumn={toggleColumn}
           onResetColumns={resetColumns}
           excludeAccounts={excludeAccounts}
@@ -510,23 +507,13 @@ const DingTalkReportPage: React.FC = () => {
             <span className="font-medium">
               已按排除规则过滤 {excludedPayeeIds.size} 条收款账户记录
             </span>
-            {excludeAccounts.length > 0 && (
-              <span className="text-rose-600">
-                账户：{excludeAccounts.join('、')}
-              </span>
-            )}
-            {excludeKeywords.length > 0 && (
-              <span className="text-rose-600">
-                关键字：{excludeKeywords.join('、')}
-              </span>
-            )}
           </div>
         )}
 
         {loading && (
           <div className="flex items-center justify-center py-12 text-gray-400">
             <Loader2 className="w-5 h-5 animate-spin mr-2" />
-            正在从钉钉拉取数据…
+            正在加载数据…
           </div>
         )}
 
@@ -550,7 +537,7 @@ const DingTalkReportPage: React.FC = () => {
             <p className="text-sm text-gray-400">
               {results.length > 0
                 ? '调整或清空排除规则后再看'
-                : '全量拉取一次，之后所有筛选都是本地瞬时生效'}
+                : '「查询」读缓存；「同步并查询」才会从钉钉拉取未完成流程'}
             </p>
           </div>
         )}
@@ -582,34 +569,21 @@ const DingTalkReportPage: React.FC = () => {
                           </span>
                         </span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        {isStoreSelected && (
-                          <button
-                            onClick={() => {
-                              setSelectedStore(null);
-                              setSelectedType(null);
-                            }}
-                            className="text-[11px] text-gray-500 hover:text-gray-700 underline"
-                          >
-                            清除门店筛选
-                          </button>
-                        )}
-                        <button
-                          onClick={() =>
-                            isStoreSelected
-                              ? (setSelectedStore(null), setSelectedType(null))
-                              : (setSelectedStore(chart.storeName),
-                                setSelectedType(null))
-                          }
-                          className={`text-[11px] px-2 py-1 rounded-lg border transition ${
-                            isStoreSelected
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
-                          }`}
-                        >
-                          {isStoreSelected ? '取消门店筛选' : '仅看该门店'}
-                        </button>
-                      </div>
+                      <button
+                        onClick={() =>
+                          isStoreSelected
+                            ? (setSelectedStore(null), setSelectedType(null))
+                            : (setSelectedStore(chart.storeName),
+                              setSelectedType(null))
+                        }
+                        className={`text-[11px] px-2 py-1 rounded-lg border transition ${
+                          isStoreSelected
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        {isStoreSelected ? '取消门店筛选' : '仅看该门店'}
+                      </button>
                     </div>
 
                     <TypePieChart

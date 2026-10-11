@@ -28,6 +28,7 @@ interface Props {
     totalCount: number;
     totalTemplates: number;
     costMs: number;
+    source?: string;
   } | null;
   visibleColumns: Set<ColumnKey>;
   onlyApproved: boolean;
@@ -40,9 +41,9 @@ interface Props {
   onSetTemplateTypes?: (names: string[]) => void;
   onRefreshTemplates: () => void;
   onSearch: () => void;
+  onSyncAndSearch?: () => void;
   onToggleColumn: (key: ColumnKey) => void;
   onResetColumns: () => void;
-
   /* ⭐ 收款账户排除规则 */
   excludeAccounts: string[];
   excludeKeywords: string[];
@@ -60,9 +61,9 @@ export const DingTalkFilterBar: React.FC<Props> = ({
   refreshingTemplates, loading, meta, visibleColumns,
   onlyApproved, onToggleOnlyApproved,
   onStartChange, onEndChange, onTogglePaymentUnit, onSetPaymentUnits,
-  onToggleTemplateType, onSetTemplateTypes, onRefreshTemplates, onSearch,
+  onToggleTemplateType, onSetTemplateTypes, onRefreshTemplates,
+  onSearch, onSyncAndSearch,
   onToggleColumn, onResetColumns,
-  /* ⭐ 排除规则 */
   excludeAccounts, excludeKeywords,
   onAddExcludeAccount, onRemoveExcludeAccount,
   onAddExcludeKeyword, onRemoveExcludeKeyword, onClearExcludeRules,
@@ -77,12 +78,10 @@ export const DingTalkFilterBar: React.FC<Props> = ({
     () => new Set()
   );
 
-  /* ⭐ 排除规则面板的展开状态 + 输入 */
   const [excludeExpanded, setExcludeExpanded] = useState(false);
   const [accountInput, setAccountInput] = useState('');
   const [keywordInput, setKeywordInput] = useState('');
 
-  /* 点击外部关闭 */
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
@@ -198,7 +197,6 @@ export const DingTalkFilterBar: React.FC<Props> = ({
     onEndChange(e);
   };
 
-  /* ⭐ 排除规则的操作 */
   const handleAddAccount = () => {
     if (!accountInput.trim()) return;
     onAddExcludeAccount(accountInput.trim());
@@ -214,9 +212,8 @@ export const DingTalkFilterBar: React.FC<Props> = ({
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">
-      {/* 三列：日期范围 / 付款单位 / 流程类型 */}
+      {/* 三列 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {/* 日期范围 */}
         <div>
           <DateRangePicker
             start={start}
@@ -227,7 +224,6 @@ export const DingTalkFilterBar: React.FC<Props> = ({
           />
         </div>
 
-        {/* 付款单位多选 */}
         <div className="relative" ref={pickerRef}>
           <label className="block text-xs font-medium text-gray-600 mb-1.5">
             付款单位（多选）
@@ -323,7 +319,6 @@ export const DingTalkFilterBar: React.FC<Props> = ({
           )}
         </div>
 
-        {/* 流程类型 */}
         <div className="relative" ref={typePickerRef}>
           <label className="block text-xs font-medium text-gray-600 mb-1.5">
             流程类型（不选=全部）
@@ -499,7 +494,7 @@ export const DingTalkFilterBar: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* ⭐ 收款账户排除规则 */}
+      {/* 收款账户排除规则 */}
       <div className="border-t border-gray-100 pt-3 mt-4">
         <button
           type="button"
@@ -522,7 +517,6 @@ export const DingTalkFilterBar: React.FC<Props> = ({
 
         {excludeExpanded && (
           <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* 精确账户 */}
             <div>
               <div className="text-[11px] text-gray-500 mb-1.5">
                 排除指定账户（完全匹配）
@@ -571,7 +565,6 @@ export const DingTalkFilterBar: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* 关键字 */}
             <div>
               <div className="text-[11px] text-gray-500 mb-1.5">
                 排除关键字（包含匹配）
@@ -620,7 +613,6 @@ export const DingTalkFilterBar: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* 清空按钮 */}
             <div className="lg:col-span-2 flex justify-end">
               <button
                 type="button"
@@ -649,6 +641,17 @@ export const DingTalkFilterBar: React.FC<Props> = ({
             <><Search className="w-4 h-4" /> 查询</>
           )}
         </button>
+
+        {onSyncAndSearch && (
+          <button
+            onClick={onSyncAndSearch}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-semibold shadow-md transition disabled:opacity-50"
+          >
+            <RefreshCw className="w-4 h-4" />
+            同步并查询
+          </button>
+        )}
 
         <button
           type="button"
@@ -683,6 +686,12 @@ export const DingTalkFilterBar: React.FC<Props> = ({
             命中 <span className="font-semibold text-blue-700">{meta.totalCount}</span> 条
             · 扫描 <span className="font-semibold">{meta.totalTemplates}</span> 个模板
             · 耗时 {(meta.costMs / 1000).toFixed(1)}s
+            {meta.source === 'cache' && (
+              <span className="ml-2 text-[10px] text-gray-400">（缓存）</span>
+            )}
+            {meta.source === 'dingtalk+sync' && (
+              <span className="ml-2 text-[10px] text-emerald-600">（已同步）</span>
+            )}
           </div>
         )}
       </div>

@@ -40,6 +40,10 @@ export interface DingTalkReportItem {
   originatorName?: string;
   pendingApprovers?: DingTalkPendingApprover[];
   error?: string;
+  /* ⭐ 门店归属标记 */
+  _autoAssigned?: boolean;
+  _storeName?: string | null;
+  _assignReason?: string;
 }
 
 export interface DingTalkReportResponse {
@@ -48,6 +52,8 @@ export interface DingTalkReportResponse {
   data: {
     startTime: number;
     endTime: number;
+    /** ⭐ 'cache' | 'dingtalk+sync' */
+    source?: string;
     filter: {
       type: string | null;
       company: string | null;
@@ -57,6 +63,8 @@ export interface DingTalkReportResponse {
     totalTemplates: number;
     beforeFilterCount: number;
     totalCount: number;
+    /** ⭐ 门店自动归属条数 */
+    autoAssignedCount?: number;
     costMs: number;
     results: DingTalkReportItem[];
   };
@@ -78,6 +86,8 @@ export interface FetchReportParams {
   type?: string;
   company?: string;
   onlyApproved?: boolean;
+  /** ⭐ 0=只读缓存 1=同步并查询 */
+  sync?: 0 | 1;
 }
 
 export async function fetchDingTalkReport(
@@ -92,6 +102,7 @@ export async function fetchDingTalkReport(
         type: params.type || undefined,
         company: params.company || undefined,
         onlyApproved: params.onlyApproved === false ? '0' : undefined,
+        sync: params.sync != null ? String(params.sync) : undefined,
       },
     }
   );

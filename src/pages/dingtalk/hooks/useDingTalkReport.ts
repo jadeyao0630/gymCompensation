@@ -13,12 +13,15 @@ interface SearchParams {
   templateTypes: string[];
   paymentUnits: string[];
   onlyApproved: boolean;
+  /** ⭐ 0=只读缓存 1=同步并查询 */
+  sync?: 0 | 1;
 }
 
 export interface ReportMeta {
   totalCount: number;
   totalTemplates: number;
   costMs: number;
+  source?: string; // ⭐ 'cache' | 'dingtalk+sync'
 }
 
 export interface TypeSummary {
@@ -76,7 +79,6 @@ function inferRefundPaymentUnit(item: DingTalkReportItem): string | null {
  * ⭐ 前端过滤逻辑
  * ============================================================ */
 
-/** 状态过滤 */
 function filterByStatus(
   list: DingTalkReportItem[],
   onlyApproved: boolean
@@ -98,11 +100,9 @@ function filterByStatus(
   if (onlyApproved) {
     return list.filter((d) => isCompleted(d.status) && isAgreed(d.result));
   }
-  /* 全部状态：排除拒绝 / 取消 */
   return list.filter((d) => !isRefused(d.result) && !isCanceled(d.status));
 }
 
-/** 付款单位过滤 */
 function filterByPaymentUnits(
   list: DingTalkReportItem[],
   paymentUnits: string[]
@@ -114,7 +114,6 @@ function filterByPaymentUnits(
   });
 }
 
-/** 流程类型过滤 */
 function filterByTemplateTypes(
   list: DingTalkReportItem[],
   templateTypes: string[]
@@ -129,13 +128,13 @@ export function useDingTalkReport() {
   const [error, setError] = useState('');
   const [meta, setMeta] = useState<ReportMeta | null>(null);
 
-  /* ⭐ 三个筛选开关（全部由页面控制，切换时无需重新请求） */
   const [onlyApproved, setOnlyApproved] = useState(false);
   const [paymentUnits, setPaymentUnits] = useState<string[]>([]);
   const [templateTypes, setTemplateTypes] = useState<string[]>([]);
 
-  const handleSearch = async (params: SearchParams) => {
-    const { start, end } = params;
+  const handleSearch = useCallback(async (params: SearchParams) => {
+    const { start, end, sync } = params;
+    const needSync = sync === 1;
 
     if (!start || !end) {
       alert('请选择时间范围');
@@ -145,12 +144,16 @@ export function useDingTalkReport() {
       alert('开始日期不能晚于结束日期');
       return;
     }
-    if (
-      !confirm(
-        '将拉取全部流程（含所有类型、所有付款单位），数据量可能较大，继续？'
-      )
-    ) {
-      return;
+
+    /* ⭐ 只有「同步并查询」才弹确认 */
+    if (needSync) {
+      if (
+        !confirm(
+          '将从钉钉同步未完成的流程（含审批中），可能耗时较长。继续？'
+        )
+      ) {
+        return;
+      }
     }
 
     /* ⭐ 同步筛选条件到 hook 内部 state */
@@ -164,8 +167,12 @@ export function useDingTalkReport() {
     setMeta(null);
 
     try {
-      /* ⭐ 永远只传 start / end，不传 type / company —— 后端返回全量 */
-      const data = await fetchDingTalkReport({ start, end });
+      /* ⭐ 永远只传 start / end / sync —— 后端返回全量 */
+      const data = await fetchDingTalkReport({
+        start,
+        end,
+        sync: needSync ? 1 : 0,
+      });
       let allResults: DingTalkReportItem[] = data.results || [];
 
       /* 会员退费 → 推断付款单位 */
@@ -182,6 +189,7 @@ export function useDingTalkReport() {
         totalCount: allResults.length,
         totalTemplates: data.totalTemplates,
         costMs: data.costMs,
+        source: data.source, // ⭐ 透传 source
       });
     } catch (e: any) {
       console.error('[DingTalk] 查询失败', e);
@@ -189,9 +197,9 @@ export function useDingTalkReport() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  /* ⭐ 三层本地过滤：状态 → 付款单位 → 流程类型 */
+  /* ⭐ 三层本地过滤 */
   const results = useMemo(() => {
     let list = filterByStatus(rawResults, onlyApproved);
     list = filterByPaymentUnits(list, paymentUnits);
@@ -279,7 +287,6 @@ export function useDingTalkReport() {
     return list;
   }, [results]);
 
-  /* ⭐ 暴露 setter 供页面切换（无需重新请求） */
   return {
     results,
     rawResults,

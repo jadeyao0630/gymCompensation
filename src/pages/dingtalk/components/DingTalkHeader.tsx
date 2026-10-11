@@ -7,6 +7,7 @@ interface Props {
   loading?: boolean;
   hasResults?: boolean;
   onSearch: () => void;
+  onSyncAndSearch?: () => void;
   onExport: () => void;
 }
 
@@ -14,6 +15,7 @@ export const DingTalkHeader: React.FC<Props> = ({
   loading,
   hasResults,
   onSearch,
+  onSyncAndSearch,
   onExport,
 }) => (
   <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 shadow-2xl shadow-blue-500/20 p-8 sm:p-10 mb-8 text-white">
@@ -31,14 +33,14 @@ export const DingTalkHeader: React.FC<Props> = ({
             钉钉流程报告
           </h1>
           <p className="text-sm text-blue-100/90 mt-3 max-w-md leading-relaxed">
-            按流程类型、付款单位（门店）统计已审批通过的流程明细
+            按流程类型、付款单位（门店）统计流程明细；「刷新」读缓存，「同步并查询」从钉钉拉取未完成流程
           </p>
         </div>
 
         <div className="flex flex-col items-end gap-2">
           <UserMenu variant="dark" />
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={onSearch}
               disabled={loading}
@@ -50,6 +52,18 @@ export const DingTalkHeader: React.FC<Props> = ({
                 <><RefreshCw className="w-4 h-4" /> 刷新</>
               )}
             </button>
+
+            {onSyncAndSearch && (
+              <button
+                onClick={onSyncAndSearch}
+                disabled={loading}
+                className="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-white rounded-2xl px-5 py-2.5 shadow-lg transition disabled:opacity-50 font-semibold text-sm"
+                title="从钉钉拉取未完成的流程并写库后再查询，可能耗时较长"
+              >
+                <RefreshCw className="w-4 h-4" />
+                同步并查询
+              </button>
+            )}
 
             <button
               onClick={onExport}
