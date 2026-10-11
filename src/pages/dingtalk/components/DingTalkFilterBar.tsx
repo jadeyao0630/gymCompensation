@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Loader2, Search, ChevronDown, Store, X, RefreshCw, ChevronRight, Layers, Filter,
+  CheckCircle2, Circle,
 } from 'lucide-react';
 import {
   PAYMENT_UNITS,
@@ -29,6 +30,9 @@ interface Props {
     costMs: number;
   } | null;
   visibleColumns: Set<ColumnKey>;
+  /* ⭐ 新增：只看已通过开关 */
+  onlyApproved: boolean;
+  onToggleOnlyApproved: () => void;
   onStartChange: (v: string) => void;
   onEndChange: (v: string) => void;
   onTogglePaymentUnit: (u: string) => void;
@@ -46,6 +50,7 @@ const STORE_ORDER = ['哈德门', '富贵园'];
 export const DingTalkFilterBar: React.FC<Props> = ({
   start, end, paymentUnits, templateTypes, templates, loadingTemplates,
   refreshingTemplates, loading, meta, visibleColumns,
+  onlyApproved, onToggleOnlyApproved,
   onStartChange, onEndChange, onTogglePaymentUnit, onSetPaymentUnits,
   onToggleTemplateType, onSetTemplateTypes, onRefreshTemplates, onSearch,
   onToggleColumn, onResetColumns,
@@ -179,7 +184,7 @@ export const DingTalkFilterBar: React.FC<Props> = ({
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">
-      {/* ⭐ 三列：日期范围 / 付款单位 / 流程类型 */}
+      {/* 三列：日期范围 / 付款单位 / 流程类型 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* 日期范围 */}
         <div>
@@ -464,6 +469,7 @@ export const DingTalkFilterBar: React.FC<Props> = ({
         </div>
       </div>
 
+      {/* ⭐ 底部操作行：查询按钮 + 只看已通过开关 + 列选择 + meta */}
       <div className="mt-4 flex items-center gap-2 flex-wrap">
         <button
           onClick={onSearch}
@@ -475,6 +481,29 @@ export const DingTalkFilterBar: React.FC<Props> = ({
           ) : (
             <><Search className="w-4 h-4" /> 查询</>
           )}
+        </button>
+
+        {/* ⭐ 只看已通过 开关 */}
+        <button
+          type="button"
+          onClick={onToggleOnlyApproved}
+          title={
+            onlyApproved
+              ? '当前只查询【已完成且同意】的流程，点击切换为查询全部状态'
+              : '当前查询【全部状态】的流程（含审批中、已撤销等），点击切换为只查询已通过'
+          }
+          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border transition ${
+            onlyApproved
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+              : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+          }`}
+        >
+          {onlyApproved ? (
+            <CheckCircle2 className="w-3.5 h-3.5" />
+          ) : (
+            <Circle className="w-3.5 h-3.5" />
+          )}
+          {onlyApproved ? '只看已通过' : '全部状态'}
         </button>
 
         <ColumnPicker

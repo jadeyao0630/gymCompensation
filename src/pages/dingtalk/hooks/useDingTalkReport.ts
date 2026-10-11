@@ -11,6 +11,8 @@ interface SearchParams {
   end: string;
   templateTypes: string[];
   paymentUnits: string[];
+  /** ⭐ 只看已通过 */
+  onlyApproved: boolean;
 }
 
 export interface ReportMeta {
@@ -34,19 +36,15 @@ export interface StoreSummary {
 
 /* ============================================================
  * ⭐ 会员退费 → 付款单位推断
- *   - 任何字段含"富贵园" 或 "装修" → 富贵园
- *   - 其他 → 哈德门
  * ============================================================ */
 const MEMBER_REFUND_TPL = '会员退费';
-const FU_GUI_YUAN_UNIT = '北京林朗韵动体育管理有限公司';   // 富贵园
-const HA_DE_MEN_UNIT = '北京林朗悦动体育管理有限公司';       // 哈德门
+const FU_GUI_YUAN_UNIT = '北京林朗韵动体育管理有限公司';
+const HA_DE_MEN_UNIT = '北京林朗悦动体育管理有限公司';
 const REFUND_KEYWORDS = ['富贵园', '装修'];
 
-/* ⭐ 收集一条数据里所有可能的文本 */
 function collectAllText(item: DingTalkReportItem): string {
   const parts: string[] = [];
 
-  /* 1) formValues 里所有字段的值（不管字段名是什么） */
   const fv = item.formValues || {};
   Object.values(fv).forEach((v) => {
     if (v === null || v === undefined) return;
@@ -62,28 +60,24 @@ function collectAllText(item: DingTalkReportItem): string {
     }
   });
 
-  /* 2) items 数组的 content */
   if (Array.isArray(item.items)) {
     item.items.forEach((it: any) => {
       if (it?.content) parts.push(String(it.content));
     });
   }
 
-  /* 3) 顶层 title */
   if (item.title) parts.push(String(item.title));
 
   return parts.join(' ');
 }
 
 function inferRefundPaymentUnit(item: DingTalkReportItem): string | null {
-  /* 只处理"会员退费"且付款单位为空的情况 */
   if (item.templateName !== MEMBER_REFUND_TPL) return null;
   if (item.paymentUnit && String(item.paymentUnit).trim()) return null;
 
   const combined = collectAllText(item);
-  if (!combined) return HA_DE_MEN_UNIT; // 没文本时默认哈德门
+  if (!combined) return HA_DE_MEN_UNIT;
 
-  /* 判断是否命中富贵园关键词 */
   const hit = REFUND_KEYWORDS.some((k) => combined.includes(k));
   return hit ? FU_GUI_YUAN_UNIT : HA_DE_MEN_UNIT;
 }
@@ -95,7 +89,7 @@ export function useDingTalkReport() {
   const [meta, setMeta] = useState<ReportMeta | null>(null);
 
   const handleSearch = async (params: SearchParams) => {
-    const { start, end, templateTypes, paymentUnits } = params;
+    const { start, end, templateTypes, paymentUnits, onlyApproved } = params;
 
     if (!start || !end) {
       alert('请选择时间范围');
@@ -128,7 +122,7 @@ export function useDingTalkReport() {
           start,
           end,
           type: typeParam,
-          onlyApproved: true,
+          onlyApproved,        /* ⭐ 传开关 */
         });
         allResults = data.results || [];
         totalTemplates = data.totalTemplates;
@@ -140,7 +134,7 @@ export function useDingTalkReport() {
             end,
             type: typeParam,
             company: unit,
-            onlyApproved: true,
+            onlyApproved,      /* ⭐ 传开关 */
           }).catch((e) => {
             console.warn(`[DingTalk] 单位"${unit}"查询失败`, e);
             return null;
@@ -217,7 +211,7 @@ export function useDingTalkReport() {
     }));
   }, [results]);
 
-  /* ⭐ 按 门店 → 类型 分组（用于扇形图） */
+  /* ⭐ 按 门店 → 类型 分组 */
   const groupedByStore = useMemo(() => {
     const storeMap = new Map<
       string,

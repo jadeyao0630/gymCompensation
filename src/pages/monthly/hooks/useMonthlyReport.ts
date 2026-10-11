@@ -35,10 +35,8 @@ const EMPTY_COST: FixedCostDetail = {
 export function useMonthlyReport(storeId: string, selectedMonth: string) {
   const { data: appData, update: updateAppData } = useAppData();
 
-  /* ⭐ key = `${storeId}_${month}`，月份/门店切换自动隔离 */
   const cacheKey = `${storeId}_${selectedMonth}`;
 
-  /* ---------- 局部状态 ---------- */
   const [hasLoaded, setHasLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -71,7 +69,7 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     [updateAppData, cacheKey]
   );
 
-  /* ---------- fixedCostDetail：全局 store（刷新后不丢） ---------- */
+  /* ---------- fixedCostDetail：全局 store ---------- */
   const fixedCostDetail: FixedCostDetail =
     appData.monthlyFixedCostByKey[cacheKey] || EMPTY_COST;
 
@@ -102,22 +100,27 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     busId: storeId,
   });
 
-  /* ---------- 重置（仅局部状态；全局 store 按 key 隔离，不清） ---------- */
   const reset = useCallback(() => {
     setHasLoaded(false);
     setError('');
   }, []);
 
-  /* ---------- 拉取全部数据 ---------- */
+  /* ---------- 拉取全部数据（⭐ 带诊断日志） ---------- */
   const fetchAll = useCallback(
     async (month: string) => {
-      if (!storeId || !month) return;
+      if (!storeId || !month) return null;
       setLoading(true);
       setError('');
       try {
         const { begin, end } = getMonthRange(month);
+        console.log('[MonthlyReport] fetchAll 开始：', {
+          storeId,
+          month,
+          begin,
+          end,
+        });
 
-        /* 1) 员工状态（新人 / 排除） */
+        /* 1) 员工状态 */
         let newbieSet = new Set<string>();
         let excludedSet = new Set<string>();
         try {
@@ -126,33 +129,63 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
             if (s.isNewbie) newbieSet.add(s.staffId);
             if (s.isExcluded) excludedSet.add(s.staffId);
           });
+          console.log('[MonthlyReport] 员工状态拉取成功', statuses.length);
         } catch (e) {
           console.warn('[MonthlyReport] 拉员工状态失败', e);
         }
 
         /* 2) 方案配置 */
         const plan = await fetchPlanByMonth(storeId, month);
+        console.log(
+          '[MonthlyReport] 方案配置：',
+          plan ? `岗位 ${plan.positions?.length || 0} 个` : 'null'
+        );
 
-        /* 3) 营销订单 */
+        /* 3) ⭐ 营销订单 */
+        let orders: FinancialFlowItem[] = [];
+        const orderParams = {
+          bus_id: storeId,
+          sale_id: '',
+          begin_date: begin,
+          end_date: end,
+          page_no: 1,
+          page_size: 2000,
+        };
+        console.log('[MonthlyReport] 拉订单参数 =', orderParams);
         try {
-          const orderRes = await getCardOrderList({
-            bus_id: storeId,
-            sale_id: '',
-            begin_date: begin,
-            end_date: end,
-            page_no: 1,
-            page_size: 2000,
-          });
-          setOrderList(orderRes.list || []);
-        } catch (e) {
+          const orderRes: any = await getCardOrderList(orderParams);
+          console.log('[MonthlyReport] 拉订单原始返回 =', orderRes);
+
+          /* ⭐ 兼容多种返回结构：list / data.list / data */
+          let rawList: any[] = [];
+          if (Array.isArray(orderRes)) rawList = orderRes;
+          else if (Array.isArray(orderRes?.list)) rawList = orderRes.list;
+          else if (Array.isArray(orderRes?.data?.list)) rawList = orderRes.data.list;
+          else if (Array.isArray(orderRes?.data)) rawList = orderRes.data;
+          else if (Array.isArray(orderRes?.result?.list)) rawList = orderRes.result.list;
+
+          console.log('[MonthlyReport] 订单条数 =', rawList.length);
+          if (rawList.length > 0) {
+            console.log('[MonthlyReport] 订单第一条 =', rawList[0]);
+            console.log(
+              '[MonthlyReport] 订单第一条的字段 =',
+              Object.keys(rawList[0])
+            );
+          }
+
+          orders = rawList;
+          setOrderList(orders);
+        } catch (e: any) {
           console.warn('[MonthlyReport] 拉订单失败', e);
+          console.warn('[MonthlyReport] 错误详情 =', e?.response?.data || e?.message);
           setOrderList([]);
         }
 
         /* 4) 固定成本 */
+        let costDetail: FixedCostDetail = EMPTY_COST;
         try {
           const sim = await fetchSimulationSetting(storeId, month);
-          const detail: FixedCostDetail = {
+          costDetail = {
             propertyFee: Number(sim?.propertyFee || 0),
             electricityFee: Number(sim?.electricityFee || 0),
             rent: Number(sim?.rent || 0),
@@ -160,13 +193,15 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
             networkFee: Number(sim?.networkFee || 0),
             otherFee: Number(sim?.otherFee || 0),
           };
-          setFixedCostDetail(detail);
+          setFixedCostDetail(costDetail);
+          console.log('[MonthlyReport] 固定成本 =', costDetail);
         } catch (e) {
           console.warn('[MonthlyReport] 拉测算设置失败', e);
           setFixedCostDetail(EMPTY_COST);
         }
 
-        /* 5) 薪酬计算（含奖罚） */
+        /* 5) 薪酬计算 */
+        let payroll: PayrollResult[] = [];
         if (plan) {
           try {
             const catalog = loadRewardsCatalog();
@@ -182,10 +217,11 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
                 tempRewardsByStaff: plan.tempRewards,
               }
             );
-            const filtered = (res.results || []).filter(
+            payroll = (res.results || []).filter(
               (r) => !excludedSet.has(r.staffId)
             );
-            setPayrollResults(filtered);
+            setPayrollResults(payroll);
+            console.log('[MonthlyReport] 薪酬计算完成，人数 =', payroll.length);
           } catch (e) {
             console.warn('[MonthlyReport] 薪酬计算失败', e);
             setPayrollResults([]);
@@ -195,11 +231,18 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
         }
 
         setHasLoaded(true);
+
+        return {
+          orders,
+          payrollResults: payroll,
+          fixedCostDetail: costDetail,
+        };
       } catch (e: any) {
         console.error('[MonthlyReport] 加载失败', e);
         setError(
           e?.response?.data?.errormsg || e?.message || '加载数据失败'
         );
+        return null;
       } finally {
         setLoading(false);
       }
@@ -207,26 +250,22 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     [storeId, run, setOrderList, setPayrollResults, setFixedCostDetail]
   );
 
-  /* ---------- 门店切换 → 重置局部状态 ---------- */
   useEffect(() => {
     reset();
   }, [storeId, reset]);
 
-  /* ---------- 月份切换 → 重置局部状态（全局 store 按 key 隔离） ---------- */
   useEffect(() => {
     setHasLoaded(false);
     setError('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMonth]);
 
-  /* ⭐ 从全局 store 恢复 hasLoaded（刷新 / 切回已加载月份） */
   useEffect(() => {
     if (!storeId || !selectedMonth) return;
     const key = `${storeId}_${selectedMonth}`;
     const hasPayroll = (appData.monthlyPayrollByKey[key]?.length || 0) > 0;
     const hasOrders = (appData.monthlyOrdersByKey[key]?.length || 0) > 0;
     const hasFixed = !!appData.monthlyFixedCostByKey[key];
-    // 有任一缓存即视为已加载过
     if (hasPayroll || hasOrders || hasFixed) {
       setHasLoaded(true);
     }
@@ -238,7 +277,6 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     appData.monthlyFixedCostByKey,
   ]);
 
-  /* ---------- 汇总计算 ---------- */
   const payrollSummary = useMemo(() => {
     return payrollResults.reduce(
       (acc, r) => ({
@@ -283,21 +321,17 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
   const isProfit = profit >= 0;
 
   return {
-    /* 状态 */
     hasLoaded,
     loading: loading || payrollLoading,
     error,
-    /* 数据 */
     payrollResults,
     orderList,
     fixedCost,
     fixedCostDetail,
-    /* 汇总 */
     payrollSummary,
     marketingSummary,
     profit,
     isProfit,
-    /* 方法 */
     fetchAll,
     reset,
   };

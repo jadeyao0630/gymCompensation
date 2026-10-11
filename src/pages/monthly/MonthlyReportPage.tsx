@@ -1,31 +1,39 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, Sparkles, ChevronDown } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+
 import StoreSwitcher from '../../components/layout/StoreSwitcher';
 import StoreStatusBadge from '../../components/layout/StoreStatusBadge';
 import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useAppData } from '../../contexts/AppDataContext';
 import { getStoreById } from '../../constants/stores';
 
 import { useMonthlyReport } from './hooks/useMonthlyReport';
 import { exportMonthlyReport } from './utils/exportExcel';
+import {
+  buildPayload,
+  generateAiReport,
+} from '../../services/monthlyReportApi';
 
 import { MonthlyHeader } from './components/MonthlyHeader';
 import { MonthlyEmptyState } from './components/MonthlyEmptyState';
 import { MonthlySummaryCards } from './components/MonthlySummaryCards';
 import { MonthlyDetailPanels } from './components/MonthlyDetailPanels';
 import { MonthlyProfitPanel } from './components/MonthlyProfitPanel';
+import { MonthlyCharts } from './components/MonthlyCharts';
 import { MonthPicker } from '../../components/common/MonthPicker';
 import { usePersistedMonth } from '../../hooks/usePersistedMonth';
 
 const MonthlyReportPage: React.FC = () => {
   const { storeId } = useStore();
   const { hasPermission } = useAuth();
+  const { data: appData, update: updateAppData } = useAppData();
 
   const canView = hasPermission('report:monthly:view', storeId);
   const storeName = getStoreById(storeId)?.name || '门店';
 
-  /* ⭐ 页面级月份持久化：key = gym_monthly_month_v1_<storeId> */
   const { month: selectedMonth, changeMonth } = usePersistedMonth(
     'monthly',
     storeId
@@ -46,8 +54,55 @@ const MonthlyReportPage: React.FC = () => {
     fetchAll,
   } = useMonthlyReport(storeId, selectedMonth);
 
+  const aiCacheKey = `${storeId}_${selectedMonth}`;
+  const aiReport = appData.monthlyAiReportByKey[aiCacheKey] || '';
+
+  const setAiReport = (text: string) => {
+    updateAppData('monthlyAiReportByKey', (prev) => ({
+      ...prev,
+      [aiCacheKey]: text,
+    }));
+  };
+
+  const [aiPayload, setAiPayload] = useState<any>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [aiExpanded, setAiExpanded] = useState(false);
+
   const handleMonthChange = changeMonth;
   const handleFetch = () => fetchAll(selectedMonth);
+
+  const handleGenerateAi = async () => {
+    if (!hasLoaded) {
+      alert('请先点击「获取报告」加载业务数据');
+      return;
+    }
+    setAiLoading(true);
+    setAiError('');
+    try {
+      const payload = buildPayload({
+        storeId,
+        storeName,
+        month: selectedMonth,
+        orderList,
+        payrollResults,
+        fixedCostDetail,
+      });
+
+      console.log('[AI payload]', payload);
+
+      setAiPayload(payload);
+
+      const text = await generateAiReport(payload);
+      setAiReport(text);
+      setAiExpanded(true);
+    } catch (e: any) {
+      console.error('[handleGenerateAi]', e);
+      setAiError(e?.message || '生成失败');
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   const handleExport = () => {
     if (!hasLoaded) {
@@ -106,6 +161,24 @@ const MonthlyReportPage: React.FC = () => {
           </div>
 
           <div className="flex-1" />
+
+          <button
+            onClick={handleGenerateAi}
+            disabled={aiLoading || loading}
+            title="基于本月业务数据生成 AI 分析报告"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+          >
+            {aiLoading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> 生成中…
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-3.5 h-3.5" />{' '}
+                {aiReport ? '重新生成' : '生成 AI 报告'}
+              </>
+            )}
+          </button>
         </div>
 
         {!hasLoaded && !loading && !error && (
@@ -132,6 +205,73 @@ const MonthlyReportPage: React.FC = () => {
 
         {!loading && !error && hasLoaded && (
           <>
+            {/* ⭐ AI 报告区：可折叠 + Markdown 渲染 */}
+            {(aiReport || aiLoading || aiError) && (
+              <div className="bg-gradient-to-br from-violet-50 via-white to-indigo-50/60 rounded-2xl border border-violet-100 shadow-sm mb-6">
+                <button
+                  type="button"
+                  onClick={() => setAiExpanded((v) => !v)}
+                  className="w-full px-5 py-3 flex items-center gap-2 hover:bg-violet-50/50 transition text-left rounded-2xl"
+                >
+                  <Sparkles className="w-4 h-4 text-violet-600" />
+                  <h3 className="text-sm font-semibold text-gray-800">
+                    AI 月报分析
+                  </h3>
+                  {aiReport && !aiLoading && (
+                    <span className="text-[11px] text-gray-400 ml-1">
+                      {aiExpanded ? '点击收起' : '点击展开'}
+                    </span>
+                  )}
+                  <div className="flex-1" />
+                  {aiReport && !aiLoading && (
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigator.clipboard
+                          .writeText(aiReport)
+                          .catch(() => {});
+                      }}
+                      className="text-[11px] text-violet-600 hover:text-violet-800 underline"
+                    >
+                      复制
+                    </span>
+                  )}
+                  {aiLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-violet-600" />
+                  ) : (
+                    <ChevronDown
+                      className={`w-4 h-4 text-gray-400 transition-transform ${
+                        aiExpanded ? 'rotate-180' : ''
+                      }`}
+                    />
+                  )}
+                </button>
+
+                {aiExpanded && (
+                  <div className="px-5 pb-5">
+                    {aiLoading && (
+                      <div className="flex items-center gap-2 text-sm text-violet-600 py-6">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        正在生成 AI 分析报告…
+                      </div>
+                    )}
+
+                    {!aiLoading && aiError && (
+                      <div className="text-sm text-red-600 py-2">
+                        {aiError}
+                      </div>
+                    )}
+
+                    {!aiLoading && !aiError && aiReport && (
+                      <div className="prose prose-sm max-w-none prose-headings:text-gray-800 prose-p:text-gray-700 prose-li:text-gray-700 prose-strong:text-gray-900">
+                        <ReactMarkdown>{aiReport}</ReactMarkdown>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             <MonthlySummaryCards
               marketing={marketingSummary}
               payrollTotal={payrollSummary.total}
@@ -155,6 +295,8 @@ const MonthlyReportPage: React.FC = () => {
               profit={profit}
               isProfit={isProfit}
             />
+
+            {aiPayload && <MonthlyCharts payload={aiPayload} />}
           </>
         )}
       </div>

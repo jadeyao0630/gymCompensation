@@ -1,8 +1,5 @@
 import { api } from './client';
 
-/* ============================================================
- * 类型
- * ============================================================ */
 export interface DingTalkTemplate {
   name: string;
   processCode: string;
@@ -10,13 +7,28 @@ export interface DingTalkTemplate {
   url?: string;
 }
 
+export interface DingTalkOperationRecord {
+  userId: string;
+  userName?: string;
+  type: string;
+  result: string;
+  date: number | null;
+  remark: string;
+}
+
+/** ⭐ 当前待办人 */
+export interface DingTalkPendingApprover {
+  userId: string;
+  userName: string;
+}
+
 export interface DingTalkReportItem {
   templateName: string;
   processCode: string;
   processInstanceId: string;
   title: string;
-  status: string;              // RUNNING / COMPLETED / CANCELED / ...
-  result: string;              // agree / refuse
+  status: string;
+  result: string;
   createTime: string;
   finishTime?: string;
   paymentUnit: string | null;
@@ -24,6 +36,9 @@ export interface DingTalkReportItem {
   amount: string | null;
   items: Array<{ rowNumber: string; content: string; amount: string }>;
   formValues: Record<string, any>;
+  operationRecords?: DingTalkOperationRecord[];
+  originatorName?: string;
+  pendingApprovers?: DingTalkPendingApprover[];
   error?: string;
 }
 
@@ -47,17 +62,11 @@ export interface DingTalkReportResponse {
   };
 }
 
-/* ============================================================
- * API
- * ============================================================ */
-
-/** 获取审批模板列表（读本地缓存） */
 export async function fetchDingTalkTemplates(): Promise<DingTalkTemplate[]> {
   const { data } = await api.get('/api/dingtalk/templates');
   return data?.data?.templates || [];
 }
 
-/** ⭐ 手动从钉钉刷新模板列表（点"更新模板"时调） */
 export async function refreshDingTalkTemplates(): Promise<DingTalkTemplate[]> {
   const { data } = await api.post('/api/dingtalk/templates/refresh');
   return data?.data?.templates || [];
@@ -71,7 +80,6 @@ export interface FetchReportParams {
   onlyApproved?: boolean;
 }
 
-/** 拉取报销报告数据 */
 export async function fetchDingTalkReport(
   params: FetchReportParams
 ): Promise<DingTalkReportResponse['data']> {

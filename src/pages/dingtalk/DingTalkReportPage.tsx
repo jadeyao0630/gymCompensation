@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { AlertCircle, Loader2, Search, Store } from 'lucide-react';
+import {
+  AlertCircle, Loader2, Search, Store,
+} from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 import { useStore } from '../../contexts/StoreContext';
@@ -9,6 +11,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { getDefaultMonth } from './utils/date';
 import { getStoreFromPaymentUnit } from './utils/constants';
 import { extractAmount, extractItems, extractPayeeAccount } from './utils/extract';
+import { getStatusLabel } from './utils/statusLabel';
 
 import { useDingTalkTemplates } from './hooks/useDingTalkTemplates';
 import { useReportColumns } from './hooks/useReportColumns';
@@ -26,7 +29,6 @@ const DingTalkReportPage: React.FC = () => {
 
   const canView = hasPermission('report:dingtalk:view', storeId);
 
-  /* ⭐ 页面级月份持久化：key = gym_dingtalk_month_v1_<storeId> */
   const { month: selectedMonth, setMonth: setSelectedMonth } =
     usePersistedMonth('dingtalk', storeId);
 
@@ -35,7 +37,9 @@ const DingTalkReportPage: React.FC = () => {
   const [start, setStart] = useState(defaults.start);
   const [end, setEnd] = useState(defaults.end);
 
-  /* ⭐ 月份变化 → 同步 start/end */
+  /* ⭐ 只看已通过 */
+  const [onlyApproved, setOnlyApproved] = useState(true);
+
   useEffect(() => {
     if (!selectedMonth) return;
     const [y, m] = selectedMonth.split('-').map(Number);
@@ -46,7 +50,6 @@ const DingTalkReportPage: React.FC = () => {
     setEnd(last);
   }, [selectedMonth]);
 
-  /* 用户手动改日期：只作临时查询，同时把月份写回持久化 */
   const handleStartChange = (v: string) => {
     setStart(v);
     if (v && /^\d{4}-\d{2}/.test(v)) setSelectedMonth(v.slice(0, 7));
@@ -82,29 +85,29 @@ const DingTalkReportPage: React.FC = () => {
   } = useDingTalkReport();
 
   const storeCharts = useMemo(
-  () =>
-    groupedByStore
-      .map((s) => ({
-        storeName: s.storeName,
-        totalCount: s.count,
-        totalAmount: s.total,
-        slices: s.types
-          .filter((t) => (t.total || 0) > 0)          // ⭐ 过滤金额为 0 的类型
-          .map((t, i) => ({
-            label: t.typeName,
-            value: t.total,
-            count: t.count,
-            color: getPieColor(i),
-          })),
-      }))
-      .filter((c) => c.slices.length > 0),            // ⭐ 过滤没可画数据的门店
+    () =>
+      groupedByStore
+        .map((s) => ({
+          storeName: s.storeName,
+          totalCount: s.count,
+          totalAmount: s.total,
+          slices: s.types
+            .filter((t) => (t.total || 0) > 0)
+            .map((t, i) => ({
+              label: t.typeName,
+              value: t.total,
+              count: t.count,
+              color: getPieColor(i),
+            })),
+        }))
+        .filter((c) => c.slices.length > 0),
     [groupedByStore]
   );
 
   const onSearch = () => {
     setSelectedType(null);
     setSelectedStore(null);
-    handleSearch({ start, end, templateTypes, paymentUnits });
+    handleSearch({ start, end, templateTypes, paymentUnits, onlyApproved });
   };
 
   const togglePaymentUnit = (unit: string) => {
@@ -175,7 +178,7 @@ const DingTalkReportPage: React.FC = () => {
         extractItems(r.templateName, r.formValues),
         extractAmount(r.templateName, r.formValues) || 0,
         extractPayeeAccount(r.formValues) || '',
-        r.status,
+        getStatusLabel(r.status, r.result),
         r.createTime,
         r.finishTime || '',
       ]);
@@ -218,6 +221,7 @@ const DingTalkReportPage: React.FC = () => {
           onExport={handleExport}
         />
 
+        {/* ⭐ 只看已通过开关已挪到 FilterBar 里，与查询按钮同行 */}
         <DingTalkFilterBar
           start={start}
           end={end}
@@ -229,6 +233,8 @@ const DingTalkReportPage: React.FC = () => {
           loading={loading}
           meta={meta}
           visibleColumns={visibleColumns}
+          onlyApproved={onlyApproved}
+          onToggleOnlyApproved={() => setOnlyApproved((v) => !v)}
           onStartChange={handleStartChange}
           onEndChange={handleEndChange}
           onTogglePaymentUnit={togglePaymentUnit}
@@ -260,9 +266,11 @@ const DingTalkReportPage: React.FC = () => {
             <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center mb-5">
               <Search className="w-7 h-7 text-blue-500" />
             </div>
-            <h3 className="text-gray-700 font-semibold mb-2">选择条件后点击「查询」</h3>
+            <h3 className="text-gray-700 font-semibold mb-2">
+              选择条件后点击「查询」
+            </h3>
             <p className="text-sm text-gray-400">
-              系统将拉取钉钉审批流程，按"门店 → 流程类型 → 付款单位"分组展示
+              当前筛选：{onlyApproved ? '只看已通过' : '全部状态'}
             </p>
           </div>
         )}

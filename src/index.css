@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 /* ⭐ Tailwind v4：显式扫描 src 目录 */
 @source "./**/*.{ts,tsx}";
@@ -75,7 +76,7 @@ html body #root select {
 }
 
 /* ============================================================
- * ⭐ 导航按钮 hover 效果（如果 Tailwind 扫描不到，用 CSS 兜底）
+ * ⭐ 导航按钮 hover 效果
  * ============================================================ */
 .nav-btn-hover {
   transition: all 0.2s ease;
@@ -85,4 +86,127 @@ html body #root select {
   transform: translateY(-2px);
   box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15);
   filter: brightness(1.1);
+}
+
+/* ============================================================
+ * ⭐ 钉钉审批状态 tooltip（position: fixed + portal 版）
+ * ============================================================ */
+.dt-status-tooltip-fixed {
+  width: 280px;
+  max-width: 320px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #111827;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.5;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+
+.dt-status-tooltip-fixed::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -4px;
+  width: 8px;
+  height: 8px;
+  background: #111827;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.dt-status-tooltip-title {
+  display: block;
+  font-weight: 600;
+  color: #e5e7eb;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #374151;
+}
+
+.dt-status-tooltip-empty {
+  display: block;
+  color: #9ca3af;
+  padding: 2px 0;
+}
+
+.dt-status-tooltip-list {
+  display: block;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.dt-status-tooltip-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.dt-status-tooltip-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-top: 6px;
+  flex-shrink: 0;
+  background: #9ca3af;
+}
+
+.dt-dot-agree { background: #34d399; }
+.dt-dot-refuse { background: #fb7185; }
+.dt-dot-default { background: #9ca3af; }
+
+.dt-status-tooltip-body {
+  display: block;
+  flex: 1;
+  min-width: 0;
+}
+
+.dt-status-tooltip-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dt-status-tooltip-user {
+  color: #fff;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dt-status-tooltip-time {
+  color: #9ca3af;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.dt-status-tooltip-action {
+  display: block;
+  color: #d1d5db;
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+/* ⭐ 当前待审人高亮 */
+.dt-status-pending {
+  display: block;
+  font-size: 11px;
+  color: #fcd34d;
+  background: rgba(252, 211, 77, 0.12);
+  border: 1px solid rgba(252, 211, 77, 0.35);
+  border-radius: 6px;
+  padding: 5px 8px;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.dt-status-pending-label {
+  color: #9ca3af;
+  font-weight: 400;
+  margin-right: 6px;
 }

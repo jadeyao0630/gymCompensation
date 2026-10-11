@@ -2,6 +2,7 @@ import React from 'react';
 import { extractAmount, extractPayeeAccount, extractItems, fmtMoney } from '../utils/extract';
 import { COLUMNS, type ColumnKey } from '../utils/constants';
 import type { DingTalkReportItem } from '../../../api/dingtalk';
+import StatusBadge from './StatusBadge';
 
 interface Props {
   items: DingTalkReportItem[];
@@ -13,6 +14,8 @@ export const ResultsTable: React.FC<Props> = ({
   items,
   isColVisible,
 }) => {
+  const visibleColCount = COLUMNS.filter((c) => isColVisible(c.key)).length || 1;
+
   return (
     <div className="border-t border-gray-100 overflow-x-auto">
       <table className="w-full text-xs">
@@ -33,25 +36,58 @@ export const ResultsTable: React.FC<Props> = ({
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
-          {items.map((r) => {
-            const amount = extractAmount(r.templateName, r.formValues);
-            const payee = extractPayeeAccount(r.formValues);
-            const itemsText = extractItems(r.templateName, r.formValues);
+          {items.map((r, idx) => {
+            /* ⭐ 防御 1：数据本身缺失 */
+            if (!r) {
+              return (
+                <tr key={`empty-${idx}`}>
+                  <td
+                    colSpan={visibleColCount}
+                    className="px-3 py-2 text-rose-600 text-[11px]"
+                  >
+                    ⚠️ 数据缺失
+                  </td>
+                </tr>
+              );
+            }
+
+            /* ⭐ 防御 2：拉取失败的实例 */
+            if (r.error) {
+              return (
+                <tr key={r.processInstanceId || `err-${idx}`}>
+                  <td
+                    colSpan={visibleColCount}
+                    className="px-3 py-2 text-rose-600 text-[11px]"
+                  >
+                    ⚠️ 实例 {r.processInstanceId?.slice(0, 16) || ''} 拉取失败：
+                    {r.error}
+                  </td>
+                </tr>
+              );
+            }
+
+            /* ⭐ 防御 3：字段缺失的兜底 */
+            const templateName = r.templateName || '';
+            const formValues = r.formValues || {};
+            const amount = extractAmount(templateName, formValues);
+            const payee = extractPayeeAccount(formValues);
+            const itemsText = extractItems(templateName, formValues);
+
             return (
-              <tr key={r.processInstanceId} className="hover:bg-blue-50/30">
+              <tr key={r.processInstanceId || `row-${idx}`} className="hover:bg-blue-50/30">
                 {isColVisible('title') && (
-                  <td className="px-3 py-2 text-gray-700 max-w-xs truncate" title={r.title}>
+                  <td className="px-3 py-2 text-gray-700 max-w-xs truncate" title={r.title || ''}>
                     {r.title || '—'}
                   </td>
                 )}
                 {isColVisible('items') && (
                   <td className="px-3 py-2 text-gray-600 max-w-md" title={itemsText}>
-                    <span className="line-clamp-2">{itemsText}</span>
+                    <span className="line-clamp-2">{itemsText || '—'}</span>
                   </td>
                 )}
                 {isColVisible('amount') && (
                   <td className="px-3 py-2 text-right tabular-nums font-semibold text-emerald-700 whitespace-nowrap">
-                    {amount !== null ? fmtMoney(amount) : '—'}
+                    {amount !== null && amount !== undefined ? fmtMoney(amount) : '—'}
                   </td>
                 )}
                 {isColVisible('payee') && (
@@ -59,9 +95,13 @@ export const ResultsTable: React.FC<Props> = ({
                 )}
                 {isColVisible('status') && (
                   <td className="px-3 py-2">
-                    <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] border bg-emerald-50 text-emerald-700 border-emerald-100">
-                      已通过
-                    </span>
+                    <StatusBadge
+                      status={r.status}
+                      result={r.result}
+                      operationRecords={r.operationRecords}
+                      originatorName={r.originatorName}
+                      pendingApprovers={r.pendingApprovers}
+                    />
                   </td>
                 )}
                 {isColVisible('createTime') && (
