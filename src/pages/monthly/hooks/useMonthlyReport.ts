@@ -32,6 +32,13 @@ const EMPTY_COST: FixedCostDetail = {
   otherFee: 0,
 };
 
+/** ⭐ fetchAll 返回的快照类型 */
+export interface MonthlyReportSnapshot {
+  orders: FinancialFlowItem[];
+  payrollResults: PayrollResult[];
+  fixedCostDetail: FixedCostDetail;
+}
+
 export function useMonthlyReport(storeId: string, selectedMonth: string) {
   const { data: appData, update: updateAppData } = useAppData();
 
@@ -41,7 +48,7 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  /* ---------- payrollResults：全局 store ---------- */
+  /* payrollResults 从全局 store 取 */
   const payrollResults = appData.monthlyPayrollByKey[cacheKey] || [];
   const setPayrollResults = useCallback(
     (updater: React.SetStateAction<PayrollResult[]>) => {
@@ -55,7 +62,7 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     [updateAppData, cacheKey]
   );
 
-  /* ---------- orderList：全局 store ---------- */
+  /* orderList 从全局 store 取 */
   const orderList = appData.monthlyOrdersByKey[cacheKey] || [];
   const setOrderList = useCallback(
     (updater: React.SetStateAction<FinancialFlowItem[]>) => {
@@ -69,7 +76,7 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     [updateAppData, cacheKey]
   );
 
-  /* ---------- fixedCostDetail：全局 store ---------- */
+  /* fixedCostDetail 从全局 store 取 */
   const fixedCostDetail: FixedCostDetail =
     appData.monthlyFixedCostByKey[cacheKey] || EMPTY_COST;
 
@@ -91,7 +98,6 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     [updateAppData, cacheKey]
   );
 
-  /* ---------- 薪酬计算 Hook ---------- */
   const username = import.meta.env.VITE_TEST_USERNAME || '';
   const password = import.meta.env.VITE_TEST_PASSWORD || '';
   const { run, loading: payrollLoading } = usePayroll({
@@ -105,20 +111,14 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     setError('');
   }, []);
 
-  /* ---------- 拉取全部数据（⭐ 带诊断日志） ---------- */
+  /* ---------- 拉取全部数据（⭐ 返回快照） ---------- */
   const fetchAll = useCallback(
-    async (month: string) => {
+    async (month: string): Promise<MonthlyReportSnapshot | null> => {
       if (!storeId || !month) return null;
       setLoading(true);
       setError('');
       try {
         const { begin, end } = getMonthRange(month);
-        console.log('[MonthlyReport] fetchAll 开始：', {
-          storeId,
-          month,
-          begin,
-          end,
-        });
 
         /* 1) 员工状态 */
         let newbieSet = new Set<string>();
@@ -129,55 +129,28 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
             if (s.isNewbie) newbieSet.add(s.staffId);
             if (s.isExcluded) excludedSet.add(s.staffId);
           });
-          console.log('[MonthlyReport] 员工状态拉取成功', statuses.length);
         } catch (e) {
           console.warn('[MonthlyReport] 拉员工状态失败', e);
         }
 
         /* 2) 方案配置 */
         const plan = await fetchPlanByMonth(storeId, month);
-        console.log(
-          '[MonthlyReport] 方案配置：',
-          plan ? `岗位 ${plan.positions?.length || 0} 个` : 'null'
-        );
 
-        /* 3) ⭐ 营销订单 */
+        /* 3) 营销订单 */
         let orders: FinancialFlowItem[] = [];
-        const orderParams = {
-          bus_id: storeId,
-          sale_id: '',
-          begin_date: begin,
-          end_date: end,
-          page_no: 1,
-          page_size: 2000,
-        };
-        console.log('[MonthlyReport] 拉订单参数 =', orderParams);
         try {
-          const orderRes: any = await getCardOrderList(orderParams);
-          console.log('[MonthlyReport] 拉订单原始返回 =', orderRes);
-
-          /* ⭐ 兼容多种返回结构：list / data.list / data */
-          let rawList: any[] = [];
-          if (Array.isArray(orderRes)) rawList = orderRes;
-          else if (Array.isArray(orderRes?.list)) rawList = orderRes.list;
-          else if (Array.isArray(orderRes?.data?.list)) rawList = orderRes.data.list;
-          else if (Array.isArray(orderRes?.data)) rawList = orderRes.data;
-          else if (Array.isArray(orderRes?.result?.list)) rawList = orderRes.result.list;
-
-          console.log('[MonthlyReport] 订单条数 =', rawList.length);
-          if (rawList.length > 0) {
-            console.log('[MonthlyReport] 订单第一条 =', rawList[0]);
-            console.log(
-              '[MonthlyReport] 订单第一条的字段 =',
-              Object.keys(rawList[0])
-            );
-          }
-
-          orders = rawList;
+          const orderRes = await getCardOrderList({
+            bus_id: storeId,
+            sale_id: '',
+            begin_date: begin,
+            end_date: end,
+            page_no: 1,
+            page_size: 2000,
+          });
+          orders = orderRes.list || [];
           setOrderList(orders);
-        } catch (e: any) {
+        } catch (e) {
           console.warn('[MonthlyReport] 拉订单失败', e);
-          console.warn('[MonthlyReport] 错误详情 =', e?.response?.data || e?.message);
           setOrderList([]);
         }
 
@@ -194,7 +167,6 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
             otherFee: Number(sim?.otherFee || 0),
           };
           setFixedCostDetail(costDetail);
-          console.log('[MonthlyReport] 固定成本 =', costDetail);
         } catch (e) {
           console.warn('[MonthlyReport] 拉测算设置失败', e);
           setFixedCostDetail(EMPTY_COST);
@@ -221,7 +193,6 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
               (r) => !excludedSet.has(r.staffId)
             );
             setPayrollResults(payroll);
-            console.log('[MonthlyReport] 薪酬计算完成，人数 =', payroll.length);
           } catch (e) {
             console.warn('[MonthlyReport] 薪酬计算失败', e);
             setPayrollResults([]);
@@ -232,6 +203,7 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
 
         setHasLoaded(true);
 
+        /* ⭐ 返回快照 */
         return {
           orders,
           payrollResults: payroll,
@@ -260,6 +232,7 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMonth]);
 
+  /* 从全局 store 恢复 hasLoaded */
   useEffect(() => {
     if (!storeId || !selectedMonth) return;
     const key = `${storeId}_${selectedMonth}`;

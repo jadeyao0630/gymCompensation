@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import {
-  AlertCircle, Loader2, Search, Store,
+  AlertCircle, Loader2, Search, Store, Ban,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -16,12 +16,55 @@ import { getStatusLabel } from './utils/statusLabel';
 import { useDingTalkTemplates } from './hooks/useDingTalkTemplates';
 import { useReportColumns } from './hooks/useReportColumns';
 import { useDingTalkReport } from './hooks/useDingTalkReport';
+import { useDingTalkFilters } from './hooks/useDingTalkFilters';
 import { usePersistedMonth } from '../../hooks/usePersistedMonth';
 
+import type { DingTalkReportItem } from '../../api/dingtalk';
+
 import DingTalkHeader from './components/DingTalkHeader';
+import DingTalkSyncPanel from './components/DingTalkSyncPanel';
 import DingTalkFilterBar from './components/DingTalkFilterBar';
 import GroupedResults from './components/GroupedResults';
 import TypePieChart, { getPieColor } from './components/TypePieChart';
+
+/* ⭐ 判断收款账户是否被排除 */
+function isPayeeExcluded(
+  payeeAccount: string | null | undefined,
+  excludeAccounts: string[],
+  excludeKeywords: string[]
+): boolean {
+  const raw = payeeAccount == null ? '' : String(payeeAccount).trim();
+  if (!raw) return false;
+  if (excludeAccounts.includes(raw)) return true;
+  if (excludeKeywords.some((k) => k && raw.includes(k))) return true;
+  return false;
+}
+
+/* ============================================================
+ * ⭐ 收款账户 → 类别覆盖规则
+ *    命中后，该记录的分组类别改为对应的值（不再按 templateName）
+ * ============================================================ */
+const PAYEE_CATEGORY_OVERRIDES: Array<{
+  payee: string;         // 精确匹配
+  category: string;      // 覆盖后的类别名
+}> = [
+  { payee: '山东云优人力资源服务有限公司', category: '薪酬佣金' },
+];
+
+/**
+ * ⭐ 根据收款账户获取「类别覆盖」
+ * 返回 null 表示不覆盖，仍用 templateName
+ */
+function resolveCategoryOverride(
+  payeeAccount: string | null | undefined
+): string | null {
+  const raw = payeeAccount == null ? '' : String(payeeAccount).trim();
+  if (!raw) return null;
+  for (const rule of PAYEE_CATEGORY_OVERRIDES) {
+    if (raw === rule.payee) return rule.category;
+  }
+  return null;
+}
 
 const DingTalkReportPage: React.FC = () => {
   const { storeId } = useStore();
@@ -29,16 +72,45 @@ const DingTalkReportPage: React.FC = () => {
 
   const canView = hasPermission('report:dingtalk:view', storeId);
 
+  /* 月份持久化 */
   const { month: selectedMonth, setMonth: setSelectedMonth } =
     usePersistedMonth('dingtalk', storeId);
 
   const defaults = useMemo(() => getDefaultMonth(), []);
-
   const [start, setStart] = useState(defaults.start);
   const [end, setEnd] = useState(defaults.end);
 
-  /* ⭐ 只看已通过 */
-  const [onlyApproved, setOnlyApproved] = useState(true);
+  /* ⭐ 筛选条件持久化（含收款账户排除规则） */
+  const {
+    paymentUnits,
+    templateTypes,
+    onlyApproved,
+    excludeAccounts,
+    excludeKeywords,
+    togglePaymentUnit,
+    setPaymentUnits,
+    toggleTemplateType,
+    setTemplateTypes,
+    toggleOnlyApproved,
+    addExcludeAccount,
+    removeExcludeAccount,
+    addExcludeKeyword,
+    removeExcludeKeyword,
+    clearExcludeRules,
+  } = useDingTalkFilters(storeId);
+
+  const {
+    results,
+    loading,
+    error,
+    meta,
+    setOnlyApproved,
+    setPaymentUnits: setPaymentUnitsInHook,
+    setTemplateTypes: setTemplateTypesInHook,
+    handleSearch,
+    grouped,
+    groupedByStore,
+  } = useDingTalkReport();
 
   useEffect(() => {
     if (!selectedMonth) return;
@@ -59,9 +131,6 @@ const DingTalkReportPage: React.FC = () => {
     if (v && /^\d{4}-\d{2}/.test(v)) setSelectedMonth(v.slice(0, 7));
   };
 
-  const [paymentUnits, setPaymentUnits] = useState<string[]>([]);
-  const [templateTypes, setTemplateTypes] = useState<string[]>([]);
-
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [selectedStore, setSelectedStore] = useState<string | null>(null);
 
@@ -74,19 +143,162 @@ const DingTalkReportPage: React.FC = () => {
 
   const { visibleColumns, toggleColumn, resetColumns, isColVisible } =
     useReportColumns();
-  const {
-    results,
-    loading,
-    error,
-    meta,
-    handleSearch,
-    grouped,
-    groupedByStore,
-  } = useDingTalkReport();
 
-  const storeCharts = useMemo(
-    () =>
-      groupedByStore
+  const handleToggleOnlyApproved = () => {
+    toggleOnlyApproved();
+    setOnlyApproved((prev) => !prev);
+  };
+
+  const handleTogglePaymentUnit = (unit: string) => {
+    togglePaymentUnit(unit);
+    setPaymentUnitsInHook((prev) =>
+      prev.includes(unit) ? prev.filter((u) => u !== unit) : [...prev, unit]
+    );
+  };
+
+  const handleSetPaymentUnits = (units: string[]) => {
+    setPaymentUnits(units);
+    setPaymentUnitsInHook(units);
+  };
+
+  const handleToggleTemplateType = (name: string) => {
+    toggleTemplateType(name);
+    setTemplateTypesInHook((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+    );
+  };
+
+  const handleSetTemplateTypes = (names: string[]) => {
+    setTemplateTypes(names);
+    setTemplateTypesInHook(names);
+  };
+
+  /* ============================================================
+   * ⭐ 前端过滤：收款账户排除
+   * ============================================================ */
+  const excludedPayeeIds = useMemo(() => {
+    const set = new Set<string>();
+    if (excludeAccounts.length === 0 && excludeKeywords.length === 0) return set;
+    for (const r of results) {
+      const payee = r.payeeAccount || extractPayeeAccount(r.formValues || {});
+      if (isPayeeExcluded(payee, excludeAccounts, excludeKeywords)) {
+        if (r.processInstanceId) set.add(r.processInstanceId);
+      }
+    }
+    return set;
+  }, [results, excludeAccounts, excludeKeywords]);
+
+  const filteredResults = useMemo(() => {
+    if (excludedPayeeIds.size === 0) return results;
+    return results.filter(
+      (r) => !r.processInstanceId || !excludedPayeeIds.has(r.processInstanceId)
+    );
+  }, [results, excludedPayeeIds]);
+
+  /* ============================================================
+   * ⭐ 类别覆盖：给每条记录算出最终用于分组的 category
+   * ============================================================ */
+  const categorizedResults = useMemo(() => {
+    return filteredResults.map((r) => {
+      const payee = r.payeeAccount || extractPayeeAccount(r.formValues || {});
+      const override = resolveCategoryOverride(payee);
+      return {
+        item: r,
+        category: override || r.templateName || '未知',
+        overridden: !!override,
+      };
+    });
+  }, [filteredResults]);
+
+  /* ============================================================
+   * ⭐ 分组：如果排除规则 & 类别覆盖都没生效，直接用 hook 的 grouped；
+   *    否则用 categorizedResults 重算
+   * ============================================================ */
+  const finalGrouped = useMemo(() => {
+    const needRebuild =
+      excludedPayeeIds.size > 0 ||
+      categorizedResults.some((c) => c.overridden);
+
+    if (!needRebuild) return grouped;
+
+    const map = new Map<
+      string,
+      {
+        typeName: string;
+        total: number;
+        count: number;
+        totalCount: number;
+        units: Map<
+          string,
+          {
+            storeName: string;
+            unitName: string;
+            total: number;
+            count: number;
+            items: DingTalkReportItem[];
+          }
+        >;
+      }
+    >();
+
+    for (const { item: r, category } of categorizedResults) {
+      if (r.error) continue;
+      const typeName = category;
+      const unitName = r.paymentUnit || '未指定';
+      const storeName = getStoreFromPaymentUnit(unitName) || '未归属门店';
+      const amount = Number(
+        extractAmount(r.templateName || '', r.formValues || {}) || 0
+      );
+
+      if (!map.has(typeName)) {
+        map.set(typeName, {
+          typeName,
+          total: 0,
+          count: 0,
+          totalCount: 0,
+          units: new Map(),
+        });
+      }
+      const g = map.get(typeName)!;
+      g.total += amount;
+      g.count += 1;
+      g.totalCount += 1;
+
+      const uKey = `${storeName}||${unitName}`;
+      if (!g.units.has(uKey)) {
+        g.units.set(uKey, {
+          storeName,
+          unitName,
+          total: 0,
+          count: 0,
+          items: [],
+        });
+      }
+      const u = g.units.get(uKey)!;
+      u.total += amount;
+      u.count += 1;
+      u.items.push(r);
+    }
+
+    return Array.from(map.values())
+      .map((g) => ({
+        typeName: g.typeName,
+        total: g.total,
+        count: g.count,
+        totalCount: g.totalCount,
+        units: Array.from(g.units.values()),
+      }))
+      .filter((g) => g.units.length > 0);
+  }, [grouped, categorizedResults, excludedPayeeIds]);
+
+  /* ⭐ 门店饼图数据 */
+  const storeCharts = useMemo(() => {
+    const needRebuild =
+      excludedPayeeIds.size > 0 ||
+      categorizedResults.some((c) => c.overridden);
+
+    if (!needRebuild) {
+      return groupedByStore
         .map((s) => ({
           storeName: s.storeName,
           totalCount: s.count,
@@ -100,9 +312,58 @@ const DingTalkReportPage: React.FC = () => {
               color: getPieColor(i),
             })),
         }))
-        .filter((c) => c.slices.length > 0),
-    [groupedByStore]
-  );
+        .filter((c) => c.slices.length > 0);
+    }
+
+    const map = new Map<
+      string,
+      {
+        storeName: string;
+        totalCount: number;
+        totalAmount: number;
+        types: Map<string, { typeName: string; total: number; count: number }>;
+      }
+    >();
+
+    for (const g of finalGrouped) {
+      for (const u of g.units) {
+        if (!map.has(u.storeName)) {
+          map.set(u.storeName, {
+            storeName: u.storeName,
+            totalCount: 0,
+            totalAmount: 0,
+            types: new Map(),
+          });
+        }
+        const s = map.get(u.storeName)!;
+        s.totalCount += u.count;
+        s.totalAmount += u.total;
+
+        if (!s.types.has(g.typeName)) {
+          s.types.set(g.typeName, { typeName: g.typeName, total: 0, count: 0 });
+        }
+        const t = s.types.get(g.typeName)!;
+        t.total += u.total;
+        t.count += u.count;
+      }
+    }
+
+    return Array.from(map.values())
+      .map((s) => ({
+        storeName: s.storeName,
+        totalCount: s.totalCount,
+        totalAmount: s.totalAmount,
+        slices: Array.from(s.types.values())
+          .filter((t) => (t.total || 0) > 0)
+          .map((t, i) => ({
+            label: t.typeName,
+            value: t.total,
+            count: t.count,
+            color: getPieColor(i),
+          })),
+      }))
+      .filter((c) => c.slices.length > 0);
+  }, [groupedByStore, finalGrouped, excludedPayeeIds, categorizedResults]);
 
   const onSearch = () => {
     setSelectedType(null);
@@ -110,24 +371,8 @@ const DingTalkReportPage: React.FC = () => {
     handleSearch({ start, end, templateTypes, paymentUnits, onlyApproved });
   };
 
-  const togglePaymentUnit = (unit: string) => {
-    setPaymentUnits((prev) =>
-      prev.includes(unit) ? prev.filter((u) => u !== unit) : [...prev, unit]
-    );
-  };
-
-  const toggleTemplateType = (name: string) => {
-    setTemplateTypes((prev) =>
-      prev.includes(name) ? prev.filter((x) => x !== name) : [...prev, name]
-    );
-  };
-
-  const setTemplateTypesDirect = (names: string[]) => {
-    setTemplateTypes(names);
-  };
-
   const filteredGrouped = useMemo(() => {
-    let groups = grouped;
+    let groups = finalGrouped;
     if (selectedStore) {
       groups = groups
         .map((g) => ({
@@ -140,24 +385,25 @@ const DingTalkReportPage: React.FC = () => {
       groups = groups.filter((g) => g.typeName === selectedType);
     }
     return groups;
-  }, [grouped, selectedStore, selectedType]);
+  }, [finalGrouped, selectedStore, selectedType]);
 
   const handleExport = () => {
-    if (results.length === 0) {
+    if (filteredResults.length === 0) {
       alert('暂无数据可导出');
       return;
     }
     const wb = XLSX.utils.book_new();
 
-    let exportResults = results;
+    let exportResults = categorizedResults;
     if (selectedStore) {
       exportResults = exportResults.filter(
-        (r) => getStoreFromPaymentUnit(r.paymentUnit) === selectedStore
+        (c) =>
+          getStoreFromPaymentUnit(c.item.paymentUnit) === selectedStore
       );
     }
     if (selectedType) {
       exportResults = exportResults.filter(
-        (r) => r.templateName === selectedType
+        (c) => c.category === selectedType
       );
     }
 
@@ -169,9 +415,9 @@ const DingTalkReportPage: React.FC = () => {
     const rows: any[][] = [
       ['流程类型', '门店', '付款单位', '标题', '事项', '金额', '收款账户', '状态', '创建时间', '完成时间'],
     ];
-    exportResults.forEach((r) => {
+    exportResults.forEach(({ item: r, category, overridden }) => {
       rows.push([
-        r.templateName,
+        overridden ? `${r.templateName}（→${category}）` : r.templateName,
         getStoreFromPaymentUnit(r.paymentUnit),
         r.paymentUnit || '',
         r.title,
@@ -185,7 +431,7 @@ const DingTalkReportPage: React.FC = () => {
     });
     const ws1 = XLSX.utils.aoa_to_sheet(rows);
     ws1['!cols'] = [
-      { wch: 18 }, { wch: 10 }, { wch: 30 }, { wch: 40 }, { wch: 40 },
+      { wch: 24 }, { wch: 10 }, { wch: 30 }, { wch: 40 }, { wch: 40 },
       { wch: 14 }, { wch: 20 }, { wch: 12 }, { wch: 20 }, { wch: 20 },
     ];
     XLSX.utils.book_append_sheet(wb, ws1, '明细');
@@ -211,17 +457,21 @@ const DingTalkReportPage: React.FC = () => {
     return <Navigate to="/no-permission" replace />;
   }
 
+  const hasExcludeRules =
+    excludeAccounts.length > 0 || excludeKeywords.length > 0;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50/50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <DingTalkHeader
           loading={loading}
-          hasResults={results.length > 0}
+          hasResults={filteredResults.length > 0}
           onSearch={onSearch}
           onExport={handleExport}
         />
 
-        {/* ⭐ 只看已通过开关已挪到 FilterBar 里，与查询按钮同行 */}
+        <DingTalkSyncPanel />
+
         <DingTalkFilterBar
           start={start}
           end={end}
@@ -234,18 +484,44 @@ const DingTalkReportPage: React.FC = () => {
           meta={meta}
           visibleColumns={visibleColumns}
           onlyApproved={onlyApproved}
-          onToggleOnlyApproved={() => setOnlyApproved((v) => !v)}
+          onToggleOnlyApproved={handleToggleOnlyApproved}
           onStartChange={handleStartChange}
           onEndChange={handleEndChange}
-          onTogglePaymentUnit={togglePaymentUnit}
-          onSetPaymentUnits={setPaymentUnits}
-          onToggleTemplateType={toggleTemplateType}
-          onSetTemplateTypes={setTemplateTypesDirect}
+          onTogglePaymentUnit={handleTogglePaymentUnit}
+          onSetPaymentUnits={handleSetPaymentUnits}
+          onToggleTemplateType={handleToggleTemplateType}
+          onSetTemplateTypes={handleSetTemplateTypes}
           onRefreshTemplates={refreshTemplates}
           onSearch={onSearch}
           onToggleColumn={toggleColumn}
           onResetColumns={resetColumns}
+          excludeAccounts={excludeAccounts}
+          excludeKeywords={excludeKeywords}
+          onAddExcludeAccount={addExcludeAccount}
+          onRemoveExcludeAccount={removeExcludeAccount}
+          onAddExcludeKeyword={addExcludeKeyword}
+          onRemoveExcludeKeyword={removeExcludeKeyword}
+          onClearExcludeRules={clearExcludeRules}
         />
+
+        {hasExcludeRules && excludedPayeeIds.size > 0 && (
+          <div className="bg-rose-50 border border-rose-100 rounded-2xl p-3 mb-4 text-xs text-rose-700 flex items-center gap-2 flex-wrap">
+            <Ban className="w-3.5 h-3.5" />
+            <span className="font-medium">
+              已按排除规则过滤 {excludedPayeeIds.size} 条收款账户记录
+            </span>
+            {excludeAccounts.length > 0 && (
+              <span className="text-rose-600">
+                账户：{excludeAccounts.join('、')}
+              </span>
+            )}
+            {excludeKeywords.length > 0 && (
+              <span className="text-rose-600">
+                关键字：{excludeKeywords.join('、')}
+              </span>
+            )}
+          </div>
+        )}
 
         {loading && (
           <div className="flex items-center justify-center py-12 text-gray-400">
@@ -261,21 +537,25 @@ const DingTalkReportPage: React.FC = () => {
           </div>
         )}
 
-        {!loading && !error && results.length === 0 && (
+        {!loading && !error && filteredResults.length === 0 && (
           <div className="bg-white rounded-2xl border border-dashed border-gray-200 shadow-sm p-16 text-center">
             <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center mb-5">
               <Search className="w-7 h-7 text-blue-500" />
             </div>
             <h3 className="text-gray-700 font-semibold mb-2">
-              选择条件后点击「查询」
+              {results.length > 0
+                ? '当前排除规则下无数据'
+                : '选择条件后点击「查询」'}
             </h3>
             <p className="text-sm text-gray-400">
-              当前筛选：{onlyApproved ? '只看已通过' : '全部状态'}
+              {results.length > 0
+                ? '调整或清空排除规则后再看'
+                : '全量拉取一次，之后所有筛选都是本地瞬时生效'}
             </p>
           </div>
         )}
 
-        {!loading && !error && results.length > 0 && (
+        {!loading && !error && filteredResults.length > 0 && (
           <>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
               {storeCharts.map((chart) => {

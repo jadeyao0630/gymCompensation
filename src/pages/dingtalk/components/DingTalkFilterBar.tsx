@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Loader2, Search, ChevronDown, Store, X, RefreshCw, ChevronRight, Layers, Filter,
-  CheckCircle2, Circle,
+  CheckCircle2, Circle, Ban, Plus, RotateCcw,
 } from 'lucide-react';
 import {
   PAYMENT_UNITS,
@@ -30,7 +30,6 @@ interface Props {
     costMs: number;
   } | null;
   visibleColumns: Set<ColumnKey>;
-  /* ⭐ 新增：只看已通过开关 */
   onlyApproved: boolean;
   onToggleOnlyApproved: () => void;
   onStartChange: (v: string) => void;
@@ -43,6 +42,15 @@ interface Props {
   onSearch: () => void;
   onToggleColumn: (key: ColumnKey) => void;
   onResetColumns: () => void;
+
+  /* ⭐ 收款账户排除规则 */
+  excludeAccounts: string[];
+  excludeKeywords: string[];
+  onAddExcludeAccount: (v: string) => void;
+  onRemoveExcludeAccount: (v: string) => void;
+  onAddExcludeKeyword: (v: string) => void;
+  onRemoveExcludeKeyword: (v: string) => void;
+  onClearExcludeRules: () => void;
 }
 
 const STORE_ORDER = ['哈德门', '富贵园'];
@@ -54,6 +62,10 @@ export const DingTalkFilterBar: React.FC<Props> = ({
   onStartChange, onEndChange, onTogglePaymentUnit, onSetPaymentUnits,
   onToggleTemplateType, onSetTemplateTypes, onRefreshTemplates, onSearch,
   onToggleColumn, onResetColumns,
+  /* ⭐ 排除规则 */
+  excludeAccounts, excludeKeywords,
+  onAddExcludeAccount, onRemoveExcludeAccount,
+  onAddExcludeKeyword, onRemoveExcludeKeyword, onClearExcludeRules,
 }) => {
   const [showUnitPicker, setShowUnitPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -64,6 +76,11 @@ export const DingTalkFilterBar: React.FC<Props> = ({
   const [expandedCategories, setExpandedCategories] = useState<Set<TemplateCategory>>(
     () => new Set()
   );
+
+  /* ⭐ 排除规则面板的展开状态 + 输入 */
+  const [excludeExpanded, setExcludeExpanded] = useState(false);
+  const [accountInput, setAccountInput] = useState('');
+  const [keywordInput, setKeywordInput] = useState('');
 
   /* 点击外部关闭 */
   useEffect(() => {
@@ -176,11 +193,24 @@ export const DingTalkFilterBar: React.FC<Props> = ({
     else templateTypes.forEach((t) => onToggleTemplateType(t));
   };
 
-  /* ⭐ 区间变化：同时刷新 start / end，不自动查询 */
   const handleRangeChange = (s: string, e: string) => {
     onStartChange(s);
     onEndChange(e);
   };
+
+  /* ⭐ 排除规则的操作 */
+  const handleAddAccount = () => {
+    if (!accountInput.trim()) return;
+    onAddExcludeAccount(accountInput.trim());
+    setAccountInput('');
+  };
+  const handleAddKeyword = () => {
+    if (!keywordInput.trim()) return;
+    onAddExcludeKeyword(keywordInput.trim());
+    setKeywordInput('');
+  };
+
+  const totalExcludeRules = excludeAccounts.length + excludeKeywords.length;
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 mb-6">
@@ -469,7 +499,144 @@ export const DingTalkFilterBar: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* ⭐ 底部操作行：查询按钮 + 只看已通过开关 + 列选择 + meta */}
+      {/* ⭐ 收款账户排除规则 */}
+      <div className="border-t border-gray-100 pt-3 mt-4">
+        <button
+          type="button"
+          onClick={() => setExcludeExpanded((v) => !v)}
+          className="flex items-center gap-2 text-xs text-gray-600 hover:text-gray-800"
+        >
+          <Ban className="w-3.5 h-3.5 text-rose-500" />
+          <span className="font-medium">收款账户排除规则</span>
+          {totalExcludeRules > 0 && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded text-[10px] bg-rose-50 text-rose-700 border border-rose-200">
+              {totalExcludeRules} 条生效
+            </span>
+          )}
+          <ChevronDown
+            className={`w-3.5 h-3.5 text-gray-400 transition-transform ${
+              excludeExpanded ? 'rotate-180' : ''
+            }`}
+          />
+        </button>
+
+        {excludeExpanded && (
+          <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* 精确账户 */}
+            <div>
+              <div className="text-[11px] text-gray-500 mb-1.5">
+                排除指定账户（完全匹配）
+              </div>
+              <div className="flex items-center gap-1.5 mb-2">
+                <input
+                  value={accountInput}
+                  onChange={(e) => setAccountInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddAccount();
+                    }
+                  }}
+                  placeholder="输入账户名后回车"
+                  className="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-rose-400"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddAccount}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold"
+                >
+                  <Plus className="w-3 h-3" />
+                  添加
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {excludeAccounts.length === 0 && (
+                  <span className="text-[11px] text-gray-400">暂无排除账户</span>
+                )}
+                {excludeAccounts.map((acc) => (
+                  <span
+                    key={acc}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-[11px]"
+                  >
+                    {acc}
+                    <button
+                      type="button"
+                      onClick={() => onRemoveExcludeAccount(acc)}
+                      className="text-rose-400 hover:text-rose-700"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* 关键字 */}
+            <div>
+              <div className="text-[11px] text-gray-500 mb-1.5">
+                排除关键字（包含匹配）
+              </div>
+              <div className="flex items-center gap-1.5 mb-2">
+                <input
+                  value={keywordInput}
+                  onChange={(e) => setKeywordInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddKeyword();
+                    }
+                  }}
+                  placeholder="输入关键字后回车"
+                  className="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-rose-400"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddKeyword}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold"
+                >
+                  <Plus className="w-3 h-3" />
+                  添加
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {excludeKeywords.length === 0 && (
+                  <span className="text-[11px] text-gray-400">暂无排除关键字</span>
+                )}
+                {excludeKeywords.map((kw) => (
+                  <span
+                    key={kw}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-[11px]"
+                  >
+                    {kw}
+                    <button
+                      type="button"
+                      onClick={() => onRemoveExcludeKeyword(kw)}
+                      className="text-rose-400 hover:text-rose-700"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* 清空按钮 */}
+            <div className="lg:col-span-2 flex justify-end">
+              <button
+                type="button"
+                onClick={onClearExcludeRules}
+                disabled={totalExcludeRules === 0}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:text-gray-700 hover:bg-gray-50 text-[11px] disabled:opacity-40"
+              >
+                <RotateCcw className="w-3 h-3" />
+                清空全部规则
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 底部操作行 */}
       <div className="mt-4 flex items-center gap-2 flex-wrap">
         <button
           onClick={onSearch}
@@ -483,7 +650,6 @@ export const DingTalkFilterBar: React.FC<Props> = ({
           )}
         </button>
 
-        {/* ⭐ 只看已通过 开关 */}
         <button
           type="button"
           onClick={onToggleOnlyApproved}

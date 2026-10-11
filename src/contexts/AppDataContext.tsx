@@ -4,19 +4,17 @@ import type { FinancialFlowItem, FrontMoneyItem } from '../api/stats';
 import type { FixedCostDetail } from '../pages/monthly/hooks/useMonthlyReport';
 
 export interface AppData {
-  /** 薪酬计算：门店 → 结果列表 */
   payrollResultsByStore: Record<string, PayrollResult[]>;
-  /** 薪酬计算：门店 → 合并后的 performances */
   performancesByStore: Record<string, any[]>;
 
-  /** 月报：门店_月 → 结果 */
   monthlyPayrollByKey: Record<string, PayrollResult[]>;
   monthlyOrdersByKey: Record<string, FinancialFlowItem[]>;
   monthlyFixedCostByKey: Record<string, FixedCostDetail>;
-  /** ⭐ AI 报告：key = `${storeId}_${month}` */
+  /** ⭐ AI 报告文本 */
   monthlyAiReportByKey: Record<string, string>;
+  /** ⭐ 图表 payload（任意结构，按 storeId_month 隔离） */
+  monthlyAiPayloadByKey: Record<string, any>;
 
-  /** 营销：门店 → 数据 */
   marketingListByStore: Record<string, FinancialFlowItem[]>;
   marketingFrontMoneyByStore: Record<string, FrontMoneyItem[]>;
 }
@@ -37,12 +35,13 @@ const EMPTY_DATA: AppData = {
   monthlyOrdersByKey: {},
   monthlyFixedCostByKey: {},
   monthlyAiReportByKey: {},
+  monthlyAiPayloadByKey: {},
   marketingListByStore: {},
   marketingFrontMoneyByStore: {},
 };
 
-/* ⭐ AI 报告的 localStorage key */
 const AI_REPORT_STORAGE_KEY = 'gym_appdata_ai_reports_v1';
+const AI_PAYLOAD_STORAGE_KEY = 'gym_appdata_ai_payloads_v1';
 
 interface CtxValue {
   data: AppData;
@@ -58,23 +57,39 @@ const AppDataCtx = createContext<CtxValue | null>(null);
 export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  /* ⭐ 初始化时从 localStorage 恢复 AI 报告 */
+  /* ⭐ 初始化从 localStorage 恢复 AI 报告 + 图表 payload */
   const [data, setData] = useState<AppData>(() => {
+    let reports: Record<string, string> = {};
+    let payloads: Record<string, any> = {};
+
     try {
-      const saved = localStorage.getItem(AI_REPORT_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object') {
-          return { ...EMPTY_DATA, monthlyAiReportByKey: parsed };
-        }
+      const r = localStorage.getItem(AI_REPORT_STORAGE_KEY);
+      if (r) {
+        const parsed = JSON.parse(r);
+        if (parsed && typeof parsed === 'object') reports = parsed;
       }
     } catch (e) {
       console.warn('[AppData] 恢复 AI 报告失败', e);
     }
-    return EMPTY_DATA;
+
+    try {
+      const p = localStorage.getItem(AI_PAYLOAD_STORAGE_KEY);
+      if (p) {
+        const parsed = JSON.parse(p);
+        if (parsed && typeof parsed === 'object') payloads = parsed;
+      }
+    } catch (e) {
+      console.warn('[AppData] 恢复图表 payload 失败', e);
+    }
+
+    return {
+      ...EMPTY_DATA,
+      monthlyAiReportByKey: reports,
+      monthlyAiPayloadByKey: payloads,
+    };
   });
 
-  /* ⭐ AI 报告变化时写入 localStorage */
+  /* ⭐ AI 报告变化时写 localStorage */
   useEffect(() => {
     try {
       localStorage.setItem(
@@ -85,6 +100,18 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({
       console.warn('[AppData] 保存 AI 报告失败', e);
     }
   }, [data.monthlyAiReportByKey]);
+
+  /* ⭐ 图表 payload 变化时写 localStorage */
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        AI_PAYLOAD_STORAGE_KEY,
+        JSON.stringify(data.monthlyAiPayloadByKey)
+      );
+    } catch (e) {
+      console.warn('[AppData] 保存图表 payload 失败', e);
+    }
+  }, [data.monthlyAiPayloadByKey]);
 
   const update: CtxValue['update'] = (key, updater) => {
     setData((prev) => ({

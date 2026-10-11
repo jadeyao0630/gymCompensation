@@ -55,8 +55,9 @@ const MonthlyReportPage: React.FC = () => {
   } = useMonthlyReport(storeId, selectedMonth);
 
   const aiCacheKey = `${storeId}_${selectedMonth}`;
-  const aiReport = appData.monthlyAiReportByKey[aiCacheKey] || '';
 
+  /* ⭐ AI 报告：Context + localStorage */
+  const aiReport = appData.monthlyAiReportByKey[aiCacheKey] || '';
   const setAiReport = (text: string) => {
     updateAppData('monthlyAiReportByKey', (prev) => ({
       ...prev,
@@ -64,14 +65,37 @@ const MonthlyReportPage: React.FC = () => {
     }));
   };
 
-  const [aiPayload, setAiPayload] = useState<any>(null);
+  /* ⭐ 图表 payload：Context + localStorage（点「获取报告」自动生成） */
+  const aiPayload = appData.monthlyAiPayloadByKey[aiCacheKey] || null;
+  const setAiPayload = (payload: any) => {
+    updateAppData('monthlyAiPayloadByKey', (prev) => ({
+      ...prev,
+      [aiCacheKey]: payload,
+    }));
+  };
+
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const [aiExpanded, setAiExpanded] = useState(false);
 
   const handleMonthChange = changeMonth;
-  const handleFetch = () => fetchAll(selectedMonth);
 
+  /* ⭐ 获取报告：拉数据 + 自动生成 payload（图表不需要 AI） */
+  const handleFetch = async () => {
+    const snapshot = await fetchAll(selectedMonth);
+
+    const payload = buildPayload({
+      storeId,
+      storeName,
+      month: selectedMonth,
+      orderList: snapshot?.orders ?? orderList,
+      payrollResults: snapshot?.payrollResults ?? payrollResults,
+      fixedCostDetail: snapshot?.fixedCostDetail ?? fixedCostDetail,
+    });
+    setAiPayload(payload);
+  };
+
+  /* ⭐ 生成 AI 报告 */
   const handleGenerateAi = async () => {
     if (!hasLoaded) {
       alert('请先点击「获取报告」加载业务数据');
@@ -205,7 +229,7 @@ const MonthlyReportPage: React.FC = () => {
 
         {!loading && !error && hasLoaded && (
           <>
-            {/* ⭐ AI 报告区：可折叠 + Markdown 渲染 */}
+            {/* AI 报告区（可选，折叠） */}
             {(aiReport || aiLoading || aiError) && (
               <div className="bg-gradient-to-br from-violet-50 via-white to-indigo-50/60 rounded-2xl border border-violet-100 shadow-sm mb-6">
                 <button
@@ -255,13 +279,11 @@ const MonthlyReportPage: React.FC = () => {
                         正在生成 AI 分析报告…
                       </div>
                     )}
-
                     {!aiLoading && aiError && (
                       <div className="text-sm text-red-600 py-2">
                         {aiError}
                       </div>
                     )}
-
                     {!aiLoading && !aiError && aiReport && (
                       <div className="prose prose-sm max-w-none prose-headings:text-gray-800 prose-p:text-gray-700 prose-li:text-gray-700 prose-strong:text-gray-900">
                         <ReactMarkdown>{aiReport}</ReactMarkdown>
@@ -296,6 +318,7 @@ const MonthlyReportPage: React.FC = () => {
               isProfit={isProfit}
             />
 
+            {/* ⭐ 图表区：从 Context 读，点「获取报告」后自动生成；刷新/切回来不丢 */}
             {aiPayload && <MonthlyCharts payload={aiPayload} />}
           </>
         )}
