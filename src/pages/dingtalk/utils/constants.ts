@@ -21,7 +21,7 @@ export function getStoreFromPaymentUnit(paymentUnit: string | null): string {
 }
 
 /* ============================================================
- * ⭐ 模板名称 → 分类映射（按钉钉后台的分类）
+ * 模板分类（保留你原有的）
  * ============================================================ */
 export type TemplateCategory =
   | '假勤管理'
@@ -30,7 +30,6 @@ export type TemplateCategory =
   | '业务管理'
   | '其他';
 
-/* 分类顺序（前端展示顺序） */
 export const TEMPLATE_CATEGORY_ORDER: TemplateCategory[] = [
   '假勤管理',
   '智能财务',
@@ -39,7 +38,6 @@ export const TEMPLATE_CATEGORY_ORDER: TemplateCategory[] = [
   '其他',
 ];
 
-/* 精确名称映射（同名直接用） */
 export const TEMPLATE_NAME_TO_CATEGORY: Record<string, TemplateCategory> = {
   /* 假勤管理 */
   '出差申请': '假勤管理',
@@ -74,57 +72,37 @@ export const TEMPLATE_NAME_TO_CATEGORY: Record<string, TemplateCategory> = {
   '轻量审批-权限申请': '其他',
 };
 
-/* ⭐ 从模板名推断分类（支持模糊匹配） */
 export function getTemplateCategory(templateName: string): TemplateCategory {
   if (!templateName) return '其他';
 
-  /* 1) 精确匹配 */
   if (TEMPLATE_NAME_TO_CATEGORY[templateName]) {
     return TEMPLATE_NAME_TO_CATEGORY[templateName];
   }
 
-  /* 2) 模糊匹配关键词 */
   const name = templateName;
 
-  /* 假勤管理 */
   if (name.includes('请假') || name.includes('出差') || name.includes('加班') ||
       name.includes('外出') || name.includes('调休') || name.includes('考勤')) {
     return '假勤管理';
   }
 
-  /* 智能财务 */
   if (
-    name.includes('付款') ||
-    name.includes('借款') ||
-    name.includes('备用金') ||
-    name.includes('报销') ||
-    name.includes('退费') ||
-    name.includes('退款') ||
-    name.includes('资产') ||
-    name.includes('银行账户') ||
-    name.includes('费用') ||
-    name.includes('底薪、佣金支付申请') 
+    name.includes('付款') || name.includes('借款') || name.includes('备用金') ||
+    name.includes('报销') || name.includes('退费') || name.includes('退款') ||
+    name.includes('资产') || name.includes('银行账户') || name.includes('费用') ||
+    name.includes('底薪、佣金支付申请')
   ) {
     return '智能财务';
   }
 
-  /* 法务管理 */
   if (
-    name.includes('印章') ||
-    name.includes('证照') ||
-    name.includes('档案') ||
-    name.includes('合同用印') ||
-    name.includes('法务')
+    name.includes('印章') || name.includes('证照') || name.includes('档案') ||
+    name.includes('合同用印') || name.includes('法务')
   ) {
     return '法务管理';
   }
 
-  /* 业务管理 */
-  if (
-    name.includes('请示') ||
-    name.includes('会签') ||
-    name.includes('审批')
-  ) {
+  if (name.includes('请示') || name.includes('会签') || name.includes('审批')) {
     return '业务管理';
   }
 
@@ -161,5 +139,113 @@ export const COLUMNS: ColumnDef[] = [
 
 export const COLUMN_STORAGE_KEY = 'dingtalk_report_visible_columns_v1';
 
-/* 排除的模板（不显示） */
 export const EXCLUDE_TEMPLATES = ['银行账户'];
+
+/* ============================================================
+ * ⭐ 会员退费 → 门店推断（按「事项/明细」文本里的关键字）
+ *
+ *   判断依据（只读「事项 / 明细」类字段）：
+ *     - 明细列表（JSON 里的「事项」value）
+ *     - 退卡原因（会员退费主字段）
+ *     - 事项 / 事项/明细 / 报销事由 / 费用类型
+ *     - 付款内容提要 / 付款事由 / 付款用途 / 借款提要
+ *     - 备注 / 说明 / 用途 / 摘要 / 事由
+ *     - items[].content
+ *
+ *   命中「富贵园」或「装修」→ 富贵园公司
+ *   否则                → 哈德门公司
+ * ============================================================ */
+import type { DingTalkReportItem } from '../../../api/dingtalk';
+
+export const MEMBER_REFUND_TPL = '会员退费';
+export const FU_GUI_YUAN_UNIT = '北京林朗韵动体育管理有限公司';
+export const HA_DE_MEN_UNIT = '北京林朗悦动体育管理有限公司';
+export const REFUND_KEYWORDS = ['富贵园', '装修'];
+
+/** 只采集「事项 / 明细」类的文本，用于判断门店 */
+function collectRefundItemText(item: DingTalkReportItem): string {
+  const parts: string[] = [];
+
+  /* 1) items[].content */
+  if (Array.isArray(item.items)) {
+    item.items.forEach((it: any) => {
+      if (it?.content) parts.push(String(it.content));
+    });
+  }
+
+  const fv = item.formValues || {};
+
+  /* 2) 明细列表（JSON 字符串，取「事项」列） */
+  const rawDetail = fv['明细列表'];
+  if (typeof rawDetail === 'string' && rawDetail && rawDetail !== 'null') {
+    try {
+      const parsed = JSON.parse(rawDetail);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((row: any) => {
+          (row?.rowValue || []).forEach((f: any) => {
+            const label = String(f?.label || '');
+            if (
+              label.includes('事项') ||
+              label.includes('内容') ||
+              label.includes('名称')
+            ) {
+              if (f?.value != null && f.value !== 'null') {
+                parts.push(String(f.value));
+              }
+            }
+          });
+        });
+      }
+    } catch {
+      parts.push(String(rawDetail));
+    }
+  }
+
+  /* 3) 事项 / 明细 类的文本字段 */
+  [
+    '退卡原因',
+    '事项',
+    '事项/明细',
+    '报销事由',
+    '费用类型',
+    '明细',
+    '付款内容提要',
+    '付款事由',
+    '付款用途',
+    '借款提要',
+    '备注',
+    '说明',
+    '用途',
+    '摘要',
+    '事由',
+  ].forEach((k) => {
+    const v = fv[k];
+    if (v == null || v === 'null' || v === '') return;
+    if (typeof v === 'object') {
+      try { parts.push(JSON.stringify(v)); } catch {}
+    } else {
+      parts.push(String(v));
+    }
+  });
+
+  return parts.join(' ');
+}
+
+/**
+ * 会员退费 → 推断付款单位
+ *  - 命中「富贵园 / 装修」→ 富贵园公司
+ *  - 否则 → 哈德门公司
+ *  - 非会员退费 / 已有 paymentUnit → 返回 null
+ */
+export function inferRefundPaymentUnit(
+  item: DingTalkReportItem
+): string | null {
+  if (item.templateName !== MEMBER_REFUND_TPL) return null;
+  if (item.paymentUnit && String(item.paymentUnit).trim()) return null;
+
+  const combined = collectRefundItemText(item);
+  if (!combined) return HA_DE_MEN_UNIT;
+
+  const hit = REFUND_KEYWORDS.some((k) => combined.includes(k));
+  return hit ? FU_GUI_YUAN_UNIT : HA_DE_MEN_UNIT;
+}

@@ -2,18 +2,20 @@ import { useCallback, useMemo, useState } from 'react';
 import {
   fetchDingTalkReport,
   type DingTalkReportItem,
+  type DingTalkSyncResult,
 } from '../../../api/dingtalk';
-import { getStoreFromPaymentUnit } from '../utils/constants';
+import {
+  getStoreFromPaymentUnit,
+  inferRefundPaymentUnit, // ⭐ 从 constants 引入
+} from '../utils/constants';
 import { extractAmount } from '../utils/extract';
 
 interface SearchParams {
   start: string;
   end: string;
-  /** ⭐ 以下三项仅用于本地过滤，不传后端 */
   templateTypes: string[];
   paymentUnits: string[];
   onlyApproved: boolean;
-  /** ⭐ 0=只读缓存 1=同步并查询 */
   sync?: 0 | 1;
 }
 
@@ -21,7 +23,8 @@ export interface ReportMeta {
   totalCount: number;
   totalTemplates: number;
   costMs: number;
-  source?: string; // ⭐ 'cache' | 'dingtalk+sync'
+  source?: string;
+  syncResult?: DingTalkSyncResult;
 }
 
 export interface TypeSummary {
@@ -38,45 +41,7 @@ export interface StoreSummary {
 }
 
 /* ============================================================
- * 会员退费 → 付款单位推断
- * ============================================================ */
-const MEMBER_REFUND_TPL = '会员退费';
-const FU_GUI_YUAN_UNIT = '北京林朗韵动体育管理有限公司';
-const HA_DE_MEN_UNIT = '北京林朗悦动体育管理有限公司';
-const REFUND_KEYWORDS = ['富贵园', '装修'];
-
-function collectAllText(item: DingTalkReportItem): string {
-  const parts: string[] = [];
-  const fv = item.formValues || {};
-  Object.values(fv).forEach((v) => {
-    if (v === null || v === undefined) return;
-    if (typeof v === 'object') {
-      try { parts.push(JSON.stringify(v)); } catch {}
-    } else {
-      const s = String(v);
-      if (s && s !== 'null') parts.push(s);
-    }
-  });
-  if (Array.isArray(item.items)) {
-    item.items.forEach((it: any) => {
-      if (it?.content) parts.push(String(it.content));
-    });
-  }
-  if (item.title) parts.push(String(item.title));
-  return parts.join(' ');
-}
-
-function inferRefundPaymentUnit(item: DingTalkReportItem): string | null {
-  if (item.templateName !== MEMBER_REFUND_TPL) return null;
-  if (item.paymentUnit && String(item.paymentUnit).trim()) return null;
-  const combined = collectAllText(item);
-  if (!combined) return HA_DE_MEN_UNIT;
-  const hit = REFUND_KEYWORDS.some((k) => combined.includes(k));
-  return hit ? FU_GUI_YUAN_UNIT : HA_DE_MEN_UNIT;
-}
-
-/* ============================================================
- * ⭐ 前端过滤逻辑
+ * 前端过滤逻辑
  * ============================================================ */
 
 function filterByStatus(
@@ -145,18 +110,12 @@ export function useDingTalkReport() {
       return;
     }
 
-    /* ⭐ 只有「同步并查询」才弹确认 */
     if (needSync) {
-      if (
-        !confirm(
-          '将从钉钉同步未完成的流程（含审批中），可能耗时较长。继续？'
-        )
-      ) {
+      if (!confirm('将从钉钉同步未完成的流程（含审批中），可能耗时较长。继续？')) {
         return;
       }
     }
 
-    /* ⭐ 同步筛选条件到 hook 内部 state */
     setOnlyApproved(!!params.onlyApproved);
     setPaymentUnits(params.paymentUnits || []);
     setTemplateTypes(params.templateTypes || []);
@@ -167,7 +126,6 @@ export function useDingTalkReport() {
     setMeta(null);
 
     try {
-      /* ⭐ 永远只传 start / end / sync —— 后端返回全量 */
       const data = await fetchDingTalkReport({
         start,
         end,
@@ -175,7 +133,7 @@ export function useDingTalkReport() {
       });
       let allResults: DingTalkReportItem[] = data.results || [];
 
-      /* 会员退费 → 推断付款单位 */
+      /* 会员退费 → 推断付款单位（复用 constants 里的函数） */
       allResults = allResults.map((r) => {
         const inferred = inferRefundPaymentUnit(r);
         if (inferred && (!r.paymentUnit || !String(r.paymentUnit).trim())) {
@@ -189,7 +147,8 @@ export function useDingTalkReport() {
         totalCount: allResults.length,
         totalTemplates: data.totalTemplates,
         costMs: data.costMs,
-        source: data.source, // ⭐ 透传 source
+        source: data.source,
+        syncResult: data.syncResult,
       });
     } catch (e: any) {
       console.error('[DingTalk] 查询失败', e);
@@ -199,7 +158,6 @@ export function useDingTalkReport() {
     }
   }, []);
 
-  /* ⭐ 三层本地过滤 */
   const results = useMemo(() => {
     let list = filterByStatus(rawResults, onlyApproved);
     list = filterByPaymentUnits(list, paymentUnits);
@@ -207,7 +165,6 @@ export function useDingTalkReport() {
     return list;
   }, [rawResults, onlyApproved, paymentUnits, templateTypes]);
 
-  /* 类型 → 付款单位 分组 */
   const grouped = useMemo(() => {
     const typeMap = new Map<string, Map<string, DingTalkReportItem[]>>();
     results.forEach((r) => {
@@ -235,7 +192,6 @@ export function useDingTalkReport() {
     }));
   }, [results]);
 
-  /* 门店 → 类型 分组 */
   const groupedByStore = useMemo(() => {
     const storeMap = new Map<
       string,

@@ -14,6 +14,15 @@ interface SyncConfig {
   last_run_message: string | null;
 }
 
+interface Props {
+  /** ⭐ 外部同步完成后推入的最新结果 */
+  externalLastRun?: {
+    finishedAt: string;
+    status: 'success' | 'failed';
+    message: string;
+  } | null;
+}
+
 const DEFAULT_CONFIG: SyncConfig = {
   enabled: true,
   schedule_mode: 'daily',
@@ -25,21 +34,18 @@ const DEFAULT_CONFIG: SyncConfig = {
   last_run_message: null,
 };
 
-/* ⭐ 前端兜底：把 ISO 时间格式化成 "YYYY-MM-DD HH:mm:ss" */
 function formatDateTime(input?: string | null): string {
   if (!input) return '';
   if (!input.includes('T')) return input;
-
   const d = new Date(input);
   if (isNaN(d.getTime())) return input;
-
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(
     d.getHours()
   )}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-export const DingTalkSyncPanel: React.FC = () => {
+export const DingTalkSyncPanel: React.FC<Props> = ({ externalLastRun }) => {
   const [expanded, setExpanded] = useState(false);
   const [config, setConfig] = useState<SyncConfig>(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(false);
@@ -47,7 +53,6 @@ export const DingTalkSyncPanel: React.FC = () => {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
 
-  /* 拉配置 */
   const fetchConfig = async () => {
     setLoading(true);
     setError('');
@@ -67,7 +72,17 @@ export const DingTalkSyncPanel: React.FC = () => {
     fetchConfig();
   }, []);
 
-  /* 保存配置 */
+  /* ⭐ 外部同步完成 → 直接覆盖面板上的 last_run 信息，无需重新请求 */
+  useEffect(() => {
+    if (!externalLastRun) return;
+    setConfig((prev) => ({
+      ...prev,
+      last_run_at: externalLastRun.finishedAt || prev.last_run_at,
+      last_run_status: externalLastRun.status,
+      last_run_message: externalLastRun.message,
+    }));
+  }, [externalLastRun]);
+
   const handleSave = async () => {
     setSaving(true);
     setError('');
@@ -93,7 +108,6 @@ export const DingTalkSyncPanel: React.FC = () => {
     }
   };
 
-  /* 立即同步 */
   const handleSyncNow = async () => {
     if (!confirm('立即从钉钉同步一次？可能耗时较长。')) return;
     setRunning(true);
@@ -110,12 +124,18 @@ export const DingTalkSyncPanel: React.FC = () => {
     }
   };
 
-  /* 状态徽章 */
   const renderLastRun = () => {
     if (!config.last_run_at)
       return <span className="text-gray-400">从未执行</span>;
 
-    const status = config.last_run_status;
+    let status = config.last_run_status;
+    if (status === 'running' && config.last_run_at) {
+      const t = new Date(config.last_run_at).getTime();
+      if (!isNaN(t) && Date.now() - t > 10 * 60 * 1000) {
+        status = 'failed';
+      }
+    }
+
     const icon =
       status === 'success' ? (
         <CheckCircle2 className="w-3 h-3 text-emerald-600" />
@@ -138,7 +158,6 @@ export const DingTalkSyncPanel: React.FC = () => {
         title={config.last_run_message || ''}
       >
         {icon}
-        {/* ⭐ 统一格式化 */}
         {formatDateTime(config.last_run_at)}
       </span>
     );
@@ -146,7 +165,6 @@ export const DingTalkSyncPanel: React.FC = () => {
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm mb-6">
-      {/* 折叠头 */}
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -180,7 +198,6 @@ export const DingTalkSyncPanel: React.FC = () => {
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
-            {/* 启用 */}
             <label className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-xs cursor-pointer hover:bg-gray-50">
               <input
                 type="checkbox"
@@ -193,7 +210,6 @@ export const DingTalkSyncPanel: React.FC = () => {
               启用定时同步
             </label>
 
-            {/* 模式 */}
             <div className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-xs">
               <span className="text-gray-500 shrink-0">模式</span>
               <select
@@ -211,7 +227,6 @@ export const DingTalkSyncPanel: React.FC = () => {
               </select>
             </div>
 
-            {/* 时间 / 间隔 */}
             {config.schedule_mode === 'daily' ? (
               <div className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-xs">
                 <span className="text-gray-500 shrink-0">每天</span>
@@ -252,7 +267,6 @@ export const DingTalkSyncPanel: React.FC = () => {
               </div>
             )}
 
-            {/* 回看天数 */}
             <div className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-xs">
               <span className="text-gray-500 shrink-0">回看</span>
               <input

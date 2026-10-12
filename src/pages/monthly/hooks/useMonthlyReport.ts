@@ -2,10 +2,19 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchPlanByMonth, fetchSimulationSetting } from '../../../api/compensation';
 import { fetchStaffStatus } from '../../../api/payrollStatus';
 import { getCardOrderList, type FinancialFlowItem } from '../../../api/stats';
+import {
+  fetchDingTalkMonthlySummary,
+  type DingTalkReportItem,
+} from '../../../api/dingtalk';
 import { usePayroll } from '../../../hooks/usePayroll';
 import type { PayrollResult } from '../../../utils/payroll';
 import { loadRewardsCatalog } from '../../../utils/payrollStorage';
 import { useAppData } from '../../../contexts/AppDataContext';
+import { getStoreById } from '../../../constants/stores'; // ⭐ 门店名转换
+import {
+  getStoreFromPaymentUnit,
+  inferRefundPaymentUnit, // ⭐ 复用推断逻辑
+} from '../../dingtalk/utils/constants';
 import {
   aggregateOrders,
   getIncomeAmount,
@@ -32,68 +41,101 @@ const EMPTY_COST: FixedCostDetail = {
   otherFee: 0,
 };
 
-/** ⭐ fetchAll 返回的快照类型 */
 export interface MonthlyReportSnapshot {
   orders: FinancialFlowItem[];
   payrollResults: PayrollResult[];
   fixedCostDetail: FixedCostDetail;
+  dingtalkItems: DingTalkReportItem[];
+}
+
+/**
+ * ⭐ 先推断退费门店，再按当前门店过滤
+ *   - 退费：inferRefundPaymentUnit 补 paymentUnit
+ *   - 过滤：getStoreFromPaymentUnit(paymentUnit) === storeName
+ */
+function normalizeAndFilter(
+  items: DingTalkReportItem[],
+  storeName: string
+): DingTalkReportItem[] {
+  /* 1) 会员退费 → 按「事项/明细」文本推断 paymentUnit */
+  const withUnit = items.map((r) => {
+    if (r.templateName !== '会员退费') return r;
+    if (r.paymentUnit && String(r.paymentUnit).trim()) return r;
+    const inferred = inferRefundPaymentUnit(r);
+    return inferred ? { ...r, paymentUnit: inferred } : r;
+  });
+
+  /* 2) 按门店名过滤（富贵园/哈德门） */
+  if (!storeName) return withUnit;
+  return withUnit.filter((r) => {
+    const s = getStoreFromPaymentUnit(r.paymentUnit);
+    return s === storeName;
+  });
 }
 
 export function useMonthlyReport(storeId: string, selectedMonth: string) {
   const { data: appData, update: updateAppData } = useAppData();
-
   const cacheKey = `${storeId}_${selectedMonth}`;
 
   const [hasLoaded, setHasLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  /* payrollResults 从全局 store 取 */
+  const [dingtalkSummary, setDingtalkSummary] = useState<{
+    count: number;
+    total: number;
+  }>({ count: 0, total: 0 });
+
   const payrollResults = appData.monthlyPayrollByKey[cacheKey] || [];
   const setPayrollResults = useCallback(
     (updater: React.SetStateAction<PayrollResult[]>) => {
       updateAppData('monthlyPayrollByKey', (prev) => {
         const cur = prev[cacheKey] || [];
-        const next =
-          typeof updater === 'function' ? (updater as any)(cur) : updater;
+        const next = typeof updater === 'function' ? (updater as any)(cur) : updater;
         return { ...prev, [cacheKey]: next };
       });
     },
     [updateAppData, cacheKey]
   );
 
-  /* orderList 从全局 store 取 */
   const orderList = appData.monthlyOrdersByKey[cacheKey] || [];
   const setOrderList = useCallback(
     (updater: React.SetStateAction<FinancialFlowItem[]>) => {
       updateAppData('monthlyOrdersByKey', (prev) => {
         const cur = prev[cacheKey] || [];
-        const next =
-          typeof updater === 'function' ? (updater as any)(cur) : updater;
+        const next = typeof updater === 'function' ? (updater as any)(cur) : updater;
         return { ...prev, [cacheKey]: next };
       });
     },
     [updateAppData, cacheKey]
   );
 
-  /* fixedCostDetail 从全局 store 取 */
   const fixedCostDetail: FixedCostDetail =
     appData.monthlyFixedCostByKey[cacheKey] || EMPTY_COST;
 
   const fixedCost =
-    fixedCostDetail.propertyFee +
-    fixedCostDetail.electricityFee +
-    fixedCostDetail.rent +
-    fixedCostDetail.waterFee +
-    fixedCostDetail.networkFee +
-    fixedCostDetail.otherFee;
+    fixedCostDetail.propertyFee + fixedCostDetail.electricityFee +
+    fixedCostDetail.rent + fixedCostDetail.waterFee +
+    fixedCostDetail.networkFee + fixedCostDetail.otherFee;
 
   const setFixedCostDetail = useCallback(
     (next: FixedCostDetail) => {
       updateAppData('monthlyFixedCostByKey', (prev) => ({
-        ...prev,
-        [cacheKey]: next,
+        ...prev, [cacheKey]: next,
       }));
+    },
+    [updateAppData, cacheKey]
+  );
+
+  const dingtalkItems: DingTalkReportItem[] =
+    (appData as any).monthlyDingtalkByKey?.[cacheKey] || [];
+  const setDingtalkItems = useCallback(
+    (updater: React.SetStateAction<DingTalkReportItem[]>) => {
+      updateAppData('monthlyDingtalkByKey' as any, (prev: any) => {
+        const cur = prev?.[cacheKey] || [];
+        const next = typeof updater === 'function' ? (updater as any)(cur) : updater;
+        return { ...prev, [cacheKey]: next };
+      });
     },
     [updateAppData, cacheKey]
   );
@@ -101,9 +143,7 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
   const username = import.meta.env.VITE_TEST_USERNAME || '';
   const password = import.meta.env.VITE_TEST_PASSWORD || '';
   const { run, loading: payrollLoading } = usePayroll({
-    username,
-    password,
-    busId: storeId,
+    username, password, busId: storeId,
   });
 
   const reset = useCallback(() => {
@@ -111,7 +151,6 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     setError('');
   }, []);
 
-  /* ---------- 拉取全部数据（⭐ 返回快照） ---------- */
   const fetchAll = useCallback(
     async (month: string): Promise<MonthlyReportSnapshot | null> => {
       if (!storeId || !month) return null;
@@ -120,7 +159,6 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
       try {
         const { begin, end } = getMonthRange(month);
 
-        /* 1) 员工状态 */
         let newbieSet = new Set<string>();
         let excludedSet = new Set<string>();
         try {
@@ -129,32 +167,21 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
             if (s.isNewbie) newbieSet.add(s.staffId);
             if (s.isExcluded) excludedSet.add(s.staffId);
           });
-        } catch (e) {
-          console.warn('[MonthlyReport] 拉员工状态失败', e);
-        }
+        } catch (e) { console.warn('[MonthlyReport] 拉员工状态失败', e); }
 
-        /* 2) 方案配置 */
         const plan = await fetchPlanByMonth(storeId, month);
 
-        /* 3) 营销订单 */
         let orders: FinancialFlowItem[] = [];
         try {
           const orderRes = await getCardOrderList({
-            bus_id: storeId,
-            sale_id: '',
-            begin_date: begin,
-            end_date: end,
-            page_no: 1,
-            page_size: 2000,
+            bus_id: storeId, sale_id: '',
+            begin_date: begin, end_date: end,
+            page_no: 1, page_size: 2000,
           });
           orders = orderRes.list || [];
           setOrderList(orders);
-        } catch (e) {
-          console.warn('[MonthlyReport] 拉订单失败', e);
-          setOrderList([]);
-        }
+        } catch (e) { console.warn('[MonthlyReport] 拉订单失败', e); setOrderList([]); }
 
-        /* 4) 固定成本 */
         let costDetail: FixedCostDetail = EMPTY_COST;
         try {
           const sim = await fetchSimulationSetting(storeId, month);
@@ -167,87 +194,87 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
             otherFee: Number(sim?.otherFee || 0),
           };
           setFixedCostDetail(costDetail);
+        } catch (e) { console.warn('[MonthlyReport] 拉测算设置失败', e); setFixedCostDetail(EMPTY_COST); }
+
+        /* ⭐ 钉钉流程：只拉缓存（不按门店过滤），前端推断+过滤 */
+        let dtItems: DingTalkReportItem[] = [];
+        const storeName = getStoreById(storeId)?.name || storeId;
+        try {
+          const dtData = await fetchDingTalkMonthlySummary({
+            month,
+            /* 仍传 store，后端能做初步过滤就做；不做也没关系 */
+            store: storeName,
+          });
+          const raw = dtData.results || [];
+
+          /* ⭐ 先推断退费门店，再按门店过滤 */
+          dtItems = normalizeAndFilter(raw, storeName);
+
+          setDingtalkSummary({
+            count: dtItems.length,
+            total: dtItems.reduce((s, r) => s + Number(r.amount || 0), 0),
+          });
+          setDingtalkItems(dtItems);
+          console.log(
+            `[MonthlyReport] 钉钉流程 ${storeName}: ${raw.length} → ${dtItems.length}`
+          );
         } catch (e) {
-          console.warn('[MonthlyReport] 拉测算设置失败', e);
-          setFixedCostDetail(EMPTY_COST);
+          console.warn('[MonthlyReport] 拉钉钉流程失败', e);
+          setDingtalkItems([]);
+          setDingtalkSummary({ count: 0, total: 0 });
         }
 
-        /* 5) 薪酬计算 */
         let payroll: PayrollResult[] = [];
         if (plan) {
           try {
             const catalog = loadRewardsCatalog();
-            const res = await run(
-              month,
-              plan,
-              {},
-              true,
-              newbieSet,
-              {
-                rewardsCatalog: catalog,
-                departmentRewards: plan.departmentRewards,
-                tempRewardsByStaff: plan.tempRewards,
-              }
-            );
-            payroll = (res.results || []).filter(
-              (r) => !excludedSet.has(r.staffId)
-            );
+            const res = await run(month, plan, {}, true, newbieSet, {
+              rewardsCatalog: catalog,
+              departmentRewards: plan.departmentRewards,
+              tempRewardsByStaff: plan.tempRewards,
+            });
+            payroll = (res.results || []).filter((r) => !excludedSet.has(r.staffId));
             setPayrollResults(payroll);
-          } catch (e) {
-            console.warn('[MonthlyReport] 薪酬计算失败', e);
-            setPayrollResults([]);
-          }
-        } else {
-          setPayrollResults([]);
-        }
+          } catch (e) { console.warn('[MonthlyReport] 薪酬计算失败', e); setPayrollResults([]); }
+        } else { setPayrollResults([]); }
 
         setHasLoaded(true);
 
-        /* ⭐ 返回快照 */
         return {
           orders,
           payrollResults: payroll,
           fixedCostDetail: costDetail,
+          dingtalkItems: dtItems,
         };
       } catch (e: any) {
         console.error('[MonthlyReport] 加载失败', e);
-        setError(
-          e?.response?.data?.errormsg || e?.message || '加载数据失败'
-        );
+        setError(e?.response?.data?.errormsg || e?.message || '加载数据失败');
         return null;
       } finally {
         setLoading(false);
       }
     },
-    [storeId, run, setOrderList, setPayrollResults, setFixedCostDetail]
+    [storeId, run, setOrderList, setPayrollResults, setFixedCostDetail, setDingtalkItems]
   );
 
+  useEffect(() => { reset(); }, [storeId, reset]);
   useEffect(() => {
-    reset();
-  }, [storeId, reset]);
-
-  useEffect(() => {
-    setHasLoaded(false);
-    setError('');
+    setHasLoaded(false); setError('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMonth]);
 
-  /* 从全局 store 恢复 hasLoaded */
   useEffect(() => {
     if (!storeId || !selectedMonth) return;
     const key = `${storeId}_${selectedMonth}`;
     const hasPayroll = (appData.monthlyPayrollByKey[key]?.length || 0) > 0;
     const hasOrders = (appData.monthlyOrdersByKey[key]?.length || 0) > 0;
     const hasFixed = !!appData.monthlyFixedCostByKey[key];
-    if (hasPayroll || hasOrders || hasFixed) {
-      setHasLoaded(true);
-    }
+    const hasDingtalk = (((appData as any).monthlyDingtalkByKey?.[key]) || []).length > 0;
+    if (hasPayroll || hasOrders || hasFixed || hasDingtalk) setHasLoaded(true);
   }, [
-    storeId,
-    selectedMonth,
-    appData.monthlyPayrollByKey,
-    appData.monthlyOrdersByKey,
-    appData.monthlyFixedCostByKey,
+    storeId, selectedMonth,
+    appData.monthlyPayrollByKey, appData.monthlyOrdersByKey,
+    appData.monthlyFixedCostByKey, (appData as any).monthlyDingtalkByKey,
   ]);
 
   const payrollSummary = useMemo(() => {
@@ -262,22 +289,15 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
         total: acc.total + r.total,
       }),
       {
-        headcount: 0,
-        baseSalary: 0,
-        salesCommission: 0,
-        classCommission: 0,
-        absentDeduction: 0,
-        rewardsTotal: 0,
-        total: 0,
+        headcount: 0, baseSalary: 0, salesCommission: 0,
+        classCommission: 0, absentDeduction: 0, rewardsTotal: 0, total: 0,
       }
     );
   }, [payrollResults]);
 
   const marketingSummary = useMemo(() => {
     const agg = aggregateOrders(orderList);
-    let cardAmount = 0;
-    let incomeAmount = 0;
-    let prePayment = 0;
+    let cardAmount = 0, incomeAmount = 0, prePayment = 0;
     orderList.forEach((it) => {
       cardAmount += getCardAmount(it);
       incomeAmount += getIncomeAmount(it);
@@ -307,5 +327,7 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     isProfit,
     fetchAll,
     reset,
+    dingtalkItems,
+    dingtalkSummary,
   };
 }

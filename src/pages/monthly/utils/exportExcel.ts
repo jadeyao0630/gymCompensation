@@ -8,6 +8,13 @@ import {
   type OverallSummary,
 } from '../../marketing/utils/aggregate';
 import type { FixedCostDetail } from '../hooks/useMonthlyReport';
+import type { DingTalkReportItem } from '../../../api/dingtalk';
+import { getStoreFromPaymentUnit } from '../../dingtalk/utils/constants';
+import {
+  extractAmount,
+  extractItems,
+  extractPayeeAccount,
+} from '../../dingtalk/utils/extract';
 
 interface ExportParams {
   storeName: string;
@@ -30,6 +37,8 @@ interface ExportParams {
   fixedCost: number;
   fixedCostDetail: FixedCostDetail;
   profit: number;
+  /* ⭐ 钉钉流程 */
+  dingtalkItems?: DingTalkReportItem[];
 }
 
 export function exportMonthlyReport(params: ExportParams) {
@@ -43,6 +52,7 @@ export function exportMonthlyReport(params: ExportParams) {
     fixedCost,
     fixedCostDetail,
     profit,
+    dingtalkItems = [],
   } = params;
 
   const wb = XLSX.utils.book_new();
@@ -81,6 +91,17 @@ export function exportMonthlyReport(params: ExportParams) {
       marketingSummary.incomeAmount > 0
         ? `${((profit / marketingSummary.incomeAmount) * 100).toFixed(2)}%`
         : '—',
+    ],
+    [],
+    ['— 钉钉流程（仅参考） —', ''],
+    ['钉钉流程笔数', dingtalkItems.length],
+    [
+      '钉钉流程金额',
+      dingtalkItems.reduce(
+        (s, r) =>
+          s + (extractAmount(r.templateName || '', r.formValues || {}) || 0),
+        0
+      ),
     ],
   ];
   const ws1 = XLSX.utils.aoa_to_sheet(overview);
@@ -165,6 +186,49 @@ export function exportMonthlyReport(params: ExportParams) {
   const ws4 = XLSX.utils.aoa_to_sheet(costRows);
   ws4['!cols'] = [{ wch: 18 }, { wch: 14 }];
   XLSX.utils.book_append_sheet(wb, ws4, '固定成本');
+
+  /* ⭐ Sheet 5：钉钉流程 */
+  const dtRows: any[][] = [
+    ['流程类型', '门店', '付款单位', '标题', '事项', '金额', '收款账户', '状态', '创建时间', '完成时间'],
+  ];
+  dingtalkItems.forEach((r) => {
+    dtRows.push([
+      r.templateName || '',
+      getStoreFromPaymentUnit(r.paymentUnit) || '',
+      r.paymentUnit || '',
+      r.title || '',
+      extractItems(r.templateName || '', r.formValues || {}),
+      extractAmount(r.templateName || '', r.formValues || {}) || 0,
+      extractPayeeAccount(r.formValues || {}) || '',
+      r.status || '',
+      r.createTime || '',
+      r.finishTime || '',
+    ]);
+  });
+  if (dingtalkItems.length > 0) {
+    dtRows.push([
+      '合计',
+      '',
+      '',
+      '',
+      '',
+      dingtalkItems.reduce(
+        (s, r) =>
+          s + (extractAmount(r.templateName || '', r.formValues || {}) || 0),
+        0
+      ),
+      '',
+      '',
+      '',
+      '',
+    ]);
+  }
+  const ws5 = XLSX.utils.aoa_to_sheet(dtRows);
+  ws5['!cols'] = [
+    { wch: 18 }, { wch: 10 }, { wch: 30 }, { wch: 36 }, { wch: 36 },
+    { wch: 14 }, { wch: 24 }, { wch: 12 }, { wch: 20 }, { wch: 20 },
+  ];
+  XLSX.utils.book_append_sheet(wb, ws5, '钉钉流程');
 
   const safeName = storeName.replace(/[\\/:*?"<>|]/g, '_');
   XLSX.writeFile(wb, `${safeName}_${month}_月度经营报告.xlsx`);

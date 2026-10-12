@@ -27,6 +27,7 @@ import DingTalkFilterBar from './components/DingTalkFilterBar';
 import GroupedResults from './components/GroupedResults';
 import TypePieChart, { getPieColor } from './components/TypePieChart';
 
+/* ⭐ 判断收款账户是否被排除 */
 function isPayeeExcluded(
   payeeAccount: string | null | undefined,
   excludeAccounts: string[],
@@ -39,11 +40,126 @@ function isPayeeExcluded(
   return false;
 }
 
+/* ============================================================
+ * ⭐ 类别覆盖规则 1：收款账户 → 类别
+ * ============================================================ */
 const PAYEE_CATEGORY_OVERRIDES: Array<{ payee: string; category: string }> = [
   { payee: '山东云优人力资源服务有限公司', category: '薪酬佣金' },
 ];
 
-function resolveCategoryOverride(
+/* ============================================================
+ * ⭐ 类别覆盖规则 2：明细关键字 → 类别
+ * ============================================================ */
+interface KeywordCategoryRule {
+  category: string;
+  keywords: string[];
+  applyTemplates?: string[];
+}
+
+const KEYWORD_CATEGORY_RULES: KeywordCategoryRule[] = [
+  {
+    category: '固定费用',
+    keywords: ['水费', '电费', '物业费'],
+    applyTemplates: ['员工费用报销', '付款申请单'],
+  },
+];
+
+/**
+ * ⭐ 把一条记录的所有文本（事项 / 明细 / 标题 / 付款内容提要）合并成字符串
+ */
+function collectItemText(item: DingTalkReportItem): string {
+  const parts: string[] = [];
+
+  /* 1. items 数组（已解析） */
+  if (Array.isArray(item.items)) {
+    item.items.forEach((it: any) => {
+      if (it?.content) parts.push(String(it.content));
+    });
+  }
+
+  const fv = item.formValues || {};
+
+  /* 2. 明细列表：可能是 JSON 字符串 */
+  const rawDetail = fv['明细列表'];
+  if (rawDetail != null && rawDetail !== 'null' && rawDetail !== '') {
+    if (typeof rawDetail === 'string') {
+      try {
+        const parsed = JSON.parse(rawDetail);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((row: any) => {
+            (row?.rowValue || []).forEach((f: any) => {
+              const label = String(f?.label || '');
+              if (
+                label.includes('事项') ||
+                label.includes('内容') ||
+                label.includes('名称')
+              ) {
+                if (f?.value != null && f.value !== 'null' && f.value !== '') {
+                  parts.push(String(f.value));
+                }
+              }
+            });
+          });
+        }
+      } catch {
+        parts.push(String(rawDetail));
+      }
+    } else if (typeof rawDetail === 'object') {
+      try { parts.push(JSON.stringify(rawDetail)); } catch {}
+    }
+  }
+
+  /* 3. 标题 */
+  if (item.title) parts.push(String(item.title));
+
+  /* ⭐ 4. 常见文本字段（含「付款内容提要」） */
+  [
+    '事项',
+    '事项/明细',
+    '报销事由',
+    '费用类型',
+    '明细',
+    '备注',
+    '事由',
+    '用途',
+    '摘要',
+    '说明',
+    '付款内容提要', // ⭐ 付款申请单用这个
+    '付款事由',
+    '付款用途',
+  ].forEach((k) => {
+    const v = fv[k];
+    if (v == null || v === 'null' || v === '') return;
+    if (typeof v === 'object') {
+      try { parts.push(JSON.stringify(v)); } catch {}
+    } else {
+      parts.push(String(v));
+    }
+  });
+
+  return parts.join(' ');
+}
+
+function resolveKeywordCategory(item: DingTalkReportItem): string | null {
+  const text = collectItemText(item);
+  if (!text) return null;
+
+  for (const rule of KEYWORD_CATEGORY_RULES) {
+    if (
+      rule.applyTemplates &&
+      rule.applyTemplates.length > 0 &&
+      !rule.applyTemplates.includes(item.templateName || '')
+    ) {
+      continue;
+    }
+    if (rule.keywords.some((k) => k && text.includes(k))) {
+      return rule.category;
+    }
+  }
+  return null;
+}
+
+function resolvePayeeCategory(
   payeeAccount: string | null | undefined
 ): string | null {
   const raw = payeeAccount == null ? '' : String(payeeAccount).trim();
@@ -159,6 +275,12 @@ const DingTalkReportPage: React.FC = () => {
     setTemplateTypesInHook(names);
   };
 
+  const [externalLastRun, setExternalLastRun] = useState<{
+    finishedAt: string;
+    status: 'success' | 'failed';
+    message: string;
+  } | null>(null);
+
   const excludedPayeeIds = useMemo(() => {
     const set = new Set<string>();
     if (excludeAccounts.length === 0 && excludeKeywords.length === 0) return set;
@@ -181,21 +303,43 @@ const DingTalkReportPage: React.FC = () => {
   const categorizedResults = useMemo(() => {
     return filteredResults.map((r) => {
       const payee = r.payeeAccount || extractPayeeAccount(r.formValues || {});
-      const override = resolveCategoryOverride(payee);
+
+      const payeeCategory = resolvePayeeCategory(payee);
+      if (payeeCategory) {
+        return {
+          item: r,
+          category: payeeCategory,
+          overridden: true,
+          overrideBy: 'payee' as const,
+        };
+      }
+
+      const kwCategory = resolveKeywordCategory(r);
+      if (kwCategory) {
+        return {
+          item: r,
+          category: kwCategory,
+          overridden: true,
+          overrideBy: 'keyword' as const,
+        };
+      }
+
       return {
         item: r,
-        category: override || r.templateName || '未知',
-        overridden: !!override,
+        category: r.templateName || '未知',
+        overridden: false,
+        overrideBy: null,
       };
     });
   }, [filteredResults]);
 
-  const finalGrouped = useMemo(() => {
-    const needRebuild =
-      excludedPayeeIds.size > 0 ||
-      categorizedResults.some((c) => c.overridden);
+  const hasAnyOverride = useMemo(
+    () => categorizedResults.some((c) => c.overridden),
+    [categorizedResults]
+  );
 
-    if (!needRebuild) return grouped;
+  const finalGrouped = useMemo(() => {
+    if (excludedPayeeIds.size === 0 && !hasAnyOverride) return grouped;
 
     const map = new Map<
       string,
@@ -265,12 +409,10 @@ const DingTalkReportPage: React.FC = () => {
         units: Array.from(g.units.values()),
       }))
       .filter((g) => g.units.length > 0);
-  }, [grouped, categorizedResults, excludedPayeeIds]);
+  }, [grouped, categorizedResults, excludedPayeeIds, hasAnyOverride]);
 
   const storeCharts = useMemo(() => {
-    const needRebuild =
-      excludedPayeeIds.size > 0 ||
-      categorizedResults.some((c) => c.overridden);
+    const needRebuild = excludedPayeeIds.size > 0 || hasAnyOverride;
 
     if (!needRebuild) {
       return groupedByStore
@@ -338,9 +480,8 @@ const DingTalkReportPage: React.FC = () => {
           })),
       }))
       .filter((c) => c.slices.length > 0);
-  }, [groupedByStore, finalGrouped, excludedPayeeIds, categorizedResults]);
+  }, [groupedByStore, finalGrouped, excludedPayeeIds, hasAnyOverride]);
 
-  /* ⭐ 只查缓存 */
   const onSearch = () => {
     setSelectedType(null);
     setSelectedStore(null);
@@ -354,12 +495,10 @@ const DingTalkReportPage: React.FC = () => {
     });
   };
 
-  /* ⭐ 同步并查询 */
-  const onSyncAndSearch = () => {
-    if (!confirm('将从钉钉同步未完成的流程，可能耗时较长。是否继续？')) return;
+  const onSyncAndSearch = async () => {
     setSelectedType(null);
     setSelectedStore(null);
-    handleSearch({
+    await handleSearch({
       start,
       end,
       templateTypes,
@@ -368,6 +507,12 @@ const DingTalkReportPage: React.FC = () => {
       sync: 1,
     });
   };
+
+  useEffect(() => {
+    if (meta?.syncResult) {
+      setExternalLastRun(meta.syncResult);
+    }
+  }, [meta?.syncResult]);
 
   const filteredGrouped = useMemo(() => {
     let groups = finalGrouped;
@@ -466,7 +611,7 @@ const DingTalkReportPage: React.FC = () => {
           onExport={handleExport}
         />
 
-        <DingTalkSyncPanel />
+        <DingTalkSyncPanel externalLastRun={externalLastRun} />
 
         <DingTalkFilterBar
           start={start}

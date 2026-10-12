@@ -23,6 +23,7 @@ import { MonthlySummaryCards } from './components/MonthlySummaryCards';
 import { MonthlyDetailPanels } from './components/MonthlyDetailPanels';
 import { MonthlyProfitPanel } from './components/MonthlyProfitPanel';
 import { MonthlyCharts } from './components/MonthlyCharts';
+//import { MonthlyDingTalkPie } from './components/MonthlyDingTalkPie'; // ⭐ 新增
 import { MonthPicker } from '../../components/common/MonthPicker';
 import { usePersistedMonth } from '../../hooks/usePersistedMonth';
 
@@ -52,6 +53,9 @@ const MonthlyReportPage: React.FC = () => {
     profit,
     isProfit,
     fetchAll,
+    /* ⭐ 钉钉 */
+    dingtalkItems,
+    dingtalkSummary,
   } = useMonthlyReport(storeId, selectedMonth);
 
   const aiCacheKey = `${storeId}_${selectedMonth}`;
@@ -65,7 +69,7 @@ const MonthlyReportPage: React.FC = () => {
     }));
   };
 
-  /* ⭐ 图表 payload：Context + localStorage（点「获取报告」自动生成） */
+  /* ⭐ 图表 payload：Context + localStorage */
   const aiPayload = appData.monthlyAiPayloadByKey[aiCacheKey] || null;
   const setAiPayload = (payload: any) => {
     updateAppData('monthlyAiPayloadByKey', (prev) => ({
@@ -80,7 +84,6 @@ const MonthlyReportPage: React.FC = () => {
 
   const handleMonthChange = changeMonth;
 
-  /* ⭐ 获取报告：拉数据 + 自动生成 payload（图表不需要 AI） */
   const handleFetch = async () => {
     const snapshot = await fetchAll(selectedMonth);
 
@@ -91,11 +94,11 @@ const MonthlyReportPage: React.FC = () => {
       orderList: snapshot?.orders ?? orderList,
       payrollResults: snapshot?.payrollResults ?? payrollResults,
       fixedCostDetail: snapshot?.fixedCostDetail ?? fixedCostDetail,
-    });
+      dingtalkItems: snapshot?.dingtalkItems ?? dingtalkItems,
+    } as any);
     setAiPayload(payload);
   };
 
-  /* ⭐ 生成 AI 报告 */
   const handleGenerateAi = async () => {
     if (!hasLoaded) {
       alert('请先点击「获取报告」加载业务数据');
@@ -111,7 +114,8 @@ const MonthlyReportPage: React.FC = () => {
         orderList,
         payrollResults,
         fixedCostDetail,
-      });
+        dingtalkItems,
+      } as any);
 
       console.log('[AI payload]', payload);
 
@@ -143,6 +147,7 @@ const MonthlyReportPage: React.FC = () => {
       fixedCost,
       fixedCostDetail,
       profit,
+      dingtalkItems,
     });
   };
 
@@ -216,7 +221,7 @@ const MonthlyReportPage: React.FC = () => {
         {loading && (
           <div className="flex items-center justify-center py-12 text-gray-400">
             <Loader2 className="w-5 h-5 animate-spin mr-2" />
-            正在加载：拉订单 + 员工状态 + 计算薪酬 + 拉成本…
+            正在加载：拉订单 + 员工状态 + 计算薪酬 + 拉成本 + 拉钉钉流程…
           </div>
         )}
 
@@ -302,14 +307,21 @@ const MonthlyReportPage: React.FC = () => {
               fixedCost={fixedCost}
               profit={profit}
               isProfit={isProfit}
+              dingtalkSummary={dingtalkSummary}
+              storeName={storeName}   /* ⭐ 新增 */
             />
+
             <MonthlyDetailPanels
               marketing={marketingSummary}
               orderCount={orderList.length}
               payrollSummary={payrollSummary}
               fixedCost={fixedCost}
               fixedCostDetail={fixedCostDetail}
+              dingtalkItems={dingtalkItems}
+              dingtalkSummary={dingtalkSummary}
+              storeLabel={storeName} /* ⭐ 新增：传给饼图作为标题后缀 */
             />
+
             <MonthlyProfitPanel
               incomeAmount={marketingSummary.incomeAmount}
               payrollTotal={payrollSummary.total}
@@ -318,8 +330,10 @@ const MonthlyReportPage: React.FC = () => {
               isProfit={isProfit}
             />
 
-            {/* ⭐ 图表区：从 Context 读，点「获取报告」后自动生成；刷新/切回来不丢 */}
+            {/* ⭐ 图表区（营销 / 薪酬等） */}
             {aiPayload && <MonthlyCharts payload={aiPayload} />}
+
+            
           </>
         )}
       </div>

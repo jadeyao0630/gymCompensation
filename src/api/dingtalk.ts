@@ -16,7 +16,6 @@ export interface DingTalkOperationRecord {
   remark: string;
 }
 
-/** ⭐ 当前待办人 */
 export interface DingTalkPendingApprover {
   userId: string;
   userName: string;
@@ -40,10 +39,15 @@ export interface DingTalkReportItem {
   originatorName?: string;
   pendingApprovers?: DingTalkPendingApprover[];
   error?: string;
-  /* ⭐ 门店归属标记 */
   _autoAssigned?: boolean;
   _storeName?: string | null;
   _assignReason?: string;
+}
+
+export interface DingTalkSyncResult {
+  finishedAt: string;
+  status: 'success' | 'failed';
+  message: string;
 }
 
 export interface DingTalkReportResponse {
@@ -52,20 +56,22 @@ export interface DingTalkReportResponse {
   data: {
     startTime: number;
     endTime: number;
-    /** ⭐ 'cache' | 'dingtalk+sync' */
     source?: string;
-    filter: {
+    /** ⭐ 月综合报告专用 */
+    month?: string;
+    store?: string | null;
+    filter?: {
       type: string | null;
       company: string | null;
       excludeTemplates: string[];
       onlyApproved: boolean;
     };
     totalTemplates: number;
-    beforeFilterCount: number;
+    beforeFilterCount?: number;
     totalCount: number;
-    /** ⭐ 门店自动归属条数 */
     autoAssignedCount?: number;
     costMs: number;
+    syncResult?: DingTalkSyncResult;
     results: DingTalkReportItem[];
   };
 }
@@ -86,7 +92,6 @@ export interface FetchReportParams {
   type?: string;
   company?: string;
   onlyApproved?: boolean;
-  /** ⭐ 0=只读缓存 1=同步并查询 */
   sync?: 0 | 1;
 }
 
@@ -103,6 +108,27 @@ export async function fetchDingTalkReport(
         company: params.company || undefined,
         onlyApproved: params.onlyApproved === false ? '0' : undefined,
         sync: params.sync != null ? String(params.sync) : undefined,
+      },
+    }
+  );
+  return data.data;
+}
+
+/* ⭐ 月综合报告：按月份 + 门店读缓存 */
+export interface FetchMonthlySummaryParams {
+  month: string; // YYYY-MM
+  store?: string; // 门店名（'哈德门' / '富贵园'）
+}
+
+export async function fetchDingTalkMonthlySummary(
+  params: FetchMonthlySummaryParams
+): Promise<DingTalkReportResponse['data']> {
+  const { data } = await api.get<DingTalkReportResponse>(
+    '/api/dingtalk/monthly-summary',
+    {
+      params: {
+        month: params.month,
+        store: params.store || undefined,
       },
     }
   );
