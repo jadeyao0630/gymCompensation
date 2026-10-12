@@ -23,7 +23,6 @@ import { MonthlySummaryCards } from './components/MonthlySummaryCards';
 import { MonthlyDetailPanels } from './components/MonthlyDetailPanels';
 import { MonthlyProfitPanel } from './components/MonthlyProfitPanel';
 import { MonthlyCharts } from './components/MonthlyCharts';
-//import { MonthlyDingTalkPie } from './components/MonthlyDingTalkPie'; // ⭐ 新增
 import { MonthPicker } from '../../components/common/MonthPicker';
 import { usePersistedMonth } from '../../hooks/usePersistedMonth';
 
@@ -53,14 +52,19 @@ const MonthlyReportPage: React.FC = () => {
     profit,
     isProfit,
     fetchAll,
-    /* ⭐ 钉钉 */
+    /* 钉钉 */
     dingtalkItems,
     dingtalkSummary,
+    dingtalkBreakdown,
+    /* 口径拆分 */
+    adjustedPayroll,
+    adjustedFixedCost,
+    actualExpense,
+    estimatedExpense,
   } = useMonthlyReport(storeId, selectedMonth);
 
   const aiCacheKey = `${storeId}_${selectedMonth}`;
 
-  /* ⭐ AI 报告：Context + localStorage */
   const aiReport = appData.monthlyAiReportByKey[aiCacheKey] || '';
   const setAiReport = (text: string) => {
     updateAppData('monthlyAiReportByKey', (prev) => ({
@@ -69,7 +73,6 @@ const MonthlyReportPage: React.FC = () => {
     }));
   };
 
-  /* ⭐ 图表 payload：Context + localStorage */
   const aiPayload = appData.monthlyAiPayloadByKey[aiCacheKey] || null;
   const setAiPayload = (payload: any) => {
     updateAppData('monthlyAiPayloadByKey', (prev) => ({
@@ -95,6 +98,11 @@ const MonthlyReportPage: React.FC = () => {
       payrollResults: snapshot?.payrollResults ?? payrollResults,
       fixedCostDetail: snapshot?.fixedCostDetail ?? fixedCostDetail,
       dingtalkItems: snapshot?.dingtalkItems ?? dingtalkItems,
+      dingtalkBreakdown,
+      adjustedPayroll,
+      adjustedFixedCost,
+      actualExpense,
+      estimatedExpense,
     } as any);
     setAiPayload(payload);
   };
@@ -115,6 +123,11 @@ const MonthlyReportPage: React.FC = () => {
         payrollResults,
         fixedCostDetail,
         dingtalkItems,
+        dingtalkBreakdown,
+        adjustedPayroll,
+        adjustedFixedCost,
+        actualExpense,
+        estimatedExpense,
       } as any);
 
       console.log('[AI payload]', payload);
@@ -148,7 +161,12 @@ const MonthlyReportPage: React.FC = () => {
       fixedCostDetail,
       profit,
       dingtalkItems,
-    });
+      dingtalkBreakdown,
+      adjustedPayroll,
+      adjustedFixedCost,
+      actualExpense,
+      estimatedExpense,
+    } as any);
   };
 
   if (!canView) {
@@ -234,7 +252,7 @@ const MonthlyReportPage: React.FC = () => {
 
         {!loading && !error && hasLoaded && (
           <>
-            {/* AI 报告区（可选，折叠） */}
+            {/* AI 报告区 */}
             {(aiReport || aiLoading || aiError) && (
               <div className="bg-gradient-to-br from-violet-50 via-white to-indigo-50/60 rounded-2xl border border-violet-100 shadow-sm mb-6">
                 <button
@@ -256,9 +274,7 @@ const MonthlyReportPage: React.FC = () => {
                     <span
                       onClick={(e) => {
                         e.stopPropagation();
-                        navigator.clipboard
-                          .writeText(aiReport)
-                          .catch(() => {});
+                        navigator.clipboard.writeText(aiReport).catch(() => {});
                       }}
                       className="text-[11px] text-violet-600 hover:text-violet-800 underline"
                     >
@@ -285,9 +301,7 @@ const MonthlyReportPage: React.FC = () => {
                       </div>
                     )}
                     {!aiLoading && aiError && (
-                      <div className="text-sm text-red-600 py-2">
-                        {aiError}
-                      </div>
+                      <div className="text-sm text-red-600 py-2">{aiError}</div>
                     )}
                     {!aiLoading && !aiError && aiReport && (
                       <div className="prose prose-sm max-w-none prose-headings:text-gray-800 prose-p:text-gray-700 prose-li:text-gray-700 prose-strong:text-gray-900">
@@ -308,7 +322,12 @@ const MonthlyReportPage: React.FC = () => {
               profit={profit}
               isProfit={isProfit}
               dingtalkSummary={dingtalkSummary}
-              storeName={storeName}   /* ⭐ 新增 */
+              dingtalkBreakdown={dingtalkBreakdown}
+              adjustedPayroll={adjustedPayroll}
+              adjustedFixedCost={adjustedFixedCost}
+              actualExpense={actualExpense}
+              estimatedExpense={estimatedExpense}
+              storeName={storeName}
             />
 
             <MonthlyDetailPanels
@@ -319,7 +338,12 @@ const MonthlyReportPage: React.FC = () => {
               fixedCostDetail={fixedCostDetail}
               dingtalkItems={dingtalkItems}
               dingtalkSummary={dingtalkSummary}
-              storeLabel={storeName} /* ⭐ 新增：传给饼图作为标题后缀 */
+              dingtalkBreakdown={dingtalkBreakdown}
+              adjustedPayroll={adjustedPayroll}
+              adjustedFixedCost={adjustedFixedCost}
+              actualExpense={actualExpense}
+              estimatedExpense={estimatedExpense}
+              storeLabel={storeName}
             />
 
             <MonthlyProfitPanel
@@ -330,10 +354,7 @@ const MonthlyReportPage: React.FC = () => {
               isProfit={isProfit}
             />
 
-            {/* ⭐ 图表区（营销 / 薪酬等） */}
             {aiPayload && <MonthlyCharts payload={aiPayload} />}
-
-            
           </>
         )}
       </div>

@@ -9,6 +9,8 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronRight,
+  Receipt,
+  Calculator,
 } from 'lucide-react';
 import { Row } from './MonthlyCommon';
 import type { FixedCostDetail } from '../hooks/useMonthlyReport';
@@ -17,66 +19,37 @@ import type { DingTalkReportItem } from '../../../api/dingtalk';
 import { getStoreFromPaymentUnit } from '../../dingtalk/utils/constants';
 import { extractAmount, extractItems } from '../../dingtalk/utils/extract';
 import { MonthlyDingTalkPie } from './MonthlyDingTalkPie';
-
-interface Props {
-  marketing: OverallSummary & {
-    cardAmount: number;
-    incomeAmount: number;
-    prePayment: number;
-  };
-  orderCount: number;
-  payrollSummary: {
-    headcount: number;
-    baseSalary: number;
-    salesCommission: number;
-    classCommission: number;
-    absentDeduction: number;
-    rewardsTotal?: number;
-    total: number;
-  };
-  fixedCost: number;
-  fixedCostDetail: FixedCostDetail;
-  dingtalkItems?: DingTalkReportItem[];
-  dingtalkSummary?: { count: number; total: number };
-  storeLabel?: string;
-}
+import { fmtMoney } from '../utils/date';
 
 /* ============================================================
- * 与饼图完全一致的分类规则
+ * 分类规则（与饼图一致）
  * ============================================================ */
 const PAYEE_CATEGORY_OVERRIDES: Array<{ payee: string; category: string }> = [
   { payee: '山东云优人力资源服务有限公司', category: '工资底薪佣金' },
 ];
 
-const KEYWORD_CATEGORY_RULES: Array<{
+const SUBJECT_RULES: Array<{
   category: string;
   keywords: string[];
   applyTemplates?: string[];
 }> = [
+  { category: '物业费', keywords: ['物业费', '物业'], applyTemplates: ['员工费用报销', '付款申请单'] },
+  { category: '水电费', keywords: ['水费', '电费', '水电'], applyTemplates: ['员工费用报销', '付款申请单'] },
   {
-    category: '物业费',
-    keywords: ['物业费', '物业'],
-    applyTemplates: ['员工费用报销', '付款申请单'],
-  },
-  {
-    category: '水电费',
-    keywords: ['水费', '电费', '水电'],
-    applyTemplates: ['员工费用报销', '付款申请单'],
+    category: '工资底薪佣金',
+    keywords: ['工资', '底薪', '佣金', '提成', '薪酬', '薪金', '劳务', '派遣', '人力资源'],
   },
   {
     category: '修理',
-    keywords: [
-      '修理', '维修', '修缮', '保养', '配件更换', '更换', '安装', '装修',
-    ],
+    keywords: ['修理', '维修', '修缮', '保养', '配件更换', '更换', '安装', '装修'],
     applyTemplates: ['员工费用报销', '付款申请单'],
   },
   {
     category: '日常支出',
     keywords: [
-      '办公', '办公用品', '日用', '清洁', '保洁', '耗材',
-      '快递', '邮寄', '差旅', '交通', '通讯', '话费',
-      '劳保', '低值易耗', '消耗', '采购', '购买',
-      '宣传', '广告', '推广', '营销', '物料', '印刷',
+      '办公', '办公用品', '日用', '清洁', '保洁', '耗材', '快递', '邮寄',
+      '差旅', '交通', '通讯', '话费', '劳保', '低值易耗', '消耗',
+      '采购', '购买', '宣传', '广告', '推广', '营销', '物料', '印刷',
     ],
     applyTemplates: ['员工费用报销', '付款申请单'],
   },
@@ -144,7 +117,7 @@ function resolvePayeeCategory(payeeAccount: string | null | undefined) {
 function resolveKeywordCategory(item: DingTalkReportItem): string | null {
   const text = collectItemText(item);
   if (!text) return null;
-  for (const rule of KEYWORD_CATEGORY_RULES) {
+  for (const rule of SUBJECT_RULES) {
     if (
       rule.applyTemplates &&
       rule.applyTemplates.length > 0 &&
@@ -161,16 +134,12 @@ function resolveKeywordCategory(item: DingTalkReportItem): string | null {
 
 function resolveCategory(item: DingTalkReportItem): string {
   const tpl = String(item.templateName || '').trim();
-
-  /* ⭐ 退费优先（包含匹配） */
   if (tpl.includes('退费') || tpl.includes('退款')) return '退费';
   if (tpl === MEMBER_REFUND_TPL) return '退费';
 
-  /* 收款账户优先 */
   const payeeCat = resolvePayeeCategory(item.payeeAccount || '');
   if (payeeCat) return payeeCat;
 
-  /* 明细关键字兜底 */
   const text = collectItemText(item);
   if (text && ['退费', '退款', '退卡', '退课'].some((k) => text.includes(k))) {
     return '退费';
@@ -183,7 +152,7 @@ function resolveCategory(item: DingTalkReportItem): string {
 }
 
 /* ============================================================
- * 状态
+ * 状态样式
  * ============================================================ */
 const STATUS_LABEL: Record<string, string> = {
   RUNNING: '审批中',
@@ -217,6 +186,50 @@ function statusClass(item: DingTalkReportItem): string {
   return 'bg-gray-50 text-gray-600 border-gray-200';
 }
 
+/* ============================================================
+ * Props
+ * ============================================================ */
+interface DingtalkBreakdown {
+  salary: { count: number; total: number };
+  property: { count: number; total: number };
+  utility: { count: number; total: number };
+  repair: { count: number; total: number };
+  daily: { count: number; total: number };
+  refund: { count: number; total: number };
+  other: { count: number; total: number };
+  total: number;
+  extraExpense: number;
+  categories: Array<{ category: string; count: number; total: number }>;
+}
+
+interface Props {
+  marketing: OverallSummary & {
+    cardAmount: number;
+    incomeAmount: number;
+    prePayment: number;
+  };
+  orderCount: number;
+  payrollSummary: {
+    headcount: number;
+    baseSalary: number;
+    salesCommission: number;
+    classCommission: number;
+    absentDeduction: number;
+    rewardsTotal?: number;
+    total: number;
+  };
+  fixedCost: number;
+  fixedCostDetail: FixedCostDetail;
+  dingtalkItems?: DingTalkReportItem[];
+  dingtalkSummary?: { count: number; total: number };
+  dingtalkBreakdown?: DingtalkBreakdown;
+  adjustedPayroll?: number;
+  adjustedFixedCost?: number;
+  actualExpense?: number;
+  estimatedExpense?: number;
+  storeLabel?: string;
+}
+
 export const MonthlyDetailPanels: React.FC<Props> = ({
   marketing,
   orderCount,
@@ -225,15 +238,15 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
   fixedCostDetail,
   dingtalkItems = [],
   dingtalkSummary,
+  dingtalkBreakdown,
+  actualExpense,
+  estimatedExpense,
   storeLabel,
 }) => {
   const rewardsTotal = payrollSummary.rewardsTotal ?? 0;
   const hasRewards = Math.abs(rewardsTotal) > 0;
 
-  /* ⭐ 已在 useMonthlyReport 里做过「推断退费门店 + 按门店过滤」，
-     这里直接用，不再过滤一遍。 */
   const storeFilteredItems = useMemo(() => dingtalkItems, [dingtalkItems]);
-
   const dtCount = storeFilteredItems.length;
   const dtTotal = useMemo(
     () =>
@@ -245,10 +258,7 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
     [storeFilteredItems]
   );
 
-  /* 明细展开状态 */
   const [detailOpen, setDetailOpen] = useState(false);
-
-  /* 每个类别的折叠状态 */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleCollapsed = (cat: string) => {
     setCollapsed((prev) => {
@@ -261,7 +271,6 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
 
   const hasDingtalk = storeFilteredItems.length > 0;
 
-  /* ⭐ 按类别分组 */
   const groups = useMemo(() => {
     const map = new Map<
       string,
@@ -284,9 +293,28 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   }, [storeFilteredItems]);
 
+  const dtSalary = dingtalkBreakdown?.salary.total || 0;
+  const dtProperty = dingtalkBreakdown?.property.total || 0;
+  const dtUtility = dingtalkBreakdown?.utility.total || 0;
+  const dtRepair = dingtalkBreakdown?.repair.total || 0;
+  const dtDaily = dingtalkBreakdown?.daily.total || 0;
+  const dtRefund = dingtalkBreakdown?.refund.total || 0;
+  const dtOther = dingtalkBreakdown?.other.total || 0;
+  const dtTotalExpense = dingtalkBreakdown?.total || 0;
+
+  const payrollEstimated = payrollSummary.total;
+  const fixedEstimated = fixedCost;
+
+  const finalEstimatedExpense =
+    estimatedExpense ?? payrollEstimated + fixedEstimated;
+  const finalActualExpense =
+    actualExpense ?? finalEstimatedExpense + dtTotalExpense;
+
   return (
     <>
-      {/* 收入 / 薪酬 / 固定成本 三栏 */}
+      {/* ============================================================
+       * 第 1 段：收入 / 薪酬 / 固定成本 三栏
+       * ============================================================ */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         {/* 收入 */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -333,8 +361,18 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
             )}
             <Row label="缺勤扣款" value={-payrollSummary.absentDeduction} color="text-red-600" />
             <div className="pt-3 border-t border-gray-100">
-              <Row label="薪酬合计" value={payrollSummary.total} color="text-blue-700" bold big />
+              <Row label="薪酬合计（预估）" value={payrollSummary.total} color="text-blue-700" bold big />
             </div>
+            {dtSalary > 0 && (
+              <div className="pt-3 border-t border-dashed border-gray-100">
+                <Row
+                  label={`钉钉实发工资（${dingtalkBreakdown!.salary.count} 笔）`}
+                  value={dtSalary}
+                  color="text-amber-700"
+                  bold
+                />
+              </div>
+            )}
           </div>
         </div>
 
@@ -354,16 +392,221 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
             <Row label="网络费" value={fixedCostDetail.networkFee} />
             <Row label="其他杂项" value={fixedCostDetail.otherFee} />
             <div className="pt-3 border-t border-gray-100">
-              <Row label="固定成本合计" value={fixedCost} color="text-amber-700" bold big />
+              <Row label="固定成本合计（预估）" value={fixedCost} color="text-amber-700" bold big />
             </div>
+            {(dtProperty > 0 || dtUtility > 0) && (
+              <div className="pt-3 border-t border-dashed border-gray-100 space-y-2">
+                {dtProperty > 0 && (
+                  <Row
+                    label={`钉钉实付物业费（${dingtalkBreakdown!.property.count} 笔）`}
+                    value={dtProperty}
+                    color="text-amber-700"
+                  />
+                )}
+                {dtUtility > 0 && (
+                  <Row
+                    label={`钉钉实付水电费（${dingtalkBreakdown!.utility.count} 笔）`}
+                    value={dtUtility}
+                    color="text-amber-700"
+                  />
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* 钉钉卡片 */}
+      {/* ============================================================
+       * 第 2 段：支出构成一览
+       * ============================================================ */}
+      {dingtalkBreakdown && dtTotalExpense > 0 && (
+        <div className="bg-white rounded-2xl border border-purple-100 shadow-sm overflow-hidden mb-6">
+          <div className="px-5 py-3 border-b border-gray-100 bg-purple-50/60">
+            <h3 className="text-sm font-semibold text-purple-800 flex items-center gap-2">
+              <Calculator className="w-4 h-4" />
+              支出构成一览
+              <span className="text-[10px] font-normal text-gray-500">
+                （钉钉实际支出全部计入，可能与预估存在重复，请注意核查）
+              </span>
+            </h3>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50 text-gray-500">
+                <tr>
+                  <th className="px-4 py-2 text-left font-medium">支出项</th>
+                  <th className="px-4 py-2 text-right font-medium">预估（payroll/fixedCost）</th>
+                  <th className="px-4 py-2 text-right font-medium">钉钉实际</th>
+                  <th className="px-4 py-2 text-left font-medium">说明</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                <tr>
+                  <td className="px-4 py-2 text-gray-700">工资底薪佣金</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-gray-600">
+                    {fmtMoney(payrollEstimated)}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums text-amber-700">
+                    {dtSalary > 0 ? fmtMoney(dtSalary) : '—'}
+                  </td>
+                  <td className="px-4 py-2 text-gray-500">
+                    {dtSalary > 0 ? '钉钉实发已计入' : '无钉钉记录'}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="px-4 py-2 text-gray-700">物业费</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-gray-600">
+                    {fmtMoney(fixedCostDetail.propertyFee)}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums text-amber-700">
+                    {dtProperty > 0 ? fmtMoney(dtProperty) : '—'}
+                  </td>
+                  <td className="px-4 py-2 text-gray-500">
+                    {dtProperty > 0 ? '钉钉实付已计入' : '无钉钉记录'}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="px-4 py-2 text-gray-700">水电费</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-gray-600">
+                    {fmtMoney(fixedCostDetail.electricityFee + fixedCostDetail.waterFee)}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums text-amber-700">
+                    {dtUtility > 0 ? fmtMoney(dtUtility) : '—'}
+                  </td>
+                  <td className="px-4 py-2 text-gray-500">
+                    {dtUtility > 0 ? '钉钉实付已计入' : '无钉钉记录'}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="px-4 py-2 text-gray-700">租金 / 网络 / 其它</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-gray-600">
+                    {fmtMoney(
+                      fixedCostDetail.rent +
+                        fixedCostDetail.networkFee +
+                        fixedCostDetail.otherFee
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-right text-gray-400">—</td>
+                  <td className="px-4 py-2 text-gray-500">fixedCost 预估</td>
+                </tr>
+                <tr>
+                  <td className="px-4 py-2 text-gray-700">钉钉新增支出</td>
+                  <td className="px-4 py-2 text-right text-gray-400">—</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-amber-700">
+                    {fmtMoney(dtRepair + dtDaily + dtRefund + dtOther)}
+                  </td>
+                  <td className="px-4 py-2 text-gray-500">
+                    退费 / 修理 / 日常支出 / 其它
+                  </td>
+                </tr>
+
+                <tr className="bg-gray-50/70 font-semibold">
+                  <td className="px-4 py-2 text-gray-800">合计</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-gray-700">
+                    {fmtMoney(finalEstimatedExpense)}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums text-amber-700">
+                    {fmtMoney(dtTotalExpense)}
+                  </td>
+                  <td className="px-4 py-2 text-gray-500">
+                    实际总支出（预估 + 钉钉全部）：
+                    <span className="font-semibold text-purple-700 ml-1">
+                      {fmtMoney(finalActualExpense)}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================
+       * 第 3 段：钉钉实际支出明细
+       * ============================================================ */}
+      {dingtalkBreakdown && dtTotalExpense > 0 && (
+        <div className="bg-white rounded-2xl border border-rose-100 shadow-sm overflow-hidden mb-8">
+          <div className="px-5 py-3 border-b border-gray-100 bg-rose-50/60">
+            <h3 className="text-sm font-semibold text-rose-800 flex items-center gap-2">
+              <Receipt className="w-4 h-4" />
+              钉钉实际支出明细
+              <span className="ml-auto text-[11px] font-normal text-gray-500">
+                合计{' '}
+                <span className="font-semibold text-rose-700 tabular-nums">
+                  ¥{Math.round(dtTotalExpense).toLocaleString('zh-CN')}
+                </span>
+              </span>
+            </h3>
+          </div>
+          <div className="p-5 space-y-3">
+            {dtSalary > 0 && (
+              <Row
+                label={`工资底薪佣金（${dingtalkBreakdown.salary.count} 笔）`}
+                value={dtSalary}
+                color="text-rose-700"
+              />
+            )}
+            {dtProperty > 0 && (
+              <Row
+                label={`物业费（${dingtalkBreakdown.property.count} 笔）`}
+                value={dtProperty}
+                color="text-rose-700"
+              />
+            )}
+            {dtUtility > 0 && (
+              <Row
+                label={`水电费（${dingtalkBreakdown.utility.count} 笔）`}
+                value={dtUtility}
+                color="text-rose-700"
+              />
+            )}
+            {dtRepair > 0 && (
+              <Row
+                label={`修理（${dingtalkBreakdown.repair.count} 笔）`}
+                value={dtRepair}
+                color="text-rose-700"
+              />
+            )}
+            {dtDaily > 0 && (
+              <Row
+                label={`日常支出（${dingtalkBreakdown.daily.count} 笔）`}
+                value={dtDaily}
+                color="text-rose-700"
+              />
+            )}
+            {dtRefund > 0 && (
+              <Row
+                label={`退费（${dingtalkBreakdown.refund.count} 笔）`}
+                value={dtRefund}
+                color="text-rose-700"
+              />
+            )}
+            {dtOther > 0 && (
+              <Row
+                label={`其它（${dingtalkBreakdown.other.count} 笔）`}
+                value={dtOther}
+                color="text-rose-700"
+              />
+            )}
+            <div className="pt-3 border-t border-gray-100">
+              <Row
+                label="钉钉实际支出合计"
+                value={dtTotalExpense}
+                color="text-rose-700"
+                bold
+                big
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================
+       * 第 4 段：钉钉流程分类占比 + 明细
+       * ============================================================ */}
       {hasDingtalk && (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-8">
-          {/* 头部 */}
           <div className="px-5 py-3 border-b border-gray-100 bg-indigo-50/50 flex items-center gap-2 flex-wrap">
             <h3 className="text-sm font-semibold text-indigo-800 flex items-center gap-2">
               <GitBranch className="w-4 h-4" />
@@ -387,23 +630,19 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
               type="button"
               onClick={() => setDetailOpen((v) => !v)}
               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 transition"
-              title={detailOpen ? '收起钉钉流程明细' : '展开钉钉流程明细'}
             >
               {detailOpen ? (
                 <>
-                  <ChevronUp className="w-3 h-3" />
-                  收起明细
+                  <ChevronUp className="w-3 h-3" /> 收起明细
                 </>
               ) : (
                 <>
-                  <ChevronDown className="w-3 h-3" />
-                  展开明细
+                  <ChevronDown className="w-3 h-3" /> 展开明细
                 </>
               )}
             </button>
           </div>
 
-          {/* 饼图 */}
           <div className="p-4">
             <MonthlyDingTalkPie
               items={storeFilteredItems}
@@ -412,19 +651,18 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
             />
           </div>
 
-          {/* 分组明细 */}
           {detailOpen && (
             <div className="border-t border-gray-100">
               {groups.length === 0 ? (
-                <div className="text-xs text-gray-400 text-center py-8">
-                  无明细
-                </div>
+                <div className="text-xs text-gray-400 text-center py-8">无明细</div>
               ) : (
                 groups.map((g) => {
                   const isCollapsed = collapsed.has(g.category);
                   return (
-                    <div key={g.category} className="border-b border-gray-100 last:border-b-0">
-                      {/* 分组头 */}
+                    <div
+                      key={g.category}
+                      className="border-b border-gray-100 last:border-b-0"
+                    >
                       <button
                         type="button"
                         onClick={() => toggleCollapsed(g.category)}
@@ -450,7 +688,6 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
                         </span>
                       </button>
 
-                      {/* 分组体 */}
                       {!isCollapsed && (
                         <div className="overflow-x-auto">
                           <table className="w-full text-xs">

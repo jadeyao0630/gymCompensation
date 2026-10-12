@@ -10,11 +10,11 @@ import { usePayroll } from '../../../hooks/usePayroll';
 import type { PayrollResult } from '../../../utils/payroll';
 import { loadRewardsCatalog } from '../../../utils/payrollStorage';
 import { useAppData } from '../../../contexts/AppDataContext';
-import { getStoreById } from '../../../constants/stores'; // ⭐ 门店名转换
+import { getStoreById } from '../../../constants/stores';
 import {
   getStoreFromPaymentUnit,
-  inferRefundPaymentUnit, // ⭐ 复用推断逻辑
-} from '../../dingtalk/utils/constants';
+  inferRefundPaymentUnit,
+} from '../../../pages/dingtalk/utils/constants';
 import {
   aggregateOrders,
   getIncomeAmount,
@@ -48,16 +48,218 @@ export interface MonthlyReportSnapshot {
   dingtalkItems: DingTalkReportItem[];
 }
 
-/**
- * ⭐ 先推断退费门店，再按当前门店过滤
- *   - 退费：inferRefundPaymentUnit 补 paymentUnit
- *   - 过滤：getStoreFromPaymentUnit(paymentUnit) === storeName
- */
+export interface DingtalkBreakdown {
+  salary: { count: number; total: number };
+  property: { count: number; total: number };
+  utility: { count: number; total: number };
+  repair: { count: number; total: number };
+  daily: { count: number; total: number };
+  refund: { count: number; total: number };
+  other: { count: number; total: number };
+  total: number;
+  extraExpense: number;
+  categories: Array<{ category: string; count: number; total: number }>;
+}
+
+const EMPTY_BREAKDOWN: DingtalkBreakdown = {
+  salary: { count: 0, total: 0 },
+  property: { count: 0, total: 0 },
+  utility: { count: 0, total: 0 },
+  repair: { count: 0, total: 0 },
+  daily: { count: 0, total: 0 },
+  refund: { count: 0, total: 0 },
+  other: { count: 0, total: 0 },
+  total: 0,
+  extraExpense: 0,
+  categories: [],
+};
+
+/* ============================================================
+ * 钉钉分类规则（与页面一致）
+ * ============================================================ */
+const PAYEE_CATEGORY_OVERRIDES: Array<{ payee: string; category: string }> = [
+  { payee: '山东云优人力资源服务有限公司', category: '工资底薪佣金' },
+];
+
+const SUBJECT_RULES: Array<{
+  key: string;
+  keywords: string[];
+  applyTemplates?: string[];
+}> = [
+  { key: '物业费', keywords: ['物业费', '物业'], applyTemplates: ['员工费用报销', '付款申请单'] },
+  { key: '水电费', keywords: ['电费', '水费', '水电'], applyTemplates: ['员工费用报销', '付款申请单'] },
+  {
+    key: '工资底薪佣金',
+    keywords: ['工资', '底薪', '佣金', '提成', '薪酬', '薪金', '劳务', '派遣', '人力资源'],
+  },
+  {
+    key: '修理',
+    keywords: ['修理', '维修', '修缮', '保养', '配件更换', '更换', '安装', '装修'],
+    applyTemplates: ['员工费用报销', '付款申请单'],
+  },
+  {
+    key: '日常支出',
+    keywords: [
+      '办公', '办公用品', '日用', '清洁', '保洁', '耗材', '快递', '邮寄',
+      '差旅', '交通', '通讯', '话费', '劳保', '低值易耗', '消耗',
+      '采购', '购买', '宣传', '广告', '推广', '营销', '物料', '印刷',
+    ],
+    applyTemplates: ['员工费用报销', '付款申请单'],
+  },
+];
+
+const MEMBER_REFUND_TPL = '会员退费';
+
+function collectDingtalkText(item: DingTalkReportItem): string {
+  const parts: string[] = [];
+  if (Array.isArray(item.items)) {
+    item.items.forEach((it: any) => {
+      if (it?.content) parts.push(String(it.content));
+    });
+  }
+  const fv = item.formValues || {};
+  const rawDetail = fv['明细列表'];
+  if (typeof rawDetail === 'string' && rawDetail && rawDetail !== 'null') {
+    try {
+      const parsed = JSON.parse(rawDetail);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((row: any) => {
+          (row?.rowValue || []).forEach((f: any) => {
+            const label = String(f?.label || '');
+            if (
+              label.includes('事项') ||
+              label.includes('内容') ||
+              label.includes('名称')
+            ) {
+              if (f?.value != null && f.value !== 'null') {
+                parts.push(String(f.value));
+              }
+            }
+          });
+        });
+      }
+    } catch { /* ignore */ }
+  }
+  if (item.title) parts.push(String(item.title));
+  [
+    '事项', '事项/明细', '报销事由', '费用类型', '明细',
+    '备注', '事由', '用途', '摘要', '说明',
+    '付款内容提要', '付款事由', '付款用途',
+    '借款提要', '退卡原因',
+  ].forEach((k) => {
+    const v = fv[k];
+    if (v == null || v === 'null' || v === '') return;
+    if (typeof v === 'object') {
+      try { parts.push(JSON.stringify(v)); } catch {}
+    } else {
+      parts.push(String(v));
+    }
+  });
+  return parts.join(' ');
+}
+
+function classifyDingtalk(item: DingTalkReportItem): string {
+  const tpl = String(item.templateName || '').trim();
+
+  if (tpl.includes('退费') || tpl.includes('退款')) return '退费';
+  if (tpl === MEMBER_REFUND_TPL) return '退费';
+
+  const payee = String(item.payeeAccount || '').trim();
+  for (const rule of PAYEE_CATEGORY_OVERRIDES) {
+    if (payee === rule.payee) return rule.category;
+  }
+  const text = collectDingtalkText(item);
+  if (text) {
+    if (['退费', '退款', '退卡', '退课'].some((k) => text.includes(k))) {
+      return '退费';
+    }
+    for (const rule of SUBJECT_RULES) {
+      if (
+        rule.applyTemplates &&
+        rule.applyTemplates.length > 0 &&
+        !rule.applyTemplates.includes(tpl)
+      ) {
+        continue;
+      }
+      if (rule.keywords.some((k) => k && text.includes(k))) {
+        return rule.key;
+      }
+    }
+  }
+  return tpl || '其它';
+}
+
+function pickDingtalkAmount(item: DingTalkReportItem): number {
+  const candidates = [
+    '补退金额（元）', '补退金额', '退款金额（元）', '退款金额',
+    '报销金额', '借款金额（元）', '借款金额',
+    '本次申请支付金额（元）', '本次申请支付金额',
+    '总价款（元）', '金额（元）', '金额',
+  ];
+  const fv = item.formValues || {};
+  for (const k of candidates) {
+    const v = fv[k];
+    if (v != null && v !== 'null' && v !== '') {
+      const n = Number(String(v).replace(/[^\d.-]/g, ''));
+      if (Number.isFinite(n) && n !== 0) return n;
+    }
+  }
+  const n0 = Number(item.amount);
+  if (Number.isFinite(n0) && n0 !== 0) return n0;
+  return 0;
+}
+
+function calcDingtalkBreakdown(items: DingTalkReportItem[]): DingtalkBreakdown {
+  const groups = new Map<string, { count: number; total: number }>();
+  let total = 0;
+
+  for (const r of items) {
+    if (r.error) continue;
+    const category = classifyDingtalk(r);
+    const amount = pickDingtalkAmount(r);
+
+    if (!groups.has(category)) groups.set(category, { count: 0, total: 0 });
+    const g = groups.get(category)!;
+    g.count += 1;
+    g.total += amount;
+    total += amount;
+  }
+
+  const get = (key: string) => groups.get(key) || { count: 0, total: 0 };
+
+  const salary = get('工资底薪佣金');
+  const property = get('物业费');
+  const utility = get('水电费');
+  const repair = get('修理');
+  const daily = get('日常支出');
+  const refund = get('退费');
+  const other = get('其它');
+
+  const extraExpense =
+    repair.total + daily.total + refund.total + other.total;
+
+  const categories = Array.from(groups.entries())
+    .map(([category, v]) => ({ category, count: v.count, total: v.total }))
+    .sort((a, b) => b.total - a.total);
+
+  return {
+    salary,
+    property,
+    utility,
+    repair,
+    daily,
+    refund,
+    other,
+    total,
+    extraExpense,
+    categories,
+  };
+}
+
 function normalizeAndFilter(
   items: DingTalkReportItem[],
   storeName: string
 ): DingTalkReportItem[] {
-  /* 1) 会员退费 → 按「事项/明细」文本推断 paymentUnit */
   const withUnit = items.map((r) => {
     if (r.templateName !== '会员退费') return r;
     if (r.paymentUnit && String(r.paymentUnit).trim()) return r;
@@ -65,7 +267,6 @@ function normalizeAndFilter(
     return inferred ? { ...r, paymentUnit: inferred } : r;
   });
 
-  /* 2) 按门店名过滤（富贵园/哈德门） */
   if (!storeName) return withUnit;
   return withUnit.filter((r) => {
     const s = getStoreFromPaymentUnit(r.paymentUnit);
@@ -121,7 +322,8 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
   const setFixedCostDetail = useCallback(
     (next: FixedCostDetail) => {
       updateAppData('monthlyFixedCostByKey', (prev) => ({
-        ...prev, [cacheKey]: next,
+        ...prev,
+        [cacheKey]: next,
       }));
     },
     [updateAppData, cacheKey]
@@ -143,7 +345,9 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
   const username = import.meta.env.VITE_TEST_USERNAME || '';
   const password = import.meta.env.VITE_TEST_PASSWORD || '';
   const { run, loading: payrollLoading } = usePayroll({
-    username, password, busId: storeId,
+    username,
+    password,
+    busId: storeId,
   });
 
   const reset = useCallback(() => {
@@ -196,28 +400,21 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
           setFixedCostDetail(costDetail);
         } catch (e) { console.warn('[MonthlyReport] 拉测算设置失败', e); setFixedCostDetail(EMPTY_COST); }
 
-        /* ⭐ 钉钉流程：只拉缓存（不按门店过滤），前端推断+过滤 */
         let dtItems: DingTalkReportItem[] = [];
         const storeName = getStoreById(storeId)?.name || storeId;
         try {
           const dtData = await fetchDingTalkMonthlySummary({
             month,
-            /* 仍传 store，后端能做初步过滤就做；不做也没关系 */
             store: storeName,
           });
           const raw = dtData.results || [];
-
-          /* ⭐ 先推断退费门店，再按门店过滤 */
           dtItems = normalizeAndFilter(raw, storeName);
-
           setDingtalkSummary({
             count: dtItems.length,
             total: dtItems.reduce((s, r) => s + Number(r.amount || 0), 0),
           });
           setDingtalkItems(dtItems);
-          console.log(
-            `[MonthlyReport] 钉钉流程 ${storeName}: ${raw.length} → ${dtItems.length}`
-          );
+          console.log(`[MonthlyReport] 钉钉流程 ${storeName}: ${raw.length} → ${dtItems.length}`);
         } catch (e) {
           console.warn('[MonthlyReport] 拉钉钉流程失败', e);
           setDingtalkItems([]);
@@ -289,8 +486,13 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
         total: acc.total + r.total,
       }),
       {
-        headcount: 0, baseSalary: 0, salesCommission: 0,
-        classCommission: 0, absentDeduction: 0, rewardsTotal: 0, total: 0,
+        headcount: 0,
+        baseSalary: 0,
+        salesCommission: 0,
+        classCommission: 0,
+        absentDeduction: 0,
+        rewardsTotal: 0,
+        total: 0,
       }
     );
   }, [payrollResults]);
@@ -306,9 +508,32 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     return { ...agg, cardAmount, incomeAmount, prePayment };
   }, [orderList]);
 
+  /* ⭐ 钉钉分类汇总 */
+  const dingtalkBreakdown = useMemo(
+    () =>
+      dingtalkItems.length > 0
+        ? calcDingtalkBreakdown(dingtalkItems)
+        : EMPTY_BREAKDOWN,
+    [dingtalkItems]
+  );
+
+  /* ⭐ 预估口径（payroll + fixedCost） */
+  const estimatedExpense = useMemo(
+    () => payrollSummary.total + fixedCost,
+    [payrollSummary.total, fixedCost]
+  );
+
+  /* ⭐ 实际总支出 = 预估 + 钉钉全部支出
+     （不再从预估里扣重复；页面上会标注可能与预估重复，供用户核查） */
+  const actualExpense = useMemo(
+    () => estimatedExpense + dingtalkBreakdown.total,
+    [estimatedExpense, dingtalkBreakdown.total]
+  );
+
+  /* ⭐ 净利润 */
   const profit = useMemo(
-    () => marketingSummary.incomeAmount - payrollSummary.total - fixedCost,
-    [marketingSummary, payrollSummary, fixedCost]
+    () => marketingSummary.incomeAmount - actualExpense,
+    [marketingSummary.incomeAmount, actualExpense]
   );
 
   const isProfit = profit >= 0;
@@ -327,7 +552,15 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     isProfit,
     fetchAll,
     reset,
+    /* 钉钉数据 */
     dingtalkItems,
     dingtalkSummary,
+    dingtalkBreakdown,
+    /* 口径拆分 */
+    estimatedExpense,
+    actualExpense,
+    /* 兼容旧字段（不再使用扣减逻辑） */
+    adjustedPayroll: payrollSummary.total,
+    adjustedFixedCost: fixedCost,
   };
 }
