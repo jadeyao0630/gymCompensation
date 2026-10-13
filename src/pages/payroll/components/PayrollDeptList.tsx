@@ -163,7 +163,7 @@ export const PayrollDeptList: React.FC<Props> = ({
   onToggleExclude,
   onEditPosition,
   onUpdateAttendance,
-  rewardsCatalog = [],         // ⭐ 加这行
+  rewardsCatalog = [],
   tempRewardsByStaff,
   onSaveTempRewards,
 }) => {
@@ -200,7 +200,14 @@ export const PayrollDeptList: React.FC<Props> = ({
     });
   };
 
+  /* ⭐ 临时奖金 Popover 状态：目标员工 + 锚点元素 */
   const [tempRewardFor, setTempRewardFor] = useState<string | null>(null);
+  const [tempRewardAnchor, setTempRewardAnchor] = useState<HTMLElement | null>(null);
+
+  const closeTempReward = () => {
+    setTempRewardFor(null);
+    setTempRewardAnchor(null);
+  };
 
   return (
     <div className="space-y-3">
@@ -459,7 +466,8 @@ export const PayrollDeptList: React.FC<Props> = ({
                                   </td>
                                 )}
 
-                                <td className="px-4 py-2.5 text-right tabular-nums relative">
+                                {/* 奖金列 */}
+                                <td className="px-4 py-2.5 text-right tabular-nums">
                                   <div className="inline-flex items-center gap-1 justify-end">
                                     {hasRewards ? (
                                       <button
@@ -467,8 +475,12 @@ export const PayrollDeptList: React.FC<Props> = ({
                                         title="点击查看奖金 / 扣款明细"
                                         className={`inline-flex items-center gap-1 font-medium transition hover:underline ${
                                           isRewardsNegative
-                                            ? isRewardsExpanded ? 'text-rose-800' : 'text-rose-600 hover:text-rose-800'
-                                            : isRewardsExpanded ? 'text-amber-800' : 'text-amber-600 hover:text-amber-800'
+                                            ? isRewardsExpanded
+                                              ? 'text-rose-800'
+                                              : 'text-rose-600 hover:text-rose-800'
+                                            : isRewardsExpanded
+                                            ? 'text-amber-800'
+                                            : 'text-amber-600 hover:text-amber-800'
                                         }`}
                                       >
                                         {isRewardsNegative ? <MinusCircle className="w-3.5 h-3.5" /> : <Gift className="w-3.5 h-3.5" />}
@@ -480,7 +492,16 @@ export const PayrollDeptList: React.FC<Props> = ({
 
                                     {onSaveTempRewards && (
                                       <button
-                                        onClick={(e) => { e.stopPropagation(); setTempRewardFor(isTempOpen ? null : r.staffId); }}
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (isTempOpen) {
+                                            closeTempReward();
+                                          } else {
+                                            setTempRewardFor(r.staffId);
+                                            setTempRewardAnchor(e.currentTarget as HTMLElement);
+                                          }
+                                        }}
                                         title="添加临时奖金 / 扣款"
                                         className="inline-flex items-center justify-center w-5 h-5 rounded-full border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100"
                                       >
@@ -495,11 +516,12 @@ export const PayrollDeptList: React.FC<Props> = ({
                                       staffName={r.staffName}
                                       current={tempRewardsByStaff?.[String(r.staffId)] || []}
                                       catalog={rewardsCatalog || []}
+                                      anchorEl={tempRewardAnchor}
                                       onSave={(next) => {
-                                        setTempRewardFor(null);
+                                        closeTempReward();
                                         onSaveTempRewards(r.staffId, next);
                                       }}
-                                      onClose={() => setTempRewardFor(null)}
+                                      onClose={closeTempReward}
                                     />
                                   )}
                                 </td>

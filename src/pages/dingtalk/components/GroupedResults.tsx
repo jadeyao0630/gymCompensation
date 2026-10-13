@@ -1,163 +1,195 @@
-import React, { useEffect, useState } from 'react';
-import {
-  Building2, ChevronDown, ChevronRight, Store,
-} from 'lucide-react';
-import { fmtMoney } from '../utils/extract';
-import type { ColumnKey } from '../utils/constants';
-import ResultsTable from './ResultsTable';
+import React from 'react';
+import { Store } from 'lucide-react';
 import type { DingTalkReportItem } from '../../../api/dingtalk';
+import { getStoreFromPaymentUnit } from '../utils/constants';
+import type { ColumnKey } from '../hooks/useReportColumns';
+import StoreAssignCell from './StoreAssignCell';
 
-interface GroupUnit {
-  unitName: string;
+interface UnitGroup {
   storeName: string;
-  count: number;
+  unitName: string;
   total: number;
+  count: number;
   items: DingTalkReportItem[];
 }
 
-interface Group {
+interface TypeGroup {
   typeName: string;
+  total: number;
+  count: number;
   totalCount: number;
-  units: GroupUnit[];
+  units: UnitGroup[];
 }
 
 interface Props {
-  grouped: Group[];
+  grouped: TypeGroup[];
+  /* ⭐ 参数类型改成 ColumnKey */
   isColVisible: (key: ColumnKey) => boolean;
-  /** ⭐ 选中的类型（扇形图联动） */
-  selectedType?: string | null;
+  selectedType: string | null;
+  storeOptions?: string[];
+  onManualStoreChanged?: (
+    processInstanceId: string,
+    storeName: string | null,
+    isManual: boolean
+  ) => void;
 }
 
-export const GroupedResults: React.FC<Props> = ({
+const GroupedResults: React.FC<Props> = ({
   grouped,
   isColVisible,
   selectedType,
+  storeOptions = [],
+  onManualStoreChanged,
 }) => {
-  /* ⭐ 过滤：只显示选中的类型 */
-  const visibleGroups = selectedType
-    ? grouped.filter((g) => g.typeName === selectedType)
-    : grouped;
-
-  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(
-    () => new Set(visibleGroups.map((g) => g.typeName))
-  );
-  const [expandedUnits, setExpandedUnits] = useState<Set<string>>(
-    () =>
-      new Set(
-        visibleGroups.flatMap((g) =>
-          g.units.map((u) => `${g.typeName}__${u.unitName}`)
-        )
-      )
-  );
-
-  /* ⭐ 当 selectedType 变化时，重新展开 */
-  useEffect(() => {
-    setExpandedTypes(new Set(visibleGroups.map((g) => g.typeName)));
-    setExpandedUnits(
-      new Set(
-        visibleGroups.flatMap((g) =>
-          g.units.map((u) => `${g.typeName}__${u.unitName}`)
-        )
-      )
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedType]);
-
-  const toggleType = (name: string) => {
-    setExpandedTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  };
-
-  const toggleUnit = (key: string) => {
-    setExpandedUnits((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
-  if (visibleGroups.length === 0) {
-    return (
-      <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-10 text-center text-sm text-gray-400">
-        该类型下暂无明细
-      </div>
-    );
-  }
+  if (!grouped || grouped.length === 0) return null;
 
   return (
-    <div className="space-y-4">
-      {visibleGroups.map((g) => {
-        const isTypeExpanded = expandedTypes.has(g.typeName);
-        return (
-          <div key={g.typeName} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            <button
-              onClick={() => toggleType(g.typeName)}
-              className="w-full px-5 py-4 flex items-center gap-3 hover:bg-blue-50/50 transition text-left border-b border-gray-100"
-            >
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 text-white flex items-center justify-center shrink-0">
-                {isTypeExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-bold text-gray-800">{g.typeName}</div>
-                <div className="text-xs text-gray-400 mt-0.5">
-                  {g.units.length} 个付款单位 · {g.totalCount} 条明细
-                </div>
-              </div>
-            </button>
-
-            {isTypeExpanded && (
-              <div className="p-4 space-y-3 bg-gray-50/40">
-                {g.units.map((u) => {
-                  const unitKey = `${g.typeName}__${u.unitName}`;
-                  const isUnitExpanded = expandedUnits.has(unitKey);
-                  return (
-                    <div key={unitKey} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                      <button
-                        onClick={() => toggleUnit(unitKey)}
-                        className="w-full px-4 py-3 flex items-center gap-2 hover:bg-amber-50/40 transition text-left"
-                      >
-                        <Building2 className="w-4 h-4 text-amber-500 shrink-0" />
-                        <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-                          {u.storeName && (
-                            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-100">
-                              <Store className="w-3 h-3" />
-                              {u.storeName}
-                            </span>
-                          )}
-                          <span className="text-xs font-semibold text-gray-700 truncate">
-                            {u.unitName}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-gray-400 whitespace-nowrap">
-                          {u.count} 条 · {fmtMoney(u.total)}
-                        </div>
-                        {isUnitExpanded ? (
-                          <ChevronDown className="w-4 h-4 text-gray-400" />
-                        ) : (
-                          <ChevronRight className="w-4 h-4 text-gray-400" />
-                        )}
-                      </button>
-
-                      {isUnitExpanded && (
-                        <ResultsTable
-                          items={u.items}
-                          visibleColumns={new Set()}
-                          isColVisible={isColVisible}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+    <div className="space-y-6">
+      {grouped.map((g) => (
+        <div
+          key={g.typeName}
+          className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden"
+        >
+          <div className="px-5 py-3 bg-gray-50/60 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-gray-800 text-sm">
+                {g.typeName}
+              </span>
+              <span className="text-xs text-gray-400">
+                {g.totalCount} 笔 · ¥
+                {Math.round(g.total).toLocaleString('zh-CN')}
+              </span>
+            </div>
           </div>
-        );
-      })}
+
+          {g.units.map((u) => (
+            <div
+              key={`${u.storeName}||${u.unitName}`}
+              className="border-t border-gray-100"
+            >
+              <div className="px-5 py-2 bg-emerald-50/40 flex items-center gap-2 text-xs">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-emerald-100 text-emerald-700">
+                  <Store className="w-3 h-3" />
+                  {u.storeName}
+                </span>
+                <span className="text-gray-500">{u.unitName}</span>
+                <span className="text-gray-400 ml-auto">
+                  {u.count} 笔 · ¥{Math.round(u.total).toLocaleString('zh-CN')}
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50/60 text-gray-500">
+                    <tr>
+                      {isColVisible('title') && (
+                        <th className="px-3 py-2 text-left">标题</th>
+                      )}
+                      {isColVisible('items') && (
+                        <th className="px-3 py-2 text-left">事项</th>
+                      )}
+                      {isColVisible('amount') && (
+                        <th className="px-3 py-2 text-right">金额</th>
+                      )}
+                      {isColVisible('payeeAccount') && (
+                        <th className="px-3 py-2 text-left">收款账户</th>
+                      )}
+                      {isColVisible('storeName') && (
+                        <th className="px-3 py-2 text-left">门店</th>
+                      )}
+                      {isColVisible('status') && (
+                        <th className="px-3 py-2 text-left">状态</th>
+                      )}
+                      {isColVisible('createTime') && (
+                        <th className="px-3 py-2 text-left">创建时间</th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {u.items.map((item, idx) => {
+                      const pid: string =
+                        item.processInstanceId || `__row_${idx}`;
+                      const manual: boolean =
+                        (item as any)._manualStore === true;
+
+                      /* ⭐ 统一 string | null */
+                      const rawStoreName = (item as any)._storeName as
+                        | string
+                        | null
+                        | undefined;
+                      const storeName: string | null =
+                        rawStoreName ??
+                        getStoreFromPaymentUnit(item.paymentUnit || '') ??
+                        null;
+
+                      const assignReason: string =
+                        (item as any)._assignReason || '';
+
+                      return (
+                        <tr
+                          key={pid}
+                          className="border-t border-gray-50 hover:bg-gray-50/40"
+                        >
+                          {isColVisible('title') && (
+                            <td className="px-3 py-2 text-gray-700">
+                              {item.title || '-'}
+                            </td>
+                          )}
+                          {isColVisible('items') && (
+                            <td className="px-3 py-2 text-gray-600">
+                              {(item.items || [])
+                                .map((it: any) => it?.content)
+                                .filter(Boolean)
+                                .join('；') || '-'}
+                            </td>
+                          )}
+                          {isColVisible('amount') && (
+                            <td className="px-3 py-2 text-right tabular-nums">
+                              ¥
+                              {Math.round(
+                                Number(item.amount || 0)
+                              ).toLocaleString('zh-CN')}
+                            </td>
+                          )}
+                          {isColVisible('payeeAccount') && (
+                            <td className="px-3 py-2 text-gray-600">
+                              {item.payeeAccount || '-'}
+                            </td>
+                          )}
+                          {isColVisible('storeName') && (
+                            <td className="px-3 py-2">
+                              <StoreAssignCell
+                                processInstanceId={pid}
+                                storeName={storeName}
+                                assignReason={assignReason}
+                                isManual={manual}
+                                storeOptions={storeOptions}
+                                onChanged={(next, isManual) =>
+                                  onManualStoreChanged?.(pid, next, isManual)
+                                }
+                              />
+                            </td>
+                          )}
+                          {isColVisible('status') && (
+                            <td className="px-3 py-2 text-gray-600">
+                              {item.status || '-'}
+                            </td>
+                          )}
+                          {isColVisible('createTime') && (
+                            <td className="px-3 py-2 text-gray-500">
+                              {item.createTime || '-'}
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 };

@@ -1,47 +1,95 @@
-import React from 'react';
-import { Store, Tag } from 'lucide-react';
-import { extractAmount, extractPayeeAccount, extractItems, fmtMoney } from '../utils/extract';
+import React, { useEffect, useState } from 'react';
+import {
+  extractAmount, extractPayeeAccount, extractItems, fmtMoney,
+} from '../utils/extract';
 import { COLUMNS, type ColumnKey } from '../utils/constants';
 import type { DingTalkReportItem } from '../../../api/dingtalk';
+import { getStores } from '../../../utils/storeConfig';
 import StatusBadge from './StatusBadge';
 
 interface Props {
   items: DingTalkReportItem[];
-  visibleColumns: Set<ColumnKey>;
+  visibleColumns?: Set<ColumnKey>;
   isColVisible: (key: ColumnKey) => boolean;
+  /* ⭐ 手动归属后的回调 */
+  onManualStoreChanged?: (
+    processInstanceId: string,
+    storeName: string | null
+  ) => Promise<void> | void;
 }
 
-/* ⭐ 兜底：把 ISO 时间格式化成 "YYYY-MM-DD HH:mm:ss" */
-function formatDateTime(input?: string | null): string {
-  if (!input) return '';
-  if (!input.includes('T')) return input;
-  const d = new Date(input);
-  if (isNaN(d.getTime())) return input;
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(
-    d.getHours()
-  )}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
+/* ⭐ 手动归属下拉 */
+const ManualStoreSelect: React.FC<{
+  item: DingTalkReportItem;
+  onChanged?: (
+    processInstanceId: string,
+    storeName: string | null
+  ) => Promise<void> | void;
+}> = ({ item, onChanged }) => {
+  const stores = getStores();
 
-/* ⭐ 与页面保持一致的类别覆盖规则 */
-const PAYEE_CATEGORY_OVERRIDES: Array<{ payee: string; category: string }> = [
-  { payee: '山东云优人力资源服务有限公司', category: '薪酬佣金' },
-];
+  /* ⭐ 用 _storeName（门店名），不是 _manualStore（boolean） */
+  const initial: string =
+    (item as any)._manualStore === true
+      ? ((item as any)._storeName as string) || ''
+      : '';
 
-function resolveCategoryOverride(
-  payeeAccount: string | null | undefined
-): string | null {
-  const raw = payeeAccount == null ? '' : String(payeeAccount).trim();
-  if (!raw) return null;
-  for (const rule of PAYEE_CATEGORY_OVERRIDES) {
-    if (raw === rule.payee) return rule.category;
-  }
-  return null;
-}
+  const [value, setValue] = useState<string>(initial);
+  const [saving, setSaving] = useState(false);
 
-export const ResultsTable: React.FC<Props> = ({ items, isColVisible }) => {
+  /* ⭐ 外部 item 变化时同步（例如查询刷新） */
+  useEffect(() => {
+    const next: string =
+      (item as any)._manualStore === true
+        ? ((item as any)._storeName as string) || ''
+        : '';
+    setValue(next);
+  }, [(item as any)._storeName, (item as any)._manualStore]);
+
+  const handleChange = async (next: string) => {
+    const prev = value;
+    setValue(next);
+    setSaving(true);
+    try {
+      await onChanged?.(item.processInstanceId || '', next || null);
+    } catch (e) {
+      console.warn('[ManualStore] 保存失败', e);
+      setValue(prev);
+      alert('保存失败，请重试');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <select
+      value={value}
+      onChange={(e) => handleChange(e.target.value)}
+      disabled={saving || !item.processInstanceId}
+      className={`text-[11px] px-2 py-1 rounded border focus:outline-none ${
+        value
+          ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+          : 'border-gray-200 bg-white text-gray-500'
+      }`}
+      title={saving ? '保存中…' : '手动指定门店'}
+    >
+      <option value="">未指定</option>
+      {stores.map((s) => (
+        <option key={s.id} value={s.name}>
+          {s.name}
+        </option>
+      ))}
+    </select>
+  );
+};
+
+export const ResultsTable: React.FC<Props> = ({
+  items,
+  isColVisible,
+  onManualStoreChanged,
+}) => {
   const visibleColCount =
-    COLUMNS.filter((c) => isColVisible(c.key)).length || 1;
+    COLUMNS.filter((c) => isColVisible(c.key)).length + 1 || 1;
 
   return (
     <div className="border-t border-gray-100 overflow-x-auto">
@@ -60,6 +108,10 @@ export const ResultsTable: React.FC<Props> = ({ items, isColVisible }) => {
                 </th>
               ) : null
             )}
+            {/* ⭐ 手动归属列 */}
+            <th className="px-3 py-2 font-medium text-left whitespace-nowrap">
+              手动归属
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -91,68 +143,28 @@ export const ResultsTable: React.FC<Props> = ({ items, isColVisible }) => {
               );
             }
 
-            const templateName = r.templateName || '';
+            const templateName: string = r.templateName || '';
             const formValues = r.formValues || {};
             const amount = extractAmount(templateName, formValues);
             const payee = extractPayeeAccount(formValues);
             const itemsText = extractItems(templateName, formValues);
 
-            /* ⭐ 门店归属标记 */
-            const autoAssigned =
-              (r as any)._autoAssigned === true ||
-              formValues.__autoAssigned === '1';
-            const storeName =
-              (r as any)._storeName ||
-              formValues.__storeName ||
-              formValues['门店'] ||
-              '';
-
-            /* ⭐ 类别覆盖标记 */
-            const categoryOverride = resolveCategoryOverride(payee);
-
-            const rowCls = autoAssigned
-              ? 'bg-amber-50/40 hover:bg-amber-50/70'
-              : categoryOverride
-              ? 'bg-violet-50/40 hover:bg-violet-50/70'
-              : 'hover:bg-blue-50/30';
-
             return (
               <tr
                 key={r.processInstanceId || `row-${idx}`}
-                className={rowCls}
+                className="hover:bg-blue-50/30"
               >
                 {isColVisible('title') && (
                   <td
-                    className="px-3 py-2 text-gray-700 max-w-xs"
+                    className="px-3 py-2 text-gray-700 max-w-xs truncate"
                     title={r.title || ''}
                   >
-                    <div className="truncate">{r.title || '—'}</div>
-
-                    {/* ⭐ 门店归属徽标 */}
-                    {autoAssigned && (
-                      <div className="mt-0.5">
-                        <span
-                          className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded text-[10px] font-medium bg-amber-100 text-amber-800 border border-amber-300"
-                          title={`已按门店「${storeName}」自动归属付款单位`}
-                        >
-                          <Store className="w-3 h-3" />
-                          门店归属{storeName ? `：${storeName}` : ''}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* ⭐ 类别覆盖徽标 */}
-                    {categoryOverride && (
-                      <div className="mt-0.5">
-                        <span
-                          className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded text-[10px] font-medium bg-violet-100 text-violet-800 border border-violet-300"
-                          title={`收款账户为「${payee}」，已归入类别「${categoryOverride}」`}
-                        >
-                          <Tag className="w-3 h-3" />
-                          类别：{categoryOverride}
-                        </span>
-                      </div>
-                    )}
+                    {r.title || '—'}
+                  </td>
+                )}
+                {isColVisible('templateName') && (
+                  <td className="px-3 py-2 text-gray-600">
+                    {r.templateName || '—'}
                   </td>
                 )}
                 {isColVisible('items') && (
@@ -170,8 +182,19 @@ export const ResultsTable: React.FC<Props> = ({ items, isColVisible }) => {
                       : '—'}
                   </td>
                 )}
-                {isColVisible('payee') && (
+                {isColVisible('payeeAccount') && (
                   <td className="px-3 py-2 text-gray-600">{payee || '—'}</td>
+                )}
+                {isColVisible('storeName') && (
+                  <td className="px-3 py-2 text-gray-600">
+                    {((r as any)._storeName as string) ||
+                      ((r as any)._manualStore === true ? '未指定' : '—')}
+                  </td>
+                )}
+                {isColVisible('paymentUnit') && (
+                  <td className="px-3 py-2 text-gray-600">
+                    {r.paymentUnit || '—'}
+                  </td>
                 )}
                 {isColVisible('status') && (
                   <td className="px-3 py-2">
@@ -186,14 +209,22 @@ export const ResultsTable: React.FC<Props> = ({ items, isColVisible }) => {
                 )}
                 {isColVisible('createTime') && (
                   <td className="px-3 py-2 text-gray-500 tabular-nums whitespace-nowrap">
-                    {formatDateTime(r.createTime) || '—'}
+                    {r.createTime || '—'}
                   </td>
                 )}
                 {isColVisible('finishTime') && (
                   <td className="px-3 py-2 text-gray-500 tabular-nums whitespace-nowrap">
-                    {formatDateTime(r.finishTime) || '—'}
+                    {r.finishTime || '—'}
                   </td>
                 )}
+
+                {/* ⭐ 手动归属 */}
+                <td className="px-3 py-2 whitespace-nowrap">
+                  <ManualStoreSelect
+                    item={r}
+                    onChanged={onManualStoreChanged}
+                  />
+                </td>
               </tr>
             );
           })}

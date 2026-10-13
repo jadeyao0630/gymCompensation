@@ -7,6 +7,7 @@ import {
   BarChart3,
   TrendingUp,
   GitBranch,
+  Settings,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useStore } from '../../contexts/StoreContext';
@@ -17,7 +18,8 @@ type ActiveKey =
   | 'payroll'
   | 'marketing'
   | 'monthly'
-  | 'dingtalk';
+  | 'dingtalk'
+  | 'stores';
 
 interface NavButtonsProps {
   active: ActiveKey;
@@ -37,14 +39,11 @@ export const NavButtons: React.FC<NavButtonsProps> = ({ active, month }) => {
     }
   };
 
-  /* ⭐ 基础样式：加大圆角、过渡、悬停浮起 */
   const baseCls =
     'inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md ' +
     'transition-all duration-200 transform';
   const activeCls = 'ring-2 ring-offset-2 cursor-default';
   const clickCls = 'active:scale-[0.97]';
-
-  /* ⭐ 统一的悬停效果：上浮 + 放大阴影 + 亮度提升 */
   const hoverCls = 'nav-btn-hover';
 
   return (
@@ -138,6 +137,19 @@ export const NavButtons: React.FC<NavButtonsProps> = ({ active, month }) => {
           <GitBranch className="w-4 h-4" /> 钉钉流程
         </button>
       )}
+
+      {/* ⭐ 门店配置 */}
+      <button
+        onClick={() => active !== 'stores' && go('/settings/stores')}
+        disabled={active === 'stores'}
+        className={`${baseCls} ${
+          active === 'stores'
+            ? `bg-gradient-to-r from-slate-600 to-gray-700 text-white shadow-slate-500/30 ${activeCls} ring-slate-300`
+            : `bg-gradient-to-r from-slate-600 to-gray-700 text-white shadow-slate-500/20 ${hoverCls} ${clickCls}`
+        }`}
+      >
+        <Settings className="w-4 h-4" /> 门店配置
+      </button>
     </div>
   );
 };

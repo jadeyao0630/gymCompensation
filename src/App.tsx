@@ -7,18 +7,17 @@ import PayrollPage from './pages/payroll/PayrollPage';
 import SimulationPage from './pages/simulation/SimulationPage';
 import MarketingReportPage from './pages/marketing/MarketingReportPage';
 import MonthlyReportPage from './pages/monthly/MonthlyReportPage';
-import DingTalkReportPage from './pages/dingtalk/DingTalkReportPage';   // ⭐ 新增
+import DingTalkReportPage from './pages/dingtalk/DingTalkReportPage';
+import StoreConfigPage from './pages/settings/StoreConfigPage';
 import NoPermissionPage from './pages/no-permission/NoPermissionPage';
 import { AppDataProvider } from './contexts/AppDataContext';
 
 const App: React.FC = () => (
-    <AppDataProvider>
-      <Routes>
-      {/* 公开 */}
+  <AppDataProvider>
+    <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/no-permission" element={<NoPermissionPage />} />
 
-      {/* 受保护 */}
       <Route
         path="/"
         element={
@@ -67,7 +66,6 @@ const App: React.FC = () => (
           </RouteGuard>
         }
       />
-      {/* ⭐ 钉钉流程数据 */}
       <Route
         path="/dingtalk-report"
         element={
@@ -77,11 +75,19 @@ const App: React.FC = () => (
         }
       />
 
-      {/* 兜底 */}
+      {/* ⭐ 门店配置 */}
+      <Route
+        path="/settings/stores"
+        element={
+          <RouteGuard>
+            <StoreConfigPage />
+          </RouteGuard>
+        }
+      />
+
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   </AppDataProvider>
-  
 );
 
 export default App;

@@ -5,6 +5,9 @@ import {
   type ColumnKey,
 } from '../utils/constants';
 
+/* ⭐ 重新导出，方便其它组件 import */
+export type { ColumnKey };
+
 function loadVisibleColumns(): Set<ColumnKey> {
   try {
     const saved = localStorage.getItem(COLUMN_STORAGE_KEY);

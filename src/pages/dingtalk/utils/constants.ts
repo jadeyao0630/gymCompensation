@@ -1,5 +1,14 @@
 /* ============================================================
- * 付款单位 → 门店
+ * ⭐ 门店配置相关（运行时从 storeConfig 读取）
+ * ============================================================ */
+import {
+  matchStoreByPaymentUnit,
+  matchStoreByText,
+  matchStoreByItem,
+} from '../../../utils/storeConfig';
+
+/* ============================================================
+ * 付款单位 → 门店（保留常量，供静态展示用）
  * ============================================================ */
 export const PAYMENT_UNIT_TO_STORE: Record<string, string> = {
   '北京林朗悦动体育管理有限公司': '哈德门',
@@ -10,18 +19,25 @@ export const PAYMENT_UNIT_TO_STORE: Record<string, string> = {
 
 export const PAYMENT_UNITS = Object.keys(PAYMENT_UNIT_TO_STORE);
 
-export function getStoreFromPaymentUnit(paymentUnit: string | null): string {
-  if (!paymentUnit) return '';
-  if (PAYMENT_UNIT_TO_STORE[paymentUnit]) return PAYMENT_UNIT_TO_STORE[paymentUnit];
-  for (const [unit, store] of Object.entries(PAYMENT_UNIT_TO_STORE)) {
-    if (paymentUnit.includes(unit) || unit.includes(paymentUnit)) return store;
-  }
-  if (paymentUnit.includes('东花市')) return '富贵园';
-  return '';
+/** ⭐ 付款单位 → 门店（走运行时配置） */
+export function getStoreFromPaymentUnit(
+  paymentUnit: string | null | undefined
+): string {
+  return matchStoreByPaymentUnit(paymentUnit);
+}
+
+/** ⭐ 文本 → 门店（走运行时配置） */
+export function inferStoreFromText(text: string | null | undefined): string {
+  return matchStoreByText(text);
+}
+
+/** ⭐ 综合推断一条钉钉记录的门店 */
+export function getStoreFromItem(item: any): string {
+  return matchStoreByItem(item);
 }
 
 /* ============================================================
- * 模板分类（保留你原有的）
+ * 模板分类
  * ============================================================ */
 export type TemplateCategory =
   | '假勤管理'
@@ -39,11 +55,9 @@ export const TEMPLATE_CATEGORY_ORDER: TemplateCategory[] = [
 ];
 
 export const TEMPLATE_NAME_TO_CATEGORY: Record<string, TemplateCategory> = {
-  /* 假勤管理 */
   '出差申请': '假勤管理',
   '请假单': '假勤管理',
 
-  /* 智能财务 */
   '付款申请单': '智能财务',
   '员工借款（备用金）': '智能财务',
   '员工费用报销': '智能财务',
@@ -53,15 +67,12 @@ export const TEMPLATE_NAME_TO_CATEGORY: Record<string, TemplateCategory> = {
   '资产报废申请表': '智能财务',
   '资产购置申请表': '智能财务',
 
-  /* 法务管理 */
   '印章、证照、档案 使用申请': '法务管理',
   '合同用印': '法务管理',
 
-  /* 业务管理 */
   '请示': '业务管理',
   '会签单': '业务管理',
 
-  /* 其他 */
   '访客登记': '其他',
   '供应商合同': '其他',
   '通知供应商发货单': '其他',
@@ -81,23 +92,38 @@ export function getTemplateCategory(templateName: string): TemplateCategory {
 
   const name = templateName;
 
-  if (name.includes('请假') || name.includes('出差') || name.includes('加班') ||
-      name.includes('外出') || name.includes('调休') || name.includes('考勤')) {
+  if (
+    name.includes('请假') ||
+    name.includes('出差') ||
+    name.includes('加班') ||
+    name.includes('外出') ||
+    name.includes('调休') ||
+    name.includes('考勤')
+  ) {
     return '假勤管理';
   }
 
   if (
-    name.includes('付款') || name.includes('借款') || name.includes('备用金') ||
-    name.includes('报销') || name.includes('退费') || name.includes('退款') ||
-    name.includes('资产') || name.includes('银行账户') || name.includes('费用') ||
+    name.includes('付款') ||
+    name.includes('借款') ||
+    name.includes('备用金') ||
+    name.includes('报销') ||
+    name.includes('退费') ||
+    name.includes('退款') ||
+    name.includes('资产') ||
+    name.includes('银行账户') ||
+    name.includes('费用') ||
     name.includes('底薪、佣金支付申请')
   ) {
     return '智能财务';
   }
 
   if (
-    name.includes('印章') || name.includes('证照') || name.includes('档案') ||
-    name.includes('合同用印') || name.includes('法务')
+    name.includes('印章') ||
+    name.includes('证照') ||
+    name.includes('档案') ||
+    name.includes('合同用印') ||
+    name.includes('法务')
   ) {
     return '法务管理';
   }
@@ -110,13 +136,16 @@ export function getTemplateCategory(templateName: string): TemplateCategory {
 }
 
 /* ============================================================
- * 列定义
+ * ⭐ 列定义（已补齐 GroupedResults 用到的所有 key）
  * ============================================================ */
 export type ColumnKey =
   | 'title'
+  | 'templateName'
   | 'items'
   | 'amount'
-  | 'payee'
+  | 'payeeAccount'
+  | 'storeName'
+  | 'paymentUnit'
   | 'status'
   | 'createTime'
   | 'finishTime';
@@ -129,9 +158,12 @@ export interface ColumnDef {
 
 export const COLUMNS: ColumnDef[] = [
   { key: 'title', label: '标题', defaultVisible: true },
+  { key: 'templateName', label: '流程类型', defaultVisible: true },
   { key: 'items', label: '事项 / 明细', defaultVisible: true },
   { key: 'amount', label: '金额（元）', defaultVisible: true },
-  { key: 'payee', label: '收款账户', defaultVisible: true },
+  { key: 'payeeAccount', label: '收款账户', defaultVisible: true },
+  { key: 'storeName', label: '门店', defaultVisible: true },
+  { key: 'paymentUnit', label: '付款单位', defaultVisible: false },
   { key: 'status', label: '状态', defaultVisible: true },
   { key: 'createTime', label: '创建时间', defaultVisible: true },
   { key: 'finishTime', label: '完成时间', defaultVisible: false },
@@ -142,18 +174,7 @@ export const COLUMN_STORAGE_KEY = 'dingtalk_report_visible_columns_v1';
 export const EXCLUDE_TEMPLATES = ['银行账户'];
 
 /* ============================================================
- * ⭐ 会员退费 → 门店推断（按「事项/明细」文本里的关键字）
- *
- *   判断依据（只读「事项 / 明细」类字段）：
- *     - 明细列表（JSON 里的「事项」value）
- *     - 退卡原因（会员退费主字段）
- *     - 事项 / 事项/明细 / 报销事由 / 费用类型
- *     - 付款内容提要 / 付款事由 / 付款用途 / 借款提要
- *     - 备注 / 说明 / 用途 / 摘要 / 事由
- *     - items[].content
- *
- *   命中「富贵园」或「装修」→ 富贵园公司
- *   否则                → 哈德门公司
+ * 会员退费 → 门店推断
  * ============================================================ */
 import type { DingTalkReportItem } from '../../../api/dingtalk';
 
@@ -166,7 +187,6 @@ export const REFUND_KEYWORDS = ['富贵园', '装修'];
 function collectRefundItemText(item: DingTalkReportItem): string {
   const parts: string[] = [];
 
-  /* 1) items[].content */
   if (Array.isArray(item.items)) {
     item.items.forEach((it: any) => {
       if (it?.content) parts.push(String(it.content));
@@ -175,7 +195,6 @@ function collectRefundItemText(item: DingTalkReportItem): string {
 
   const fv = item.formValues || {};
 
-  /* 2) 明细列表（JSON 字符串，取「事项」列） */
   const rawDetail = fv['明细列表'];
   if (typeof rawDetail === 'string' && rawDetail && rawDetail !== 'null') {
     try {
@@ -201,7 +220,6 @@ function collectRefundItemText(item: DingTalkReportItem): string {
     }
   }
 
-  /* 3) 事项 / 明细 类的文本字段 */
   [
     '退卡原因',
     '事项',
@@ -233,9 +251,6 @@ function collectRefundItemText(item: DingTalkReportItem): string {
 
 /**
  * 会员退费 → 推断付款单位
- *  - 命中「富贵园 / 装修」→ 富贵园公司
- *  - 否则 → 哈德门公司
- *  - 非会员退费 / 已有 paymentUnit → 返回 null
  */
 export function inferRefundPaymentUnit(
   item: DingTalkReportItem

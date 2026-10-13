@@ -1,21 +1,13 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Calculator, Loader2 } from 'lucide-react';
 import type {
   MonthlyCompensationPlan,
   CompensationStore,
   RewardsCatalog,
-  TempReward,
 } from '../../types/compensation';
 import { usePayroll } from '../../hooks/usePayroll';
 import type { PayrollResult, Department } from '../../utils/payroll';
 import { exportPayrollTableToExcel } from '../../utils/exportPayrollTable';
-import { fetchPlanByMonth, fetchPlanList } from '../../api/compensation';
-import {
-  fetchStaffStatus,
-  saveStaffStatus,
-  type StaffStatusItem,
-} from '../../api/payrollStatus';
 import { loadRewardsCatalog } from '../../utils/payrollStorage';
 import MissingPositionConfigDialog from '../../components/compensation/MissingPositionConfigDialog';
 import StoreSwitcher from '../../components/layout/StoreSwitcher';
@@ -30,6 +22,10 @@ import { usePayrollStorage } from '../../hooks/usePayrollStorage';
 import { usePayrollCalculation } from '../../hooks/usePayrollCalculation';
 import { usePersistedMonth } from '../../hooks/usePersistedMonth';
 
+import { usePayrollMonths } from './hooks/usePayrollMonths';
+import { usePayrollStaffStatus } from './hooks/usePayrollStaffStatus';
+import { usePayrollTempRewards } from './hooks/usePayrollTempRewards';
+
 import { PayrollHeader } from './components/PayrollHeader';
 import { PayrollToolbar } from './components/PayrollToolbar';
 import { PayrollSummary } from './components/PayrollSummary';
@@ -37,6 +33,9 @@ import { PayrollMissingAlert } from './components/PayrollMissingAlert';
 import { PayrollAllTable } from './components/PayrollAllTable';
 import { PayrollDeptList } from './components/PayrollDeptList';
 import { PayrollActionsProvider } from './components/PayrollActionsContext';
+import { PayrollEmptyState } from './components/PayrollEmptyState';
+import { PayrollNoPlanState } from './components/PayrollNoPlanState';
+import { SavingTempOverlay } from './components/SavingTempOverlay';
 
 type ViewMode = 'all' | 'department';
 
@@ -49,7 +48,7 @@ const PayrollPage: React.FC = () => {
   const opsViewEnabled = hasPermission('ops:view', storeId);
 
   const {
-    fullStore, setFullStore,
+    fullStore,
     overridesByStore, setOverridesByStore,
     newbieByStore, setNewbieByStore,
     excludedByStore, setExcludedByStore,
@@ -59,7 +58,7 @@ const PayrollPage: React.FC = () => {
     persistPlanToServer,
   } = usePayrollStorage();
 
-  /* ⭐ 页面级月份持久化：key = gym_payroll_month_v1_<storeId> */
+  /* ⭐ 页面级月份持久化 */
   const { month: selectedMonth, setMonth: setSelectedMonth } = usePersistedMonth(
     'payroll',
     storeId
@@ -69,9 +68,6 @@ const PayrollPage: React.FC = () => {
   const [missingDialogOpen, setMissingDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('department');
   const [hideExcluded, setHideExcluded] = useState<boolean>(true);
-
-  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
-  const [monthsLoading, setMonthsLoading] = useState(false);
 
   /* ⭐ 从全局 store 取结果 */
   const resultsByStore = appData.payrollResultsByStore;
@@ -101,15 +97,9 @@ const PayrollPage: React.FC = () => {
 
   const [rewardsCatalog, setRewardsCatalog] = useState<RewardsCatalog>([]);
 
-  const [savingTemp, setSavingTemp] = useState<{
-    active: boolean;
-    staffName?: string;
-  }>({ active: false });
-
-  const fetchedKeyRef = useRef<string>('');
   const initializedRef = useRef(false);
-  const syncTimerRef = useRef<number | null>(null);
 
+  /* ⭐ 当前门店的 store（month → plan），传给 usePayrollMonths */
   const store: CompensationStore = fullStore[storeId] || {};
   const allResults: PayrollResult[] = resultsByStore[storeId] || [];
   const excludedSet: Set<string> = excludedByStore[storeId] || new Set();
@@ -123,28 +113,15 @@ const PayrollPage: React.FC = () => {
     setRewardsCatalog(loadRewardsCatalog());
   }, [storeId]);
 
-  useEffect(() => {
-    if (!storeId) return;
-    let cancelled = false;
-    setMonthsLoading(true);
-    (async () => {
-      const localMonths = Object.keys(fullStore[storeId] || {});
-      let remoteMonths: string[] = [];
-      try {
-        const plans = await fetchPlanList(storeId);
-        remoteMonths = (plans || []).filter((p) => p.isActive !== 0).map((p) => p.month);
-      } catch (e) {
-        console.warn('[PayrollPage] 拉取可用月份列表失败，使用本地缓存', e);
-      }
-      if (cancelled) return;
-      const merged = Array.from(new Set([...remoteMonths, ...localMonths])).sort();
-      setAvailableMonths(merged);
-      setMonthsLoading(false);
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeId, fullStore]);
+  /* ⭐ 可用月份 + 方案加载（传单门店 store） */
+  const { availableMonths, monthsLoading, invalidate } = usePayrollMonths({
+    storeId,
+    selectedMonth,
+    store,
+    savePlanToStorage,
+  });
 
+  /* ⭐ 薪酬计算 Hook */
   const {
     updateAttendance,
     handleUpdateMemberCommission,
@@ -162,60 +139,19 @@ const PayrollPage: React.FC = () => {
   const password = import.meta.env.VITE_TEST_PASSWORD || '';
   const { run, loading, error } = usePayroll({ username, password, busId: storeId });
 
-  const syncStaffStatusToServer = useCallback(
-    (newbie: Set<string>, excluded: Set<string>) => {
-      if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
-      syncTimerRef.current = window.setTimeout(async () => {
-        try {
-          const ids = new Set<string>([...newbie, ...excluded]);
-          const statuses: StaffStatusItem[] = Array.from(ids).map((id) => ({
-            staffId: id,
-            isNewbie: newbie.has(id),
-            isExcluded: excluded.has(id),
-          }));
-          await saveStaffStatus(storeId, selectedMonth, statuses);
-        } catch (e) {
-          console.warn('[PayrollPage] 保存员工状态到后端失败', e);
-        }
-      }, 600);
-    },
-    [storeId, selectedMonth]
-  );
+  /* ⭐ 员工状态 */
+  const { toggleExclude, toggleNewbie } = usePayrollStaffStatus({
+    storeId,
+    selectedMonth,
+    newbieSet,
+    excludedSet,
+    setNewbieByStore,
+    setExcludedByStore,
+    persistNewbie,
+    persistExcluded,
+  });
 
-  useEffect(() => {
-    if (!storeId || !selectedMonth) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const statuses = await fetchStaffStatus(storeId, selectedMonth);
-        if (cancelled) return;
-        const newbie = new Set<string>();
-        const excluded = new Set<string>();
-        statuses.forEach((s) => {
-          if (s.isNewbie) newbie.add(s.staffId);
-          if (s.isExcluded) excluded.add(s.staffId);
-        });
-        if (statuses.length > 0) {
-          setNewbieByStore((prev) => {
-            const next = { ...prev, [storeId]: newbie };
-            persistNewbie(next);
-            return next;
-          });
-          setExcludedByStore((prev) => {
-            const next = { ...prev, [storeId]: excluded };
-            persistExcluded(next);
-            return next;
-          });
-        }
-      } catch (e) {
-        console.warn('[PayrollPage] 拉取员工状态失败，使用本地缓存', e);
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeId, selectedMonth]);
-
-  /* ⭐ 首次进入：若无持久化月份，回退到最近可用月份（不读 URL） */
+  /* ⭐ 首次进入：无持久化月份 → 选最近可用月份 */
   useEffect(() => {
     if (initializedRef.current) return;
     initializedRef.current = true;
@@ -224,32 +160,6 @@ const PayrollPage: React.FC = () => {
     if (months.length > 0) setSelectedMonth(months[months.length - 1]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId]);
-
-  useEffect(() => { fetchedKeyRef.current = ''; }, [storeId]);
-
-  useEffect(() => {
-    if (!storeId || !selectedMonth) return;
-    const key = `${storeId}:${selectedMonth}`;
-    if (fetchedKeyRef.current === key) return;
-    const localPlan = fullStore[storeId]?.[selectedMonth];
-    if (localPlan && localPlan.positions && localPlan.positions.length > 0) {
-      fetchedKeyRef.current = key;
-      return;
-    }
-    let cancelled = false;
-    fetchedKeyRef.current = key;
-    (async () => {
-      try {
-        const remote = await fetchPlanByMonth(storeId, selectedMonth);
-        if (cancelled || !remote) return;
-        savePlanToStorage(storeId, selectedMonth, remote);
-      } catch (e) {
-        console.warn('[PayrollPage] API 加载失败，使用本地缓存', e);
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeId, selectedMonth]);
 
   const positionOptions = useMemo(() => {
     const set = new Set<string>();
@@ -274,67 +184,51 @@ const PayrollPage: React.FC = () => {
     );
   }, [allResults, excludedSet]);
 
-  const toggleExclude = (staffId: string) => {
-    setExcludedByStore((prev) => {
-      const cur = new Set(prev[storeId] || []);
-      if (cur.has(staffId)) cur.delete(staffId);
-      else cur.add(staffId);
-      const next = { ...prev, [storeId]: cur };
-      persistExcluded(next);
-      syncStaffStatusToServer(newbieSet, cur);
-      return next;
-    });
-  };
-
   const toggleDept = (dept: Department) =>
     setExpanded((p) => ({ ...p, [dept]: !p[dept] }));
 
   const handleToggleNewbie = (staffId: string) => {
-    setNewbieByStore((prev) => {
-      const cur = new Set(prev[storeId] || []);
-      const willBeNewbie = !cur.has(staffId);
-      if (willBeNewbie) cur.add(staffId);
-      else cur.delete(staffId);
-      const next = { ...prev, [storeId]: cur };
-      persistNewbie(next);
-      syncStaffStatusToServer(cur, excludedSet);
-      return next;
-    });
-    calcToggleNewbie(staffId, () => {});
+    toggleNewbie(staffId, () => calcToggleNewbie(staffId, () => {}));
   };
 
   const handleSavePosition = (staffId: string, newTitle: string) => {
     calcSavePosition(staffId, newTitle, overrides, setOverridesByStore);
   };
 
-  const runAndUpdate = async (planToUse: MonthlyCompensationPlan) => {
-    const catalog = loadRewardsCatalog();
-    setRewardsCatalog(catalog);
+  const runAndUpdate = useCallback(
+    async (planToUse: MonthlyCompensationPlan) => {
+      const catalog = loadRewardsCatalog();
+      setRewardsCatalog(catalog);
 
-    const res = await run(
-      selectedMonth,
-      planToUse,
-      overrides,
-      opsViewEnabled,
-      newbieSet,
-      {
-        rewardsCatalog: catalog,
-        departmentRewards: planToUse.departmentRewards,
-        tempRewardsByStaff: planToUse.tempRewards,
+      const res = await run(
+        selectedMonth,
+        planToUse,
+        overrides,
+        opsViewEnabled,
+        newbieSet,
+        {
+          rewardsCatalog: catalog,
+          departmentRewards: planToUse.departmentRewards,
+          tempRewardsByStaff: planToUse.tempRewards,
+        }
+      );
+
+      const filteredResults = opsViewEnabled
+        ? res.results
+        : res.results.filter((r) => r.positionTitle !== '运营主管');
+
+      if (res.missingPositions.length > 0) {
+        setMissing(res.missingPositions);
+        setMissingDialogOpen(true);
       }
-    );
-
-    const filteredResults = opsViewEnabled
-      ? res.results
-      : res.results.filter((r) => r.positionTitle !== '运营主管');
-
-    if (res.missingPositions.length > 0) {
-      setMissing(res.missingPositions);
-      setMissingDialogOpen(true);
-    }
-    setResultsByStore((prev) => ({ ...prev, [storeId]: filteredResults }));
-    setPerformancesByStore((prev) => ({ ...prev, [storeId]: res.performances }));
-  };
+      setResultsByStore((prev) => ({ ...prev, [storeId]: filteredResults }));
+      setPerformancesByStore((prev) => ({ ...prev, [storeId]: res.performances }));
+    },
+    [
+      run, selectedMonth, overrides, opsViewEnabled, newbieSet,
+      storeId, setResultsByStore, setPerformancesByStore,
+    ]
+  );
 
   const handleRun = async () => {
     if (!currentPlan || !selectedMonth) {
@@ -345,44 +239,15 @@ const PayrollPage: React.FC = () => {
     catch (e) { console.error('[handleRun] 失败:', e); }
   };
 
-  const handleSaveTempRewards = async (staffId: string, next: TempReward[]) => {
-    if (!currentPlan || !selectedMonth) return;
-
-    const sid = String(staffId).trim();
-    const staffName =
-      allResults.find((r) => String(r.staffId).trim() === sid)?.staffName ||
-      staffId;
-
-    setSavingTemp({ active: true, staffName });
-    const startedAt = Date.now();
-
-    try {
-      const merged: Record<string, TempReward[]> = {};
-      Object.keys(currentPlan.tempRewards || {}).forEach((k) => {
-        merged[String(k)] = currentPlan.tempRewards![k];
-      });
-      if (next.length === 0) delete merged[sid];
-      else merged[sid] = next;
-
-      const nextPlan: MonthlyCompensationPlan = {
-        ...currentPlan,
-        tempRewards: merged,
-      };
-
-      await persistPlanToServer(storeId, selectedMonth, nextPlan);
-      await runAndUpdate(nextPlan);
-    } catch (e) {
-      console.error('[handleSaveTempRewards] 重算失败', e);
-    } finally {
-      const elapsed = Date.now() - startedAt;
-      const remain = Math.max(0, 400 - elapsed);
-      if (remain > 0) {
-        setTimeout(() => setSavingTemp({ active: false }), remain);
-      } else {
-        setSavingTemp({ active: false });
-      }
-    }
-  };
+  /* ⭐ 临时奖罚 */
+  const { savingTemp, handleSaveTempRewards } = usePayrollTempRewards({
+    storeId,
+    selectedMonth,
+    currentPlan,
+    allResults,
+    persistPlanToServer,
+    runAndUpdate,
+  });
 
   const handleExportTable = () => {
     if (allResults.length === 0) {
@@ -457,7 +322,7 @@ const PayrollPage: React.FC = () => {
             hasPlan={!!currentPlan}
             onMonthChange={(m) => {
               setSelectedMonth(m);
-              fetchedKeyRef.current = '';
+              invalidate();
             }}
             onViewModeChange={setViewMode}
             onHideExcludedChange={setHideExcluded}
@@ -520,54 +385,14 @@ const PayrollPage: React.FC = () => {
           )}
 
           {allResults.length === 0 && currentPlan && (
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-12 text-center">
-              <div className="w-14 h-14 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-4">
-                {loading ? (
-                  <Loader2 className="w-6 h-6 text-emerald-500 animate-spin" />
-                ) : (
-                  <Calculator className="w-6 h-6 text-emerald-500" />
-                )}
-              </div>
-              <h3 className="font-semibold text-gray-700 mb-1">
-                {loading ? '正在计算…' : '暂无计算结果'}
-              </h3>
-              <p className="text-sm text-gray-400 mb-4">
-                {loading
-                  ? '正在拉取订单、员工状态、计算薪酬与成本…'
-                  : '点击「开始计算」按钮，根据本月配置拉取数据并计算薪酬'}
-              </p>
-              <button
-                onClick={handleRun}
-                disabled={loading}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-sm font-semibold shadow-md transition-all active:scale-[0.97] disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {loading ? (
-                  <><Loader2 className="w-4 h-4 animate-spin" /> 计算中…</>
-                ) : (
-                  <><Calculator className="w-4 h-4" /> 开始计算</>
-                )}
-              </button>
-            </div>
+            <PayrollEmptyState loading={loading} onRun={handleRun} />
           )}
 
           {!currentPlan && (
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-12 text-center">
-              <div className="w-14 h-14 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
-                <AlertTriangle className="w-6 h-6 text-amber-500" />
-              </div>
-              <h3 className="font-semibold text-gray-700 mb-1">
-                该月份暂无薪酬配置
-              </h3>
-              <p className="text-sm text-gray-400 mb-4">
-                请先到「薪酬配置」页面上传或导入 {selectedMonth || '当月'} 的薪酬方案
-              </p>
-              <button
-                onClick={() => navigate('/compensation')}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-xl text-sm font-semibold shadow-sm transition-all"
-              >
-                <ArrowLeft className="w-4 h-4" /> 去配置
-              </button>
-            </div>
+            <PayrollNoPlanState
+              month={selectedMonth}
+              onGoConfig={() => navigate('/compensation')}
+            />
           )}
         </div>
 
@@ -591,30 +416,10 @@ const PayrollPage: React.FC = () => {
           }}
         />
 
-        {savingTemp.active && (
-          <div
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm select-none"
-            onClick={(e) => e.stopPropagation()}
-            onContextMenu={(e) => e.preventDefault()}
-          >
-            <div className="bg-white rounded-2xl shadow-2xl px-8 py-7 flex flex-col items-center gap-3 min-w-[260px]">
-              <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
-              <div className="text-center">
-                <p className="text-sm font-semibold text-gray-800">
-                  正在保存奖罚并重算
-                </p>
-                {savingTemp.staffName && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    → {savingTemp.staffName}
-                  </p>
-                )}
-                <p className="text-[11px] text-gray-400 mt-2">
-                  请稍候，正在同步方案与计算薪酬…
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
+        <SavingTempOverlay
+          active={savingTemp.active}
+          staffName={savingTemp.staffName}
+        />
       </div>
     </PayrollActionsProvider>
   );

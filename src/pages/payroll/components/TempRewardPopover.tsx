@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Gift,
   MinusCircle,
@@ -19,6 +20,8 @@ interface Props {
   staffName: string;
   current: TempReward[];
   catalog: RewardsCatalog;
+  /** ⭐ 触发按钮 DOM（用于定位） */
+  anchorEl?: HTMLElement | null;
   onSave: (next: TempReward[]) => void;
   onClose: () => void;
 }
@@ -26,11 +29,16 @@ interface Props {
 const makeId = () =>
   `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
+const PANEL_WIDTH = 520;
+const GAP = 8;
+const MARGIN = 12;
+
 export const TempRewardPopover: React.FC<Props> = ({
   staffId,
   staffName,
   current,
   catalog,
+  anchorEl,
   onSave,
   onClose,
 }) => {
@@ -40,15 +48,80 @@ export const TempRewardPopover: React.FC<Props> = ({
   );
   const [showPicker, setShowPicker] = useState(false);
 
+  const [pos, setPos] = useState<{
+    top: number;
+    left: number;
+    placement: 'top' | 'bottom';
+    maxHeight: number;
+  }>({
+    top: 0,
+    left: 0,
+    placement: 'bottom',
+    maxHeight: 480,
+  });
+
+  const computePosition = () => {
+    if (!anchorEl || !wrapRef.current) return;
+
+    const rect = anchorEl.getBoundingClientRect();
+    const panelRect = wrapRef.current.getBoundingClientRect();
+    const panelH = panelRect.height || 400;
+
+    const vh = window.innerHeight;
+    const vw = window.innerWidth;
+
+    const spaceBelow = vh - rect.bottom - GAP - MARGIN;
+    const spaceAbove = rect.top - GAP - MARGIN;
+    const placement: 'top' | 'bottom' =
+      spaceBelow >= Math.min(panelH, 300) || spaceBelow >= spaceAbove
+        ? 'bottom'
+        : 'top';
+
+    const maxHeight =
+      placement === 'bottom'
+        ? Math.max(200, spaceBelow)
+        : Math.max(200, spaceAbove);
+
+    let left = rect.right - PANEL_WIDTH;
+    if (left < MARGIN) left = MARGIN;
+    if (left + PANEL_WIDTH > vw - MARGIN) {
+      left = vw - PANEL_WIDTH - MARGIN;
+    }
+
+    const top =
+      placement === 'bottom'
+        ? rect.bottom + GAP
+        : Math.max(MARGIN, rect.top - GAP - Math.min(panelH, maxHeight));
+
+    setPos({ top, left, placement, maxHeight });
+  };
+
+  useLayoutEffect(() => {
+    computePosition();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorEl, list.length, showPicker]);
+
+  useEffect(() => {
+    const onScrollOrResize = () => computePosition();
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
+    return () => {
+      window.removeEventListener('scroll', onScrollOrResize, true);
+      window.removeEventListener('resize', onScrollOrResize);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorEl]);
+
   useEffect(() => {
     setList(current.map((r) => ({ ...r })));
   }, [current, staffId]);
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        onClose();
-      }
+      const target = e.target as Node;
+      if (wrapRef.current && wrapRef.current.contains(target)) return;
+      if (anchorEl && anchorEl.contains(target)) return;
+      onClose();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -59,9 +132,8 @@ export const TempRewardPopover: React.FC<Props> = ({
       document.removeEventListener('mousedown', onDoc);
       document.removeEventListener('keydown', onKey);
     };
-  }, [onClose]);
+  }, [onClose, anchorEl]);
 
-  /* ⭐ 从奖罚库添加：amount 带符号（扣款为负） */
   const addFromCatalog = (def: RewardDefinition) => {
     const isDeduction = def.type === 'deduction';
     const signedAmount = isDeduction
@@ -80,7 +152,6 @@ export const TempRewardPopover: React.FC<Props> = ({
     setShowPicker(false);
   };
 
-  /* ⭐ 自定义添加：amount 0，靠用户填 + type 决定符号 */
   const addCustom = (type: 'reward' | 'deduction') => {
     setList((prev) => [
       ...prev,
@@ -111,7 +182,6 @@ export const TempRewardPopover: React.FC<Props> = ({
     onClose();
   };
 
-  /* ⭐ 行展示：isDeduction 只看 amount 符号 */
   const rows = useMemo(() => {
     return list.map((r) => {
       const catalogDef = r.rewardId
@@ -123,10 +193,16 @@ export const TempRewardPopover: React.FC<Props> = ({
     });
   }, [list, catalog]);
 
-  return (
+  const content = (
     <div
       ref={wrapRef}
-      className="absolute right-0 top-full mt-2 z-50 w-[460px] bg-white rounded-2xl border border-gray-200 shadow-2xl p-3"
+      className="fixed z-[120] bg-white rounded-2xl border border-gray-200 shadow-2xl p-3 overflow-y-auto"
+      style={{
+        top: pos.top,
+        left: pos.left,
+        width: PANEL_WIDTH,
+        maxHeight: pos.maxHeight,
+      }}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex items-center gap-2 mb-2">
@@ -146,7 +222,7 @@ export const TempRewardPopover: React.FC<Props> = ({
       {list.length === 0 ? (
         <p className="text-xs text-gray-400 mb-2">暂无条目，点击下方按钮添加</p>
       ) : (
-        <div className="space-y-1.5 mb-2 max-h-72 overflow-y-auto">
+        <div className="space-y-1.5 mb-2">
           {rows.map(({ r, isCatalog, isDeduction }, idx) => (
             <div
               key={r.id}
@@ -166,7 +242,6 @@ export const TempRewardPopover: React.FC<Props> = ({
                 </span>
               )}
 
-              {/* 类型下拉：只改 amount 符号 */}
               {!isCatalog && (
                 <select
                   value={isDeduction ? 'deduction' : 'reward'}
@@ -203,7 +278,6 @@ export const TempRewardPopover: React.FC<Props> = ({
                 />
               )}
 
-              {/* 金额输入：按 isDeduction 存正负 */}
               <div
                 className={`flex items-center gap-1 border rounded px-1.5 py-1 bg-white ${
                   isDeduction ? 'border-rose-200' : 'border-gray-200'
@@ -248,7 +322,6 @@ export const TempRewardPopover: React.FC<Props> = ({
         </div>
       )}
 
-      {/* 从奖罚库选择面板 */}
       {showPicker && (
         <div className="mb-2 border border-indigo-100 rounded-xl bg-indigo-50/40 p-2 max-h-64 overflow-y-auto">
           <div className="flex items-center justify-between px-1 pb-1 mb-1 border-b border-indigo-100">
@@ -350,6 +423,8 @@ export const TempRewardPopover: React.FC<Props> = ({
       </div>
     </div>
   );
+
+  return createPortal(content, document.body);
 };
 
 export default TempRewardPopover;

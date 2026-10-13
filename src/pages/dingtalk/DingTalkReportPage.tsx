@@ -21,6 +21,9 @@ import { usePersistedMonth } from '../../hooks/usePersistedMonth';
 
 import type { DingTalkReportItem } from '../../api/dingtalk';
 
+import { fetchStores } from '../../utils/storeConfig';
+import type { StoreInfo } from '../../constants/stores';
+
 import DingTalkHeader from './components/DingTalkHeader';
 import DingTalkSyncPanel from './components/DingTalkSyncPanel';
 import DingTalkFilterBar from './components/DingTalkFilterBar';
@@ -64,13 +67,9 @@ const KEYWORD_CATEGORY_RULES: KeywordCategoryRule[] = [
   },
 ];
 
-/**
- * ⭐ 把一条记录的所有文本（事项 / 明细 / 标题 / 付款内容提要）合并成字符串
- */
 function collectItemText(item: DingTalkReportItem): string {
   const parts: string[] = [];
 
-  /* 1. items 数组（已解析） */
   if (Array.isArray(item.items)) {
     item.items.forEach((it: any) => {
       if (it?.content) parts.push(String(it.content));
@@ -79,7 +78,6 @@ function collectItemText(item: DingTalkReportItem): string {
 
   const fv = item.formValues || {};
 
-  /* 2. 明细列表：可能是 JSON 字符串 */
   const rawDetail = fv['明细列表'];
   if (rawDetail != null && rawDetail !== 'null' && rawDetail !== '') {
     if (typeof rawDetail === 'string') {
@@ -109,10 +107,8 @@ function collectItemText(item: DingTalkReportItem): string {
     }
   }
 
-  /* 3. 标题 */
   if (item.title) parts.push(String(item.title));
 
-  /* ⭐ 4. 常见文本字段（含「付款内容提要」） */
   [
     '事项',
     '事项/明细',
@@ -124,7 +120,7 @@ function collectItemText(item: DingTalkReportItem): string {
     '用途',
     '摘要',
     '说明',
-    '付款内容提要', // ⭐ 付款申请单用这个
+    '付款内容提要',
     '付款事由',
     '付款用途',
   ].forEach((k) => {
@@ -168,6 +164,23 @@ function resolvePayeeCategory(
     if (raw === rule.payee) return rule.category;
   }
   return null;
+}
+
+/* ⭐ 分组类型，明确包含 total / count / totalCount */
+interface UnitGroupInternal {
+  storeName: string;
+  unitName: string;
+  total: number;
+  count: number;
+  items: DingTalkReportItem[];
+}
+
+interface TypeGroupInternal {
+  typeName: string;
+  total: number;
+  count: number;
+  totalCount: number;
+  units: UnitGroupInternal[];
 }
 
 const DingTalkReportPage: React.FC = () => {
@@ -245,6 +258,18 @@ const DingTalkReportPage: React.FC = () => {
 
   const { visibleColumns, toggleColumn, resetColumns, isColVisible } =
     useReportColumns();
+
+  /* ⭐ 门店列表 & 手动归属本地覆盖 */
+  const [storeOptions, setStoreOptions] = useState<string[]>([]);
+  const [manualOverrides, setManualOverrides] = useState<
+    Record<string, { storeName: string | null; isManual: boolean }>
+  >({});
+
+  useEffect(() => {
+    fetchStores().then((list: StoreInfo[]) => {
+      setStoreOptions(list.map((s) => s.name));
+    });
+  }, []);
 
   const handleToggleOnlyApproved = () => {
     toggleOnlyApproved();
@@ -338,8 +363,26 @@ const DingTalkReportPage: React.FC = () => {
     [categorizedResults]
   );
 
-  const finalGrouped = useMemo(() => {
-    if (excludedPayeeIds.size === 0 && !hasAnyOverride) return grouped;
+  const finalGrouped = useMemo<TypeGroupInternal[]>(() => {
+    if (excludedPayeeIds.size === 0 && !hasAnyOverride) {
+      /* ⭐ 兜底：把 grouped 转成 TypeGroupInternal（补 total / count） */
+      return grouped.map((g) => {
+        const units = g.units.map((u) => ({
+          storeName: u.storeName,
+          unitName: u.unitName,
+          total: u.total,
+          count: u.count,
+          items: u.items,
+        }));
+        return {
+          typeName: g.typeName,
+          total: units.reduce((s, u) => s + u.total, 0),
+          count: units.reduce((s, u) => s + u.count, 0),
+          totalCount: g.totalCount,
+          units,
+        };
+      });
+    }
 
     const map = new Map<
       string,
@@ -348,16 +391,7 @@ const DingTalkReportPage: React.FC = () => {
         total: number;
         count: number;
         totalCount: number;
-        units: Map<
-          string,
-          {
-            storeName: string;
-            unitName: string;
-            total: number;
-            count: number;
-            items: DingTalkReportItem[];
-          }
-        >;
+        units: Map<string, UnitGroupInternal>;
       }
     >();
 
@@ -365,7 +399,15 @@ const DingTalkReportPage: React.FC = () => {
       if (r.error) continue;
       const typeName = category;
       const unitName = r.paymentUnit || '未指定';
-      const storeName = getStoreFromPaymentUnit(unitName) || '未归属门店';
+
+      /* ⭐ getStoreFromPaymentUnit 参数兜底成 string */
+      const manual = manualOverrides[r.processInstanceId || ''];
+      const storeName: string =
+        manual?.storeName ??
+        ((r as any)._storeName as string | null | undefined) ??
+        getStoreFromPaymentUnit(unitName || '') ??
+        '未归属门店';
+
       const amount = Number(
         extractAmount(r.templateName || '', r.formValues || {}) || 0
       );
@@ -409,7 +451,7 @@ const DingTalkReportPage: React.FC = () => {
         units: Array.from(g.units.values()),
       }))
       .filter((g) => g.units.length > 0);
-  }, [grouped, categorizedResults, excludedPayeeIds, hasAnyOverride]);
+  }, [grouped, categorizedResults, excludedPayeeIds, hasAnyOverride, manualOverrides]);
 
   const storeCharts = useMemo(() => {
     const needRebuild = excludedPayeeIds.size > 0 || hasAnyOverride;
@@ -514,7 +556,7 @@ const DingTalkReportPage: React.FC = () => {
     }
   }, [meta?.syncResult]);
 
-  const filteredGrouped = useMemo(() => {
+  const filteredGrouped = useMemo<TypeGroupInternal[]>(() => {
     let groups = finalGrouped;
     if (selectedStore) {
       groups = groups
@@ -539,9 +581,15 @@ const DingTalkReportPage: React.FC = () => {
 
     let exportResults = categorizedResults;
     if (selectedStore) {
-      exportResults = exportResults.filter(
-        (c) => getStoreFromPaymentUnit(c.item.paymentUnit) === selectedStore
-      );
+      exportResults = exportResults.filter((c) => {
+        const manual = manualOverrides[c.item.processInstanceId || ''];
+        const storeName: string =
+          manual?.storeName ??
+          ((c.item as any)._storeName as string | null | undefined) ??
+          getStoreFromPaymentUnit(c.item.paymentUnit || '') ??
+          '';
+        return storeName === selectedStore;
+      });
     }
     if (selectedType) {
       exportResults = exportResults.filter((c) => c.category === selectedType);
@@ -556,16 +604,25 @@ const DingTalkReportPage: React.FC = () => {
       ['流程类型', '门店', '付款单位', '标题', '事项', '金额', '收款账户', '状态', '创建时间', '完成时间'],
     ];
     exportResults.forEach(({ item: r, category, overridden }) => {
+      const manual = manualOverrides[r.processInstanceId || ''];
+      const storeName: string =
+        manual?.storeName ??
+        ((r as any)._storeName as string | null | undefined) ??
+        getStoreFromPaymentUnit(r.paymentUnit || '') ??
+        '';
+
       rows.push([
-        overridden ? `${r.templateName}（→${category}）` : r.templateName,
-        getStoreFromPaymentUnit(r.paymentUnit),
+        overridden
+          ? `${r.templateName || ''}（→${category}）`
+          : (r.templateName || ''),
+        storeName,
         r.paymentUnit || '',
-        r.title,
-        extractItems(r.templateName, r.formValues),
-        extractAmount(r.templateName, r.formValues) || 0,
-        extractPayeeAccount(r.formValues) || '',
-        getStatusLabel(r.status, r.result),
-        r.createTime,
+        r.title || '',
+        extractItems(r.templateName || '', r.formValues || {}),
+        extractAmount(r.templateName || '', r.formValues || {}) || 0,
+        extractPayeeAccount(r.formValues || {}) || '',
+        getStatusLabel(r.status || '', r.result || ''),
+        r.createTime || '',
         r.finishTime || '',
       ]);
     });
@@ -791,6 +848,13 @@ const DingTalkReportPage: React.FC = () => {
               grouped={filteredGrouped}
               isColVisible={isColVisible}
               selectedType={null}
+              storeOptions={storeOptions}
+              onManualStoreChanged={(pid, next, isManual) => {
+                setManualOverrides((prev) => ({
+                  ...prev,
+                  [pid]: { storeName: next, isManual },
+                }));
+              }}
             />
           </>
         )}

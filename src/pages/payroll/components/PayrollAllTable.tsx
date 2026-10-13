@@ -144,7 +144,7 @@ export const PayrollAllTable: React.FC<Props> = ({
   onToggleExclude,
   onEditPosition,
   onUpdateAttendance,
-  rewardsCatalog = [],         // ⭐ 加这行
+  rewardsCatalog = [],
   tempRewardsByStaff,
   onSaveTempRewards,
 }) => {
@@ -183,7 +183,14 @@ export const PayrollAllTable: React.FC<Props> = ({
     });
   };
 
+  /* ⭐ 临时奖金 Popover 状态：目标员工 + 锚点元素 */
   const [tempRewardFor, setTempRewardFor] = useState<string | null>(null);
+  const [tempRewardAnchor, setTempRewardAnchor] = useState<HTMLElement | null>(null);
+
+  const closeTempReward = () => {
+    setTempRewardFor(null);
+    setTempRewardAnchor(null);
+  };
 
   const COLS = canExportPersonal ? 15 : 14;
   const rewardsTotalAll = results
@@ -358,7 +365,7 @@ export const PayrollAllTable: React.FC<Props> = ({
                       </td>
 
                       {/* 奖金列 */}
-                      <td className="px-4 py-3 text-right tabular-nums relative">
+                      <td className="px-4 py-3 text-right tabular-nums">
                         <div className="inline-flex items-center gap-1 justify-end">
                           {hasRewards ? (
                             <button
@@ -383,7 +390,16 @@ export const PayrollAllTable: React.FC<Props> = ({
 
                           {onSaveTempRewards && (
                             <button
-                              onClick={(e) => { e.stopPropagation(); setTempRewardFor(isTempOpen ? null : r.staffId); }}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isTempOpen) {
+                                  closeTempReward();
+                                } else {
+                                  setTempRewardFor(r.staffId);
+                                  setTempRewardAnchor(e.currentTarget as HTMLElement);
+                                }
+                              }}
                               title="添加临时奖金 / 扣款"
                               className="inline-flex items-center justify-center w-5 h-5 rounded-full border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100"
                             >
@@ -398,11 +414,12 @@ export const PayrollAllTable: React.FC<Props> = ({
                             staffName={r.staffName}
                             current={tempRewardsByStaff?.[String(r.staffId)] || []}
                             catalog={rewardsCatalog || []}
+                            anchorEl={tempRewardAnchor}
                             onSave={(next) => {
-                              setTempRewardFor(null);
+                              closeTempReward();
                               onSaveTempRewards(r.staffId, next);
                             }}
-                            onClose={() => setTempRewardFor(null)}
+                            onClose={closeTempReward}
                           />
                         )}
                       </td>
