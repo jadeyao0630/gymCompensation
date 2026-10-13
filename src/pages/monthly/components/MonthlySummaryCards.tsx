@@ -5,6 +5,8 @@ import {
   Users,
   Building2,
   GitBranch,
+  Calculator,
+  Receipt,
 } from 'lucide-react';
 import { BigCard } from './MonthlyCommon';
 import { fmtMoney } from '../utils/date';
@@ -13,7 +15,8 @@ import type { OverallSummary } from '../../marketing/utils/aggregate';
 interface DingtalkBreakdown {
   salary: { count: number; total: number };
   property: { count: number; total: number };
-  utility: { count: number; total: number };
+  electric: { count: number; total: number };
+  water: { count: number; total: number };
   repair: { count: number; total: number };
   daily: { count: number; total: number };
   refund: { count: number; total: number };
@@ -33,16 +36,22 @@ interface Props {
   payrollHeadcount: number;
   payrollRewardsTotal?: number;
   fixedCost: number;
-  profit: number;
-  isProfit: boolean;
+
+  estimatedProfit: number;
+  actualProfit: number;
+  isEstimatedProfit: boolean;
+
+  profit?: number;
+  isProfit?: boolean;
 
   dingtalkSummary?: { count: number; total: number };
   dingtalkBreakdown?: DingtalkBreakdown;
+  hasDingtalkData?: boolean;
 
-  adjustedPayroll?: number;
-  adjustedFixedCost?: number;
-  actualExpense?: number;
   estimatedExpense?: number;
+  actualExpense?: number;
+  actualExpenseCount?: number;
+  actualTotalExpense?: number;
 
   storeName?: string;
 }
@@ -53,20 +62,23 @@ export const MonthlySummaryCards: React.FC<Props> = ({
   payrollHeadcount,
   payrollRewardsTotal = 0,
   fixedCost,
-  profit,
-  isProfit,
+  estimatedProfit,
+  actualProfit,
+  isEstimatedProfit,
   dingtalkSummary,
   dingtalkBreakdown,
+  hasDingtalkData,
   actualExpense,
-  estimatedExpense,
-  storeName,
+  actualExpenseCount,
 }) => {
   const dtSalary = dingtalkBreakdown?.salary.total || 0;
   const dtProperty = dingtalkBreakdown?.property.total || 0;
-  const dtUtility = dingtalkBreakdown?.utility.total || 0;
-  const dtTotal = dingtalkBreakdown?.total || 0;
+  const dtElectric = dingtalkBreakdown?.electric.total || 0;
+  const dtWater = dingtalkBreakdown?.water.total || 0;
+  const dtExtra = dingtalkBreakdown?.extraExpense || 0;
 
-  /* 薪酬卡片副标题 */
+  const isActualProfit = actualProfit >= 0;
+
   let payrollSub = `计入 ${payrollHeadcount} 人`;
   if (Math.abs(payrollRewardsTotal) > 0) {
     payrollSub += ` · 奖罚 ${payrollRewardsTotal >= 0 ? '+' : ''}${fmtMoney(payrollRewardsTotal)}`;
@@ -75,25 +87,32 @@ export const MonthlySummaryCards: React.FC<Props> = ({
     payrollSub += ` · 钉钉实发 ${fmtMoney(dtSalary)}`;
   }
 
-  /* 固定成本卡片副标题 */
   let fixedSub = '物业/租金/水电等';
-  if (dtProperty + dtUtility > 0) {
-    fixedSub = `物业/租金/水电等 · 钉钉实付 ${fmtMoney(dtProperty + dtUtility)}`;
+  if (dtProperty + dtElectric + dtWater > 0) {
+    fixedSub = `物业/租金/水电等 · 钉钉实付 ${fmtMoney(dtProperty + dtElectric + dtWater)}`;
   }
 
-  /* 钉钉卡片副标题 */
-  const dingtalkSub = dingtalkSummary
-    ? `含工资/物业/水电 · ${dingtalkSummary.count} 笔`
-    : '无钉钉数据';
+  /* ⭐ 钉钉实际支出卡片：只显示排除重复后的新增金额 */
+  const finalActualExpense = actualExpense ?? dtExtra;
+  const dingtalkSub =
+    actualExpenseCount != null
+      ? `退费/修理/日常支出等 · ${actualExpenseCount} 项（已排除薪酬/物业/水电）`
+      : '退费/修理/日常支出等（已排除薪酬/物业/水电）';
 
-  /* 净利润副标题 */
-  let netSub = '已含钉钉全部支出';
+  let estSub = '收入 - 预估支出（薪酬+固定成本）';
   if (marketing.incomeAmount > 0) {
-    netSub = `利润率 ${((profit / marketing.incomeAmount) * 100).toFixed(1)}% · 已含钉钉全部支出`;
+    estSub = `利润率 ${((estimatedProfit / marketing.incomeAmount) * 100).toFixed(1)}% · 预估口径`;
+  }
+
+  let actualSub = hasDingtalkData
+    ? '收入 - 实际支出（薪酬+固定成本+钉钉新增）'
+    : '无钉钉数据，回落用预估';
+  if (marketing.incomeAmount > 0 && hasDingtalkData) {
+    actualSub = `利润率 ${((actualProfit / marketing.incomeAmount) * 100).toFixed(1)}% · 实际口径`;
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-8">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
       <BigCard
         icon={<TrendingUp className="w-6 h-6" />}
         label="营销收入（实收）"
@@ -118,27 +137,36 @@ export const MonthlySummaryCards: React.FC<Props> = ({
         gradient="from-amber-500 to-orange-500"
       />
 
+      {/* ⭐ 钉钉实际支出：排除薪酬/物业/电费/水费后的新增 */}
       <BigCard
         icon={<GitBranch className="w-6 h-6" />}
         label="钉钉实际支出"
-        value={fmtMoney(dtTotal)}
+        value={fmtMoney(finalActualExpense)}
         sub={dingtalkSub}
         gradient="from-rose-500 to-red-500"
       />
 
       <BigCard
-        icon={
-          isProfit ? (
-            <TrendingUp className="w-6 h-6" />
-          ) : (
-            <TrendingDown className="w-6 h-6" />
-          )
-        }
-        label="净利润"
-        value={fmtMoney(profit)}
-        sub={netSub}
+        icon={<Calculator className="w-6 h-6" />}
+        label="预估利润"
+        value={fmtMoney(estimatedProfit)}
+        sub={estSub}
         gradient={
-          isProfit ? 'from-rose-500 to-pink-500' : 'from-gray-500 to-gray-600'
+          isEstimatedProfit
+            ? 'from-cyan-500 to-blue-500'
+            : 'from-gray-500 to-gray-600'
+        }
+      />
+
+      <BigCard
+        icon={<Receipt className="w-6 h-6" />}
+        label="实际利润"
+        value={fmtMoney(actualProfit)}
+        sub={actualSub}
+        gradient={
+          isActualProfit
+            ? 'from-rose-500 to-pink-500'
+            : 'from-gray-500 to-gray-600'
         }
       />
     </div>

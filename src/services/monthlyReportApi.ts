@@ -1,10 +1,18 @@
 import type { DingTalkReportItem } from '../api/dingtalk';
 import { extractAmount, extractItems } from '../pages/dingtalk/utils/extract';
+import {
+  classifyDingtalkItems,
+  collectDingtalkText,
+} from '../pages/dingtalk/utils/classify';
 
+/* ============================================================
+ * 类型
+ * ============================================================ */
 export interface DingtalkBreakdown {
   salary: { count: number; total: number };
   property: { count: number; total: number };
-  utility: { count: number; total: number };
+  electric: { count: number; total: number };
+  water: { count: number; total: number };
   repair: { count: number; total: number };
   daily: { count: number; total: number };
   refund: { count: number; total: number };
@@ -57,17 +65,11 @@ export interface MonthlyReportPayload {
       samples: string[];
     }>;
   };
-  /** ⭐ 钉钉分类明细 */
   dingtalkBreakdown: DingtalkBreakdown | null;
-  /** ⭐ 扣除钉钉已发薪酬后的剩余（用于实际支出） */
-  adjustedPayroll: number;
-  /** ⭐ 扣除钉钉已付物业/水电后的剩余 */
-  adjustedFixedCost: number;
-  /** ⭐ 实际总支出 */
-  actualExpense: number;
-  /** ⭐ 预估总支出（payroll + fixedCost） */
   estimatedExpense: number;
-  /** ⭐ 门店画像 */
+  actualExpense: number;
+  adjustedPayroll: number;
+  adjustedFixedCost: number;
   storeProfile: {
     name: string;
     area: string;
@@ -80,11 +82,13 @@ export interface MonthlyReportPayload {
     totalExpense: number;
     profit: number;
     isProfit: boolean;
+    estimatedProfit?: number;
+    actualProfit?: number;
   };
 }
 
 /* ============================================================
- * ⭐ 门店画像（与后端 routes/ai.js 的 STORE_PROFILES 一致）
+ * 门店画像
  * ============================================================ */
 const STORE_PROFILES: Record<string, {
   name: string;
@@ -96,11 +100,11 @@ const STORE_PROFILES: Record<string, {
   '富贵园': {
     name: '富贵园店',
     area: '3000 多平米',
-    facilities: ['泳池','操房','乒乓球','篮球场','私教区','搏击区','有氧区','器械区'],
+    facilities: ['泳池', '操房', '乒乓球', '篮球场', '私教区', '搏击区', '有氧区', '器械区'],
     positioning:
       '综合型旗舰店，设施齐全、面积大、可承载泳教 / 篮球 / 搏击 / 操课等多业态；固定成本（水电、物业、租金、保洁）体量明显高于哈德门。',
     focus: [
-      '泳池、篮球场、操房等高能耗 / 高维护区域是水电费、保洁费、维修费的主要来源，需要单独关注其坪效。',
+      '泳池、篮球场、操房等高能耗 / 高维护区域是电费、水费、保洁费、维修费的主要来源，需要单独关注其坪效。',
       '多业态意味着收入结构更分散，需关注各业态（售卡 vs 售课 vs 泳教）的毛利差异。',
       '大面积场地固定成本刚性高，盈亏平衡点更依赖收入规模，需重点看坪效与人效。',
     ],
@@ -108,7 +112,7 @@ const STORE_PROFILES: Record<string, {
   '哈德门': {
     name: '哈德门店',
     area: '600 多平米',
-    facilities: ['私教区','有氧区','器械区','操房','乒乓球'],
+    facilities: ['私教区', '有氧区', '器械区', '操房', '乒乓球'],
     positioning:
       '小而精社区型门店，以私教、有氧、器械、操房为主；固定成本相对低，坪效 / 人效是关键指标。',
     focus: [
@@ -222,101 +226,14 @@ function aggregateByCategory(list: any[]): Record<string, { count: number; total
 }
 
 /* ============================================================
- * 钉钉摘要（给 prompt 用）
+ * 钉钉摘要（复用公共 classify）
  * ============================================================ */
-const MEMBER_REFUND_TEMPLATE = '会员退费';
-const PAYEE_CATEGORY_OVERRIDES: Array<{ payee: string; category: string }> = [
-  { payee: '山东云优人力资源服务有限公司', category: '工资底薪佣金' },
-];
-const SUBJECT_RULES: Array<{ key: string; keywords: string[] }> = [
-  { key: '物业费', keywords: ['物业费', '物业'] },
-  { key: '水电费', keywords: ['电费', '水费', '水电'] },
-  { key: '工资底薪佣金', keywords: ['工资','底薪','佣金','提成','薪酬','薪金','劳务','派遣','人力资源'] },
-  { key: '修理', keywords: ['修理','维修','修缮','保养','配件更换','更换','安装','装修'] },
-  {
-    key: '日常支出',
-    keywords: [
-      '办公','办公用品','日用','清洁','保洁','耗材','快递','邮寄',
-      '差旅','交通','通讯','话费','劳保','低值易耗','消耗',
-      '采购','购买','宣传','广告','推广','营销','物料','印刷',
-    ],
-  },
-];
-
-function collectDingtalkText(item: DingTalkReportItem): string {
-  const parts: string[] = [];
-  if (Array.isArray(item.items)) {
-    item.items.forEach((it: any) => {
-      if (it?.content) parts.push(String(it.content));
-    });
-  }
-  const fv = item.formValues || {};
-  const rawDetail = fv['明细列表'];
-  if (typeof rawDetail === 'string' && rawDetail && rawDetail !== 'null') {
-    try {
-      const parsed = JSON.parse(rawDetail);
-      if (Array.isArray(parsed)) {
-        parsed.forEach((row: any) => {
-          (row?.rowValue || []).forEach((f: any) => {
-            const label = String(f?.label || '');
-            if (label.includes('事项') || label.includes('内容') || label.includes('名称')) {
-              if (f?.value != null && f.value !== 'null') {
-                parts.push(String(f.value));
-              }
-            }
-          });
-        });
-      }
-    } catch { /* ignore */ }
-  }
-  if (item.title) parts.push(String(item.title));
-  [
-    '事项','事项/明细','报销事由','费用类型','明细',
-    '备注','事由','用途','摘要','说明',
-    '付款内容提要','付款事由','付款用途',
-    '借款提要','退卡原因',
-  ].forEach((k) => {
-    const v = fv[k];
-    if (v == null || v === 'null' || v === '') return;
-    if (typeof v === 'object') {
-      try { parts.push(JSON.stringify(v)); } catch {}
-    } else {
-      parts.push(String(v));
-    }
-  });
-  return parts.join(' ');
-}
-
-function classifyDingtalk(item: DingTalkReportItem): string {
-  const tpl = String(item.templateName || '').trim();
-  if (tpl.includes('退费') || tpl.includes('退款')) return '退费';
-  if (tpl === MEMBER_REFUND_TEMPLATE) return '退费';
-
-  const payee = String(item.payeeAccount || '').trim();
-  for (const rule of PAYEE_CATEGORY_OVERRIDES) {
-    if (payee === rule.payee) return rule.category;
-  }
-
-  const text = collectDingtalkText(item);
-  if (text) {
-    if (['退费','退款','退卡','退课'].some((k) => text.includes(k))) {
-      return '退费';
-    }
-    for (const rule of SUBJECT_RULES) {
-      if (rule.keywords.some((k) => k && text.includes(k))) {
-        return rule.key;
-      }
-    }
-  }
-  return tpl || '其它';
-}
-
 function pickDingtalkAmount(item: DingTalkReportItem): number {
   const candidates = [
-    '补退金额（元）','补退金额','退款金额（元）','退款金额',
-    '报销金额','借款金额（元）','借款金额',
-    '本次申请支付金额（元）','本次申请支付金额',
-    '总价款（元）','金额（元）','金额',
+    '补退金额（元）', '补退金额', '退款金额（元）', '退款金额',
+    '报销金额', '借款金额（元）', '借款金额',
+    '本次申请支付金额（元）', '本次申请支付金额',
+    '总价款（元）', '金额（元）', '金额',
   ];
   const fv = item.formValues || {};
   for (const k of candidates) {
@@ -339,37 +256,67 @@ function summarizeDingtalk(items: DingTalkReportItem[]) {
   let total = 0;
   let count = 0;
 
+  const breakdown = {
+    salary: { count: 0, total: 0 },
+    property: { count: 0, total: 0 },
+    electric: { count: 0, total: 0 },
+    water: { count: 0, total: 0 },
+    repair: { count: 0, total: 0 },
+    daily: { count: 0, total: 0 },
+    refund: { count: 0, total: 0 },
+    other: { count: 0, total: 0 },
+  };
+
   for (const r of items) {
     if (r.error) continue;
-    const amount = pickDingtalkAmount(r);
-    const category = classifyDingtalk(r);
 
-    if (!map.has(category)) {
-      map.set(category, { category, count: 0, total: 0, samples: [] });
-    }
-    const g = map.get(category)!;
-    g.count += 1;
-    g.total += amount;
+    const pieces = classifyDingtalkItems(r, pickDingtalkAmount);
+    for (const p of pieces) {
+      if (!map.has(p.category)) {
+        map.set(p.category, { category: p.category, count: 0, total: 0, samples: [] });
+      }
+      const g = map.get(p.category)!;
+      g.count += 1;
+      g.total += p.amount;
 
-    if (g.samples.length < 5) {
-      const label = extractItems(r.templateName || '', r.formValues || {}) || r.title || '';
-      if (label && label !== '—') g.samples.push(label.slice(0, 60));
+      if (g.samples.length < 5) {
+        const label =
+          extractItems(r.templateName || '', r.formValues || {}) ||
+          collectDingtalkText(r) ||
+          r.title ||
+          '';
+        if (label && label !== '—') g.samples.push(label.slice(0, 60));
+      }
+
+      if (p.category === '工资底薪佣金') { breakdown.salary.count += 1; breakdown.salary.total += p.amount; }
+      else if (p.category === '物业费') { breakdown.property.count += 1; breakdown.property.total += p.amount; }
+      else if (p.category === '电费') { breakdown.electric.count += 1; breakdown.electric.total += p.amount; }
+      else if (p.category === '水费') { breakdown.water.count += 1; breakdown.water.total += p.amount; }
+      else if (p.category === '修理') { breakdown.repair.count += 1; breakdown.repair.total += p.amount; }
+      else if (p.category === '日常支出') { breakdown.daily.count += 1; breakdown.daily.total += p.amount; }
+      else if (p.category === '退费') { breakdown.refund.count += 1; breakdown.refund.total += p.amount; }
+      else { breakdown.other.count += 1; breakdown.other.total += p.amount; }
+
+      total += p.amount;
+      count += 1;
     }
-    total += amount;
-    count += 1;
   }
+
+  const categories = Array.from(map.values()).sort((a, b) => b.total - a.total);
+
+  const extraExpense =
+    breakdown.repair.total + breakdown.daily.total +
+    breakdown.refund.total + breakdown.other.total;
 
   return {
     total,
     count,
-    categories: Array.from(map.values())
-      .sort((a, b) => b.total - a.total)
-      .map((g) => ({
-        category: g.category,
-        count: g.count,
-        total: g.total,
-        samples: g.samples,
-      })),
+    categories,
+    breakdown: {
+      ...breakdown,
+      total,
+      extraExpense,
+    } as DingtalkBreakdown,
   };
 }
 
@@ -388,10 +335,10 @@ export interface BuildPayloadParams {
   };
   dingtalkItems?: DingTalkReportItem[];
   dingtalkBreakdown?: DingtalkBreakdown;
+  estimatedExpense?: number;
+  actualExpense?: number;
   adjustedPayroll?: number;
   adjustedFixedCost?: number;
-  actualExpense?: number;
-  estimatedExpense?: number;
 }
 
 export function buildPayload(params: BuildPayloadParams): MonthlyReportPayload {
@@ -400,10 +347,10 @@ export function buildPayload(params: BuildPayloadParams): MonthlyReportPayload {
     orderList, payrollResults, fixedCostDetail,
     dingtalkItems = [],
     dingtalkBreakdown,
-    adjustedPayroll,
-    adjustedFixedCost,
-    actualExpense,
-    estimatedExpense,
+    estimatedExpense: estParam,
+    actualExpense: actParam,
+    adjustedPayroll: adjPayrollParam,
+    adjustedFixedCost: adjFixedParam,
   } = params;
 
   const cardOrders: any[] = [];
@@ -523,23 +470,23 @@ export function buildPayload(params: BuildPayloadParams): MonthlyReportPayload {
   const dingtalkExpenses = summarizeDingtalk(dingtalkItems);
   const storeProfile = getStoreProfile(storeName);
 
-  const finalAdjustedPayroll = adjustedPayroll ?? payrollSummary.total;
-  const finalAdjustedFixedCost = adjustedFixedCost ?? fixedCost.total;
-  const finalEstimatedExpense = estimatedExpense ?? (payrollSummary.total + fixedCost.total);
+  const finalEstimatedExpense =
+    estParam ?? (payrollSummary.total + fixedCost.total);
   const finalActualExpense =
-    actualExpense ??
-    (finalAdjustedPayroll +
-      finalAdjustedFixedCost +
-      (dingtalkBreakdown?.salary.total ?? 0) +
-      (dingtalkBreakdown?.property.total ?? 0) +
-      (dingtalkBreakdown?.utility.total ?? 0) +
-      (dingtalkBreakdown?.repair.total ?? 0) +
-      (dingtalkBreakdown?.daily.total ?? 0) +
-      (dingtalkBreakdown?.refund.total ?? 0) +
-      (dingtalkBreakdown?.other.total ?? 0));
+    actParam ?? dingtalkExpenses.breakdown.extraExpense;
+  const finalAdjustedPayroll = adjPayrollParam ?? payrollSummary.total;
+  const finalAdjustedFixedCost = adjFixedParam ?? fixedCost.total;
+  const finalDingtalkBreakdown = dingtalkBreakdown ?? dingtalkExpenses.breakdown;
 
   const totalIncome = sum(cardOrders) + sum(courseOrders);
-  const profit = totalIncome - finalActualExpense;
+
+  /* 实际总支出 = 预估 + 钉钉新增 */
+  const actualTotalExpense = finalEstimatedExpense + finalActualExpense;
+
+  const estimatedProfit = totalIncome - finalEstimatedExpense;
+  const actualProfit = totalIncome - actualTotalExpense;
+
+  const profit = actualProfit;
 
   return {
     storeId,
@@ -557,18 +504,29 @@ export function buildPayload(params: BuildPayloadParams): MonthlyReportPayload {
       byDepartment: payrollByDepartment,
       individual: { salesTop, classTop, totals },
     },
-    dingtalkExpenses,
-    dingtalkBreakdown: dingtalkBreakdown ?? null,
+    dingtalkExpenses: {
+      total: dingtalkExpenses.total,
+      count: dingtalkExpenses.count,
+      categories: dingtalkExpenses.categories.map((c) => ({
+        category: c.category,
+        count: c.count,
+        total: c.total,
+        samples: (c as any).samples || [],
+      })),
+    },
+    dingtalkBreakdown: finalDingtalkBreakdown,
+    estimatedExpense: finalEstimatedExpense,
+    actualExpense: finalActualExpense,
     adjustedPayroll: finalAdjustedPayroll,
     adjustedFixedCost: finalAdjustedFixedCost,
-    actualExpense: finalActualExpense,
-    estimatedExpense: finalEstimatedExpense,
     storeProfile,
     summary: {
       totalIncome,
-      totalExpense: finalActualExpense,
+      totalExpense: actualTotalExpense,
       profit,
       isProfit: profit >= 0,
+      estimatedProfit,
+      actualProfit,
     },
   };
 }

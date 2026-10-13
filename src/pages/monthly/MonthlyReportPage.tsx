@@ -49,6 +49,11 @@ const MonthlyReportPage: React.FC = () => {
     fixedCostDetail,
     payrollSummary,
     marketingSummary,
+    /* 两套利润 */
+    estimatedProfit,
+    actualProfit,
+    isEstimatedProfit,
+    /* 兼容旧字段 */
     profit,
     isProfit,
     fetchAll,
@@ -56,15 +61,17 @@ const MonthlyReportPage: React.FC = () => {
     dingtalkItems,
     dingtalkSummary,
     dingtalkBreakdown,
+    hasDingtalkData,
     /* 口径拆分 */
+    estimatedExpense,
+    actualExpense,
     adjustedPayroll,
     adjustedFixedCost,
-    actualExpense,
-    estimatedExpense,
   } = useMonthlyReport(storeId, selectedMonth);
 
   const aiCacheKey = `${storeId}_${selectedMonth}`;
 
+  /* AI 报告：Context + localStorage */
   const aiReport = appData.monthlyAiReportByKey[aiCacheKey] || '';
   const setAiReport = (text: string) => {
     updateAppData('monthlyAiReportByKey', (prev) => ({
@@ -73,6 +80,7 @@ const MonthlyReportPage: React.FC = () => {
     }));
   };
 
+  /* 图表 payload：Context + localStorage */
   const aiPayload = appData.monthlyAiPayloadByKey[aiCacheKey] || null;
   const setAiPayload = (payload: any) => {
     updateAppData('monthlyAiPayloadByKey', (prev) => ({
@@ -87,6 +95,7 @@ const MonthlyReportPage: React.FC = () => {
 
   const handleMonthChange = changeMonth;
 
+  /* 获取报告：拉数据 + 自动生成 payload */
   const handleFetch = async () => {
     const snapshot = await fetchAll(selectedMonth);
 
@@ -99,14 +108,15 @@ const MonthlyReportPage: React.FC = () => {
       fixedCostDetail: snapshot?.fixedCostDetail ?? fixedCostDetail,
       dingtalkItems: snapshot?.dingtalkItems ?? dingtalkItems,
       dingtalkBreakdown,
+      estimatedExpense,
+      actualExpense,
       adjustedPayroll,
       adjustedFixedCost,
-      actualExpense,
-      estimatedExpense,
     } as any);
     setAiPayload(payload);
   };
 
+  /* 生成 AI 报告 */
   const handleGenerateAi = async () => {
     if (!hasLoaded) {
       alert('请先点击「获取报告」加载业务数据');
@@ -124,10 +134,10 @@ const MonthlyReportPage: React.FC = () => {
         fixedCostDetail,
         dingtalkItems,
         dingtalkBreakdown,
+        estimatedExpense,
+        actualExpense,
         adjustedPayroll,
         adjustedFixedCost,
-        actualExpense,
-        estimatedExpense,
       } as any);
 
       console.log('[AI payload]', payload);
@@ -162,10 +172,10 @@ const MonthlyReportPage: React.FC = () => {
       profit,
       dingtalkItems,
       dingtalkBreakdown,
+      estimatedExpense,
+      actualExpense,
       adjustedPayroll,
       adjustedFixedCost,
-      actualExpense,
-      estimatedExpense,
     } as any);
   };
 
@@ -252,7 +262,7 @@ const MonthlyReportPage: React.FC = () => {
 
         {!loading && !error && hasLoaded && (
           <>
-            {/* AI 报告区 */}
+            {/* AI 报告区（可选，折叠） */}
             {(aiReport || aiLoading || aiError) && (
               <div className="bg-gradient-to-br from-violet-50 via-white to-indigo-50/60 rounded-2xl border border-violet-100 shadow-sm mb-6">
                 <button
@@ -274,7 +284,9 @@ const MonthlyReportPage: React.FC = () => {
                     <span
                       onClick={(e) => {
                         e.stopPropagation();
-                        navigator.clipboard.writeText(aiReport).catch(() => {});
+                        navigator.clipboard
+                          .writeText(aiReport)
+                          .catch(() => {});
                       }}
                       className="text-[11px] text-violet-600 hover:text-violet-800 underline"
                     >
@@ -301,7 +313,9 @@ const MonthlyReportPage: React.FC = () => {
                       </div>
                     )}
                     {!aiLoading && aiError && (
-                      <div className="text-sm text-red-600 py-2">{aiError}</div>
+                      <div className="text-sm text-red-600 py-2">
+                        {aiError}
+                      </div>
                     )}
                     {!aiLoading && !aiError && aiReport && (
                       <div className="prose prose-sm max-w-none prose-headings:text-gray-800 prose-p:text-gray-700 prose-li:text-gray-700 prose-strong:text-gray-900">
@@ -313,23 +327,27 @@ const MonthlyReportPage: React.FC = () => {
               </div>
             )}
 
+            {/* 顶部卡片：两套利润 */}
             <MonthlySummaryCards
               marketing={marketingSummary}
               payrollTotal={payrollSummary.total}
               payrollHeadcount={payrollSummary.headcount}
               payrollRewardsTotal={payrollSummary.rewardsTotal ?? 0}
               fixedCost={fixedCost}
+              estimatedProfit={estimatedProfit}
+              actualProfit={actualProfit}
+              isEstimatedProfit={isEstimatedProfit}
               profit={profit}
               isProfit={isProfit}
               dingtalkSummary={dingtalkSummary}
               dingtalkBreakdown={dingtalkBreakdown}
-              adjustedPayroll={adjustedPayroll}
-              adjustedFixedCost={adjustedFixedCost}
-              actualExpense={actualExpense}
+              hasDingtalkData={hasDingtalkData}
               estimatedExpense={estimatedExpense}
+              actualExpense={actualExpense}
               storeName={storeName}
             />
 
+            {/* 明细面板 */}
             <MonthlyDetailPanels
               marketing={marketingSummary}
               orderCount={orderList.length}
@@ -346,14 +364,19 @@ const MonthlyReportPage: React.FC = () => {
               storeLabel={storeName}
             />
 
+            {/* 利润面板：显示两套利润 */}
             <MonthlyProfitPanel
               incomeAmount={marketingSummary.incomeAmount}
               payrollTotal={payrollSummary.total}
               fixedCost={fixedCost}
               profit={profit}
               isProfit={isProfit}
+              estimatedProfit={estimatedProfit}
+              actualProfit={actualProfit}
+              isEstimatedProfit={isEstimatedProfit}
             />
 
+            {/* 图表区 */}
             {aiPayload && <MonthlyCharts payload={aiPayload} />}
           </>
         )}
