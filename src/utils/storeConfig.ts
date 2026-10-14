@@ -1,28 +1,80 @@
 /* ============================================================
  * ⭐ 门店配置（前端）：从后端 API 读取 + 内存缓存
- *   - 门店名统一归一化：去掉结尾的「店」
+ *   - 门店名归一化：去掉结尾的「店」
+ *   - paymentUnits：支持「公司 + 有效时间段」
  * ============================================================ */
-import type { StoreInfo } from '../constants/stores';
+import type { StoreInfo, PaymentUnitEntry } from '../constants/stores';
 
-/* ⭐ 门店名归一化：富贵园店 → 富贵园 */
 export function normalizeStoreName(name: string | null | undefined): string {
   const raw = name == null ? '' : String(name).trim();
   if (!raw) return '';
   return raw.replace(/店$/, '').trim();
 }
 
-/* ---------- 内存缓存 ---------- */
+/* ⭐ 兼容解析 paymentUnits */
+export function parsePaymentUnits(raw: any): PaymentUnitEntry[] {
+  if (raw == null) return [];
+  let arr: any = raw;
+  if (typeof raw === 'string') {
+    try {
+      arr = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(arr)) return [];
+
+  const out: PaymentUnitEntry[] = [];
+  for (const item of arr) {
+    if (typeof item === 'string') {
+      const company = item.trim();
+      if (company) out.push({ company, validFrom: null, validTo: null });
+      continue;
+    }
+    if (item && typeof item === 'object') {
+      const company = String(item.company || item.name || '').trim();
+      if (!company) continue;
+      out.push({
+        company,
+        validFrom: item.validFrom ? String(item.validFrom) : null,
+        validTo: item.validTo ? String(item.validTo) : null,
+      });
+    }
+  }
+  return out;
+}
+
+function toDateStr(v: string | null | undefined): string | null {
+  if (v == null || v === '') return null;
+  const s = String(v).trim().replace(/\//g, '-');
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : null;
+}
+
+export function isCompanyValidAt(
+  entry: PaymentUnitEntry,
+  atDate?: string | null
+): boolean {
+  if (!atDate) return true;
+  const from = toDateStr(entry.validFrom);
+  const to = toDateStr(entry.validTo);
+  const at = toDateStr(atDate);
+  if (!at) return true;
+  if (from && at < from) return false;
+  if (to && at > to) return false;
+  return true;
+}
+
 let CACHE: StoreInfo[] | null = null;
 
-/* ---------- 默认数据 ---------- */
 const FALLBACK_STORES: StoreInfo[] = [
   {
     id: '12279',
     name: '富贵园',
     shortName: '富贵园',
     paymentUnits: [
-      '北京林朗韵动体育管理有限公司',
-      '北京林朗体育管理有限公司东花市大街分公司',
+      { company: '北京林朗韵动体育管理有限公司' },
+      { company: '北京林朗体育管理有限公司东花市大街分公司' },
     ],
     keywords: ['富贵园', '富贵', '东花市'],
     isDefault: true,
@@ -32,27 +84,32 @@ const FALLBACK_STORES: StoreInfo[] = [
     name: '哈德门',
     shortName: '哈德门',
     paymentUnits: [
-      '北京林朗悦动体育管理有限公司',
-      '北京林朗体育管理有限公司',
+      { company: '北京林朗悦动体育管理有限公司' },
+      { company: '北京林朗体育管理有限公司' },
     ],
     keywords: ['哈德门', '哈德'],
   },
 ];
 
 function cloneFallback(): StoreInfo[] {
-  return FALLBACK_STORES.map((s) => ({ ...s }));
+  return FALLBACK_STORES.map((s) => ({
+    ...s,
+    paymentUnits: s.paymentUnits.map((p) => ({ ...p })),
+    keywords: [...s.keywords],
+  }));
 }
 
-/* ---------- ⭐ 从后端拉取 ---------- */
 export async function fetchStores(): Promise<StoreInfo[]> {
   try {
     const res = await fetch('/api/dingtalk/store-config');
     const json = await res.json();
     if (json.errorcode === 0 && Array.isArray(json.data?.stores)) {
-      const list: StoreInfo[] = json.data.stores.map((s: StoreInfo) => ({
+      const list: StoreInfo[] = json.data.stores.map((s: any) => ({
         ...s,
         name: normalizeStoreName(s.name) || s.name,
         shortName: normalizeStoreName(s.shortName || s.name) || s.shortName,
+        paymentUnits: parsePaymentUnits(s.paymentUnits),
+        keywords: Array.isArray(s.keywords) ? s.keywords : [],
       }));
       CACHE = list;
       return list;
@@ -64,7 +121,6 @@ export async function fetchStores(): Promise<StoreInfo[]> {
   return CACHE;
 }
 
-/* ---------- ⭐ 保存到后端 ---------- */
 export async function saveStores(list: StoreInfo[]): Promise<StoreInfo[]> {
   const res = await fetch('/api/dingtalk/store-config', {
     method: 'POST',
@@ -74,6 +130,7 @@ export async function saveStores(list: StoreInfo[]): Promise<StoreInfo[]> {
         ...s,
         name: normalizeStoreName(s.name) || s.name,
         shortName: normalizeStoreName(s.shortName || s.name) || s.shortName,
+        paymentUnits: parsePaymentUnits(s.paymentUnits),
       })),
     }),
   });
@@ -81,23 +138,24 @@ export async function saveStores(list: StoreInfo[]): Promise<StoreInfo[]> {
   if (json.errorcode !== 0) throw new Error(json.errormsg || '保存失败');
 
   const raw = Array.isArray(json.data?.stores) ? json.data.stores : list;
-  const next: StoreInfo[] = raw.map((s: StoreInfo) => ({
+  const next: StoreInfo[] = raw.map((s: any) => ({
     ...s,
     name: normalizeStoreName(s.name) || s.name,
     shortName: normalizeStoreName(s.shortName || s.name) || s.shortName,
+    paymentUnits: parsePaymentUnits(s.paymentUnits),
+    keywords: Array.isArray(s.keywords) ? s.keywords : [],
   }));
   CACHE = next;
   return next;
 }
 
-/* ---------- 读内存缓存（同步） ---------- */
 export function getStores(): StoreInfo[] {
   if (!CACHE) return cloneFallback();
   return CACHE;
 }
 
-/* ---------- 匹配函数（同步，基于内存缓存） ---------- */
-export function matchStoreByPaymentUnit(
+/* ⭐ 付款公司 → 门店 */
+export function resolveStoreByPaymentUnit(
   paymentUnit: string | null | undefined
 ): string {
   const raw = paymentUnit == null ? '' : String(paymentUnit).trim();
@@ -106,25 +164,77 @@ export function matchStoreByPaymentUnit(
 
   for (const s of stores) {
     for (const u of s.paymentUnits) {
-      if (raw === u) return s.name;
+      if (raw === u.company) return normalizeStoreName(s.name) || s.name;
     }
   }
   for (const s of stores) {
     for (const u of s.paymentUnits) {
-      if (raw.includes(u) || u.includes(raw)) return s.name;
+      if (raw.includes(u.company) || u.company.includes(raw)) {
+        return normalizeStoreName(s.name) || s.name;
+      }
     }
   }
   for (const s of stores) {
-    if (raw.includes(s.name) || raw.includes(s.shortName)) return s.name;
+    const name = normalizeStoreName(s.name) || s.name;
+    const short = normalizeStoreName(s.shortName || s.name) || s.shortName;
+    if (raw.includes(name) || (short && raw.includes(short))) return name;
   }
   return '';
+}
+
+/* ⭐ 门店 + 发起时间 → 该门店下有效公司 */
+export function resolveCompanyInStore(
+  storeName: string | null | undefined,
+  atDate?: string | null
+): {
+  storeName: string;
+  company: string;
+  validFrom?: string | null;
+  validTo?: string | null;
+  fallback?: boolean;
+} | null {
+  const clean = normalizeStoreName(storeName) || (storeName || '');
+  if (!clean) return null;
+  const stores = getStores();
+  const store = stores.find(
+    (s) => (normalizeStoreName(s.name) || s.name) === clean
+  );
+  if (!store) return null;
+
+  for (const entry of store.paymentUnits) {
+    if (isCompanyValidAt(entry, atDate)) {
+      return {
+        storeName: clean,
+        company: entry.company,
+        validFrom: entry.validFrom || null,
+        validTo: entry.validTo || null,
+      };
+    }
+  }
+  if (store.paymentUnits.length > 0) {
+    const first = store.paymentUnits[0];
+    return {
+      storeName: clean,
+      company: first.company,
+      validFrom: first.validFrom || null,
+      validTo: first.validTo || null,
+      fallback: true,
+    };
+  }
+  return null;
+}
+
+/* 旧名兼容 */
+export function matchStoreByPaymentUnit(
+  paymentUnit: string | null | undefined
+): string {
+  return resolveStoreByPaymentUnit(paymentUnit);
 }
 
 export function matchStoreByText(text: string | null | undefined): string {
   const t = text == null ? '' : String(text);
   if (!t) return '';
   const stores = getStores();
-
   let bestStore = '';
   let bestIdx = Number.POSITIVE_INFINITY;
   for (const s of stores) {
@@ -133,7 +243,7 @@ export function matchStoreByText(text: string | null | undefined): string {
       const idx = t.indexOf(k);
       if (idx !== -1 && idx < bestIdx) {
         bestIdx = idx;
-        bestStore = s.name;
+        bestStore = normalizeStoreName(s.name) || s.name;
       }
     }
   }
@@ -141,7 +251,7 @@ export function matchStoreByText(text: string | null | undefined): string {
 }
 
 export function matchStoreByItem(item: any): string {
-  const byUnit = matchStoreByPaymentUnit(item?.paymentUnit);
+  const byUnit = resolveStoreByPaymentUnit(item?.paymentUnit);
   if (byUnit) return byUnit;
 
   const parts: string[] = [];
@@ -152,18 +262,8 @@ export function matchStoreByItem(item: any): string {
   }
   const fv = item?.formValues || {};
   [
-    '付款内容提要',
-    '借款提要',
-    '事项',
-    '事项/明细',
-    '报销事由',
-    '费用类型',
-    '明细',
-    '备注',
-    '用途',
-    '摘要',
-    '事由',
-    '说明',
+    '付款内容提要', '借款提要', '事项', '事项/明细', '报销事由',
+    '费用类型', '明细', '备注', '用途', '摘要', '事由', '说明',
   ].forEach((k) => {
     const v = fv[k];
     if (v == null || v === 'null' || v === '') return;
@@ -191,45 +291,4 @@ export function matchStoreByItem(item: any): string {
   if (item?.title) parts.push(String(item.title));
 
   return matchStoreByText(parts.join(' '));
-}
-
-/* ============================================================
- * ⭐ 付款单位 → 门店（按门店配置 paymentUnits 顺序匹配）
- *   - 精确匹配
- *   - 双向包含
- *   - 门店名出现在付款单位里
- * ============================================================ */
-export function resolveStoreByPaymentUnit(
-  paymentUnit: string | null | undefined
-): string {
-  const raw = paymentUnit == null ? '' : String(paymentUnit).trim();
-  if (!raw) return '';
-  const stores = getStores();
-
-  /* 1) 精确匹配 */
-  for (const s of stores) {
-    for (const u of s.paymentUnits) {
-      if (raw === u) return normalizeStoreName(s.name) || s.name;
-    }
-  }
-
-  /* 2) 双向包含 */
-  for (const s of stores) {
-    for (const u of s.paymentUnits) {
-      if (raw.includes(u) || u.includes(raw)) {
-        return normalizeStoreName(s.name) || s.name;
-      }
-    }
-  }
-
-  /* 3) 门店名 / shortName 出现在付款单位里 */
-  for (const s of stores) {
-    const name = normalizeStoreName(s.name) || s.name;
-    const short = normalizeStoreName(s.shortName || s.name) || s.shortName;
-    if (raw.includes(name) || (short && raw.includes(short))) {
-      return name;
-    }
-  }
-
-  return '';
 }

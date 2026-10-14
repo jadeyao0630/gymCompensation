@@ -10,8 +10,12 @@ import {
   matchStoreByItem,
   normalizeStoreName,
   resolveStoreByPaymentUnit,
+  resolveCompanyInStore,
 } from '../../../utils/storeConfig';
-import { inferRefundPaymentUnit } from '../utils/constants';
+import {
+  inferRefundPaymentUnit,
+  extractPaymentUnitFromForm,
+} from '../utils/constants';
 import { extractAmount } from '../utils/extract';
 
 /* ⭐ 未指定门店 → 默认归到「富贵园」 */
@@ -127,20 +131,9 @@ function collectItemText(r: DingTalkReportItem): string {
   }
 
   [
-    '事项',
-    '事项/明细',
-    '报销事由',
-    '费用类型',
-    '明细',
-    '备注',
-    '事由',
-    '用途',
-    '摘要',
-    '说明',
-    '付款内容提要',
-    '付款事由',
-    '付款用途',
-    '借款提要',
+    '事项', '事项/明细', '报销事由', '费用类型', '明细', '备注',
+    '事由', '用途', '摘要', '说明', '付款内容提要', '付款事由',
+    '付款用途', '借款提要',
   ].forEach((k) => {
     const v = fv[k];
     if (v == null || v === 'null' || v === '') return;
@@ -165,38 +158,66 @@ function inferStoreFromText(r: DingTalkReportItem): string {
   return '';
 }
 
-/* ⭐ 统一：拿到一条记录的最终门店名
+/* ⭐ 统一：拿到一条记录的最终门店名 + 公司
  *   优先级：手动归属 > 付款单位匹配 > 后端非兜底 _storeName > 文本推断 > 富贵园兜底
  */
-function resolveStoreName(r: DingTalkReportItem): string {
+function resolveStoreAndCompany(r: DingTalkReportItem): {
+  storeName: string;
+  company: string | null;
+} {
+  const atDate = r.createTime || undefined;
+
   /* 1) 手动归属 */
-  const manualRaw =
-    (r as any)._manualStore === true
-      ? ((r as any)._storeName as string | null | undefined)
-      : undefined;
-  if (manualRaw) return normalizeStoreName(manualRaw) || manualRaw;
-
-  /* 2) ⭐ 付款单位匹配（走门店配置 paymentUnits） */
-  const byUnit = resolveStoreByPaymentUnit(r.paymentUnit || '');
-  if (byUnit) return byUnit;
-
-  /* 3) 后端返回的 _storeName（非兜底） */
-  const assignReason = (r as any)._assignReason as string | undefined;
-  const autoRaw = (r as any)._storeName as string | null | undefined;
-  if (autoRaw && assignReason !== '未指定兜底') {
-    return normalizeStoreName(autoRaw) || autoRaw;
+  if ((r as any)._manualStore === true) {
+    const manualStoreRaw = (r as any)._storeName as string | null | undefined;
+    const storeName = manualStoreRaw
+      ? normalizeStoreName(manualStoreRaw) || manualStoreRaw
+      : DEFAULT_STORE;
+    return { storeName, company: (r as any)._company || null };
   }
 
-  /* 4) 前端 matchStoreByItem */
+  /* 2) 有付款公司名称 → 直接按付款公司找门店 */
+  if (r.paymentUnit && String(r.paymentUnit).trim()) {
+    const byUnit = resolveStoreByPaymentUnit(r.paymentUnit);
+    if (byUnit) {
+      return { storeName: byUnit, company: String(r.paymentUnit).trim() };
+    }
+  }
+
+  /* 3) 后端非兜底结果 */
+  const assignReason = (r as any)._assignReason as string | undefined;
+  const autoRaw = (r as any)._storeName as string | null | undefined;
+  if (autoRaw && assignReason && assignReason !== '未指定兜底') {
+    return {
+      storeName: normalizeStoreName(autoRaw) || autoRaw,
+      company: (r as any)._company || null,
+    };
+  }
+
+  /* 4) 事项/明细推门店 → 门店下按有效时间段选公司 */
+  const inferredStore = inferStoreFromText(r);
+  if (inferredStore) {
+    const info = resolveCompanyInStore(inferredStore, atDate);
+    return {
+      storeName: normalizeStoreName(inferredStore) || inferredStore,
+      company: info?.company || null,
+    };
+  }
+
+  /* 5) matchStoreByItem */
   const byItem = matchStoreByItem(r);
-  if (byItem) return normalizeStoreName(byItem) || byItem;
+  if (byItem) {
+    const storeName = normalizeStoreName(byItem) || byItem;
+    const info = resolveCompanyInStore(storeName, atDate);
+    return { storeName, company: info?.company || null };
+  }
 
-  /* 5) 文本推断 */
-  const inferred = inferStoreFromText(r);
-  if (inferred) return inferred;
+  /* 6) 兜底 */
+  return { storeName: DEFAULT_STORE, company: null };
+}
 
-  /* 6) 富贵园兜底 */
-  return DEFAULT_STORE;
+function resolveStoreName(r: DingTalkReportItem): string {
+  return resolveStoreAndCompany(r).storeName;
 }
 
 export function useDingTalkReport() {
@@ -254,17 +275,19 @@ export function useDingTalkReport() {
       allResults = allResults.map((r) => {
         let next: DingTalkReportItem = r;
 
+        /* ⭐ paymentUnit 为空时，从 formValues 兜底提取（兼容 \t 字段名） */
         if (!next.paymentUnit || !String(next.paymentUnit).trim()) {
-          if (next.templateName === '会员退费') {
+          const fromForm = extractPaymentUnitFromForm(next.formValues || {});
+          if (fromForm) {
+            next = { ...next, paymentUnit: fromForm };
+          } else if (next.templateName === '会员退费') {
             const inferred = inferRefundPaymentUnit(next);
             if (inferred) next = { ...next, paymentUnit: inferred };
           }
-          if (!next.paymentUnit) {
-            const storeName = matchStoreByItem(next);
-            if (storeName) next = { ...next, paymentUnit: storeName };
-          }
+          /* ⭐ 不再把 matchStoreByItem 的结果写进 paymentUnit */
         }
 
+        /* ⭐ 门店名归一化 */
         const autoRaw = (next as any)._storeName as string | null | undefined;
         const manualRaw =
           (next as any)._manualStore === true
@@ -412,7 +435,7 @@ export function useDingTalkReport() {
     >();
 
     results.forEach((r) => {
-      const storeName = resolveStoreName(r);
+      const { storeName } = resolveStoreAndCompany(r);
       const typeName = r.templateName || '未知类型';
       const amount =
         extractAmount(r.templateName || '', r.formValues || {}) || 0;

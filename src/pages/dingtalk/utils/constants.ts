@@ -1,18 +1,20 @@
 /* ============================================================
  * ⭐ 门店配置相关（运行时从 storeConfig 读取）
- *   - 门店名统一归一化：去掉结尾的「店」
  * ============================================================ */
 import {
   matchStoreByText,
   matchStoreByItem,
   normalizeStoreName,
   resolveStoreByPaymentUnit,
+  resolveCompanyInStore,
 } from '../../../utils/storeConfig';
+import type { DingTalkReportItem } from '../../../api/dingtalk';
 
-export { normalizeStoreName };
+/* ⭐ 重新导出，供其它模块使用 */
+export { normalizeStoreName, resolveCompanyInStore };
 
 /* ============================================================
- * 付款单位 → 门店（保留常量，供静态展示用）
+ * 付款单位 → 门店
  * ============================================================ */
 export const PAYMENT_UNIT_TO_STORE: Record<string, string> = {
   '北京林朗悦动体育管理有限公司': '哈德门',
@@ -23,23 +25,62 @@ export const PAYMENT_UNIT_TO_STORE: Record<string, string> = {
 
 export const PAYMENT_UNITS = Object.keys(PAYMENT_UNIT_TO_STORE);
 
-/** ⭐ 付款单位 → 门店（走运行时配置 + 归一化） */
+/** ⭐ 付款单位 → 门店（走运行时配置） */
 export function getStoreFromPaymentUnit(
   paymentUnit: string | null | undefined
 ): string {
   return resolveStoreByPaymentUnit(paymentUnit);
 }
 
-/** ⭐ 文本 → 门店（走运行时配置 + 归一化） */
+/** ⭐ 文本 → 门店（走运行时配置） */
 export function inferStoreFromText(text: string | null | undefined): string {
   const name = matchStoreByText(text);
   return name ? normalizeStoreName(name) || name : '';
 }
 
-/** ⭐ 综合推断一条钉钉记录的门店（+ 归一化） */
+/** ⭐ 综合推断一条钉钉记录的门店 */
 export function getStoreFromItem(item: any): string {
   const name = matchStoreByItem(item);
   return name ? normalizeStoreName(name) || name : '';
+}
+
+/* ============================================================
+ * ⭐ 从 formValues 提取付款单位（兼容 \t、空格、全角字段名）
+ * ============================================================ */
+export function extractPaymentUnitFromForm(
+  formValues: Record<string, any>
+): string {
+  const normKey = (k: string): string =>
+    String(k || '')
+      .replace(/\s+/g, '')
+      .replace(/（/g, '(')
+      .replace(/）/g, ')')
+      .replace(/：/g, ':');
+
+  const nfv: Record<string, any> = {};
+  Object.keys(formValues || {}).forEach((k) => {
+    nfv[normKey(k)] = formValues[k];
+  });
+
+  const candidates = ['付款单位全称', '付款单位', '付款公司', '付款主体', '付款方'];
+  for (const c of candidates) {
+    const v = nfv[normKey(c)];
+    if (v != null && v !== 'null' && v !== '') return String(v).trim();
+  }
+
+  for (const k of Object.keys(formValues || {})) {
+    const n = normKey(k);
+    if (
+      n.includes('付款单位') ||
+      n.includes('付款公司') ||
+      n.includes('付款主体') ||
+      n.includes('付款方')
+    ) {
+      const v = formValues[k];
+      if (v != null && v !== 'null' && v !== '') return String(v).trim();
+    }
+  }
+  return '';
 }
 
 /* ============================================================
@@ -180,10 +221,8 @@ export const COLUMN_STORAGE_KEY = 'dingtalk_report_visible_columns_v1';
 export const EXCLUDE_TEMPLATES = ['银行账户'];
 
 /* ============================================================
- * 会员退费 → 门店推断
+ * ⭐ 会员退费 → 门店推断
  * ============================================================ */
-import type { DingTalkReportItem } from '../../../api/dingtalk';
-
 export const MEMBER_REFUND_TPL = '会员退费';
 export const FU_GUI_YUAN_UNIT = '北京林朗韵动体育管理有限公司';
 export const HA_DE_MEN_UNIT = '北京林朗悦动体育管理有限公司';
@@ -254,6 +293,11 @@ function collectRefundItemText(item: DingTalkReportItem): string {
   return parts.join(' ');
 }
 
+/**
+ * 会员退费 → 推断付款单位
+ *  - 命中「富贵园 / 装修」→ 富贵园公司
+ *  - 否则 → 哈德门公司
+ */
 export function inferRefundPaymentUnit(
   item: DingTalkReportItem
 ): string | null {

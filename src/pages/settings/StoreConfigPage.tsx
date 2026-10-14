@@ -1,19 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Store,
-  Plus,
-  Trash2,
-  Save,
-  RotateCcw,
-  CheckCircle2,
-  AlertCircle,
-  ChevronDown,
-  ChevronUp,
-  Loader2,
+  Store, Plus, Trash2, Save, RotateCcw,
+  CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Loader2,
 } from 'lucide-react';
 
 import PageHeader from '../../components/layout/PageHeader';
-import type { StoreInfo } from '../../constants/stores';
+import type { StoreInfo, PaymentUnitEntry } from '../../constants/stores';
 import { fetchStores, saveStores } from '../../utils/storeConfig';
 
 function genId(): string {
@@ -42,9 +34,7 @@ export const StoreConfigPage: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    load();
-  }, []);
+  useEffect(() => { load(); }, []);
 
   const updateStore = (id: string, patch: Partial<StoreInfo>) => {
     setStores((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
@@ -73,14 +63,8 @@ export const StoreConfigPage: React.FC = () => {
   const handleSave = async () => {
     setError('');
     for (const s of stores) {
-      if (!s.id.trim()) {
-        setError('门店 ID 不能为空');
-        return;
-      }
-      if (!s.name.trim()) {
-        setError(`门店「${s.id}」的名称不能为空`);
-        return;
-      }
+      if (!s.id.trim()) { setError('门店 ID 不能为空'); return; }
+      if (!s.name.trim()) { setError(`门店「${s.id}」的名称不能为空`); return; }
     }
     setSaving(true);
     try {
@@ -103,8 +87,8 @@ export const StoreConfigPage: React.FC = () => {
         name: '富贵园',
         shortName: '富贵园',
         paymentUnits: [
-          '北京林朗韵动体育管理有限公司',
-          '北京林朗体育管理有限公司东花市大街分公司',
+          { company: '北京林朗韵动体育管理有限公司' },
+          { company: '北京林朗体育管理有限公司东花市大街分公司' },
         ],
         keywords: ['富贵园', '富贵', '东花市'],
         isDefault: true,
@@ -114,8 +98,8 @@ export const StoreConfigPage: React.FC = () => {
         name: '哈德门',
         shortName: '哈德门',
         paymentUnits: [
-          '北京林朗悦动体育管理有限公司',
-          '北京林朗体育管理有限公司',
+          { company: '北京林朗悦动体育管理有限公司' },
+          { company: '北京林朗体育管理有限公司' },
         ],
         keywords: ['哈德门', '哈德'],
       },
@@ -138,31 +122,68 @@ export const StoreConfigPage: React.FC = () => {
     });
   };
 
-  const handlePaymentUnitsChange = (id: string, text: string) => {
-    const arr = text
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    updateStore(id, { paymentUnits: arr });
+  /* ⭐ 付款公司列表：增 / 改 / 删 */
+  const handleAddPaymentUnit = (storeId: string) => {
+    setStores((prev) =>
+      prev.map((s) =>
+        s.id === storeId
+          ? {
+              ...s,
+              paymentUnits: [
+                ...s.paymentUnits,
+                { company: '', validFrom: null, validTo: null },
+              ],
+            }
+          : s
+      )
+    );
+    setSaved(false);
+  };
+
+  const handleUpdatePaymentUnit = (
+    storeId: string,
+    idx: number,
+    patch: Partial<PaymentUnitEntry>
+  ) => {
+    setStores((prev) =>
+      prev.map((s) =>
+        s.id === storeId
+          ? {
+              ...s,
+              paymentUnits: s.paymentUnits.map((p, i) =>
+                i === idx ? { ...p, ...patch } : p
+              ),
+            }
+          : s
+      )
+    );
+    setSaved(false);
+  };
+
+  const handleRemovePaymentUnit = (storeId: string, idx: number) => {
+    setStores((prev) =>
+      prev.map((s) =>
+        s.id === storeId
+          ? { ...s, paymentUnits: s.paymentUnits.filter((_, i) => i !== idx) }
+          : s
+      )
+    );
+    setSaved(false);
   };
 
   const handleKeywordsChange = (id: string, text: string) => {
-    const arr = text
-      .split(/[\n,，]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const arr = text.split(/[\n,，]/).map((s) => s.trim()).filter(Boolean);
     updateStore(id, { keywords: arr });
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50/50">
-      {/* ⭐ 整页与顶部卡片一致：max-w-7xl */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <PageHeader
           badgeText="Store Config"
           badgeIcon={<Store className="w-3.5 h-3.5" />}
           title="门店配置"
-          description="维护「门店 → 付款单位 / 关键字」映射，用于钉钉流程按门店归属（数据存储在 MySQL）"
+          description="维护「门店 → 付款公司（含有效时间段） / 关键字」映射，用于钉钉流程按门店归属（数据存储在 MySQL）"
           navActive="stores"
           actions={
             <>
@@ -188,20 +209,15 @@ export const StoreConfigPage: React.FC = () => {
                 className="inline-flex items-center gap-2 bg-white text-indigo-700 hover:bg-white/90 rounded-2xl px-5 py-2.5 shadow-lg transition disabled:opacity-50 font-semibold text-sm"
               >
                 {saving ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" /> 保存中…
-                  </>
+                  <><Loader2 className="w-4 h-4 animate-spin" /> 保存中…</>
                 ) : (
-                  <>
-                    <Save className="w-4 h-4" /> 保存配置
-                  </>
+                  <><Save className="w-4 h-4" /> 保存配置</>
                 )}
               </button>
             </>
           }
         />
 
-        {/* ⭐ 状态提示 */}
         {error && (
           <div className="mb-4 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 flex items-center gap-2">
             <AlertCircle className="w-3.5 h-3.5" />
@@ -215,7 +231,6 @@ export const StoreConfigPage: React.FC = () => {
           </div>
         )}
 
-        {/* ⭐ 内容区：与顶部同宽 */}
         {loading ? (
           <div className="flex items-center justify-center py-12 text-gray-400">
             <Loader2 className="w-5 h-5 animate-spin mr-2" />
@@ -253,12 +268,9 @@ export const StoreConfigPage: React.FC = () => {
                       className="text-sm font-semibold text-gray-800 bg-transparent focus:outline-none border-b border-transparent focus:border-indigo-400 min-w-[120px]"
                       placeholder="门店名"
                     />
+                    <span className="text-[11px] text-gray-400">ID：{s.id}</span>
                     <span className="text-[11px] text-gray-400">
-                      ID：{s.id}
-                    </span>
-                    <span className="text-[11px] text-gray-400">
-                      · 付款单位 {s.paymentUnits.length} 个 · 关键字{' '}
-                      {s.keywords.length} 个
+                      · 付款公司 {s.paymentUnits.length} 个 · 关键字 {s.keywords.length} 个
                     </span>
                     <div className="flex-1" />
                     <button
@@ -279,9 +291,7 @@ export const StoreConfigPage: React.FC = () => {
                         </label>
                         <input
                           value={s.id}
-                          onChange={(e) =>
-                            updateStore(s.id, { id: e.target.value })
-                          }
+                          onChange={(e) => updateStore(s.id, { id: e.target.value })}
                           className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-400"
                           placeholder="如 12279"
                         />
@@ -289,22 +299,74 @@ export const StoreConfigPage: React.FC = () => {
 
                       <div>
                         <label className="block text-xs font-medium text-gray-600 mb-1">
-                          付款单位（每行一个）
+                          付款公司列表
                           <span className="text-gray-400 ml-1 font-normal">
-                            用于「付款单位 → 门店」映射
+                            按顺序匹配；有效时间段用于「无付款单位」时按发起时间选公司
                           </span>
                         </label>
-                        <textarea
-                          value={s.paymentUnits.join('\n')}
-                          onChange={(e) =>
-                            handlePaymentUnitsChange(s.id, e.target.value)
-                          }
-                          rows={Math.max(2, s.paymentUnits.length + 1)}
-                          className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-400 font-mono"
-                          placeholder={
-                            '北京林朗韵动体育管理有限公司\n北京林朗体育管理有限公司东花市大街分公司'
-                          }
-                        />
+
+                        <div className="space-y-2">
+                          {s.paymentUnits.map((pu, idx) => (
+                            <div
+                              key={idx}
+                              className="grid grid-cols-12 gap-2 items-center bg-gray-50/60 rounded-lg p-2"
+                            >
+                              <div className="col-span-5">
+                                <input
+                                  value={pu.company}
+                                  onChange={(e) =>
+                                    handleUpdatePaymentUnit(s.id, idx, { company: e.target.value })
+                                  }
+                                  placeholder="公司全称"
+                                  className="w-full text-xs px-2 py-1 border border-gray-200 rounded focus:outline-none focus:border-indigo-400"
+                                />
+                              </div>
+                              <div className="col-span-3">
+                                <input
+                                  type="date"
+                                  value={pu.validFrom || ''}
+                                  onChange={(e) =>
+                                    handleUpdatePaymentUnit(s.id, idx, {
+                                      validFrom: e.target.value || null,
+                                    })
+                                  }
+                                  className="w-full text-xs px-2 py-1 border border-gray-200 rounded focus:outline-none focus:border-indigo-400"
+                                  title="生效日期"
+                                />
+                              </div>
+                              <div className="col-span-3">
+                                <input
+                                  type="date"
+                                  value={pu.validTo || ''}
+                                  onChange={(e) =>
+                                    handleUpdatePaymentUnit(s.id, idx, {
+                                      validTo: e.target.value || null,
+                                    })
+                                  }
+                                  className="w-full text-xs px-2 py-1 border border-gray-200 rounded focus:outline-none focus:border-indigo-400"
+                                  title="失效日期"
+                                />
+                              </div>
+                              <div className="col-span-1 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemovePaymentUnit(s.id, idx)}
+                                  className="text-rose-500 hover:text-rose-700 text-xs"
+                                >
+                                  删除
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleAddPaymentUnit(s.id)}
+                          className="mt-2 text-xs text-indigo-600 hover:text-indigo-800"
+                        >
+                          + 添加付款公司
+                        </button>
                       </div>
 
                       <div>
@@ -316,9 +378,7 @@ export const StoreConfigPage: React.FC = () => {
                         </label>
                         <textarea
                           value={s.keywords.join('\n')}
-                          onChange={(e) =>
-                            handleKeywordsChange(s.id, e.target.value)
-                          }
+                          onChange={(e) => handleKeywordsChange(s.id, e.target.value)}
                           rows={Math.max(2, s.keywords.length + 1)}
                           className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-400 font-mono"
                           placeholder={'富贵园\n富贵\n东花市'}
@@ -332,17 +392,16 @@ export const StoreConfigPage: React.FC = () => {
           </div>
         )}
 
-        {/* 说明 */}
         <div className="mt-8 text-xs text-gray-500 bg-blue-50/50 border border-blue-100 rounded-lg p-4 leading-relaxed">
-          <p className="font-semibold text-blue-800 mb-1.5">匹配优先级：</p>
+          <p className="font-semibold text-blue-800 mb-1.5">归属决策链：</p>
           <ol className="list-decimal list-inside space-y-0.5">
-            <li>付款单位精确匹配 → 命中直接归该门店</li>
-            <li>付款单位包含匹配（双向）→ 命中直接归该门店</li>
-            <li>付款单位为空时，按事项文本里的门店关键字匹配</li>
-            <li>都未命中 → 显示为「未指定门店」</li>
+            <li>有付款公司名称 → 找所属门店，命中直接归属该门店</li>
+            <li>无付款公司名称，但有门店字段 → 在该门店下按「有效时间段包含发起时间」选公司</li>
+            <li>无付款公司名称、无门店字段 → 从事项/明细里匹配门店关键字 → 回到第 2 步</li>
+            <li>都没命中 → 手动归属（选公司 + 自动匹配门店）</li>
           </ol>
           <p className="mt-2 text-gray-500">
-            提示：多个门店共用同一个付款单位时，<b>列表中靠前的门店优先</b>。
+            提示：付款公司列表按顺序匹配，有效时间段可留空（表示长期有效）。
           </p>
         </div>
       </div>

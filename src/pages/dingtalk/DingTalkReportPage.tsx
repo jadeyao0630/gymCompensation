@@ -12,6 +12,7 @@ import { getDefaultMonth } from './utils/date';
 import {
   getStoreFromPaymentUnit,
   normalizeStoreName,
+  extractPaymentUnitFromForm,
 } from './utils/constants';
 import { extractAmount, extractItems, extractPayeeAccount } from './utils/extract';
 import { getStatusLabel } from './utils/statusLabel';
@@ -24,7 +25,11 @@ import { usePersistedMonth } from '../../hooks/usePersistedMonth';
 
 import type { DingTalkReportItem } from '../../api/dingtalk';
 
-import { fetchStores, resolveStoreByPaymentUnit } from '../../utils/storeConfig';
+import {
+  fetchStores,
+  resolveStoreByPaymentUnit,
+  resolveCompanyInStore,
+} from '../../utils/storeConfig';
 import type { StoreInfo } from '../../constants/stores';
 
 import DingTalkHeader from './components/DingTalkHeader';
@@ -50,12 +55,15 @@ function isPayeeExcluded(
 }
 
 /* ============================================================
- * ⭐ 类别覆盖规则
+ * ⭐ 类别覆盖规则 1：收款账户 → 类别
  * ============================================================ */
 const PAYEE_CATEGORY_OVERRIDES: Array<{ payee: string; category: string }> = [
   { payee: '山东云优人力资源服务有限公司', category: '薪酬佣金' },
 ];
 
+/* ============================================================
+ * ⭐ 类别覆盖规则 2：明细关键字 → 类别
+ * ============================================================ */
 interface KeywordCategoryRule {
   category: string;
   keywords: string[];
@@ -113,19 +121,8 @@ function collectItemText(item: DingTalkReportItem): string {
   if (item.title) parts.push(String(item.title));
 
   [
-    '事项',
-    '事项/明细',
-    '报销事由',
-    '费用类型',
-    '明细',
-    '备注',
-    '事由',
-    '用途',
-    '摘要',
-    '说明',
-    '付款内容提要',
-    '付款事由',
-    '付款用途',
+    '事项', '事项/明细', '报销事由', '费用类型', '明细', '备注',
+    '事由', '用途', '摘要', '说明', '付款内容提要', '付款事由', '付款用途',
   ].forEach((k) => {
     const v = fv[k];
     if (v == null || v === 'null' || v === '') return;
@@ -169,7 +166,7 @@ function resolvePayeeCategory(
   return null;
 }
 
-/* ⭐ 内部类型 */
+/* ⭐ 分组类型，明确包含 total / count / totalCount */
 interface UnitGroupInternal {
   storeName: string;
   unitName: string;
@@ -186,34 +183,47 @@ interface TypeGroupInternal {
   units: UnitGroupInternal[];
 }
 
-/* ⭐ 统一：拿到一条记录的最终门店名
- *   手动归属 > 付款单位匹配 > 后端非兜底 _storeName > 富贵园兜底
- */
-function resolveStoreNameForItem(
+/* ⭐ 统一：拿到一条记录的最终门店名 + 公司 */
+function resolveStoreAndCompanyForItem(
   r: DingTalkReportItem,
   manualOverrides: Record<string, { storeName: string | null; isManual: boolean }>
-): string {
+): { storeName: string; company: string | null } {
+  const atDate = r.createTime || undefined;
+
   /* 1) 手动归属（本地覆盖） */
   const manualRaw = manualOverrides[r.processInstanceId || '']?.storeName;
-  if (manualRaw) return normalizeStoreName(manualRaw) || manualRaw;
+  if (manualRaw) {
+    const storeName = normalizeStoreName(manualRaw) || manualRaw;
+    return { storeName, company: (r as any)._company || null };
+  }
 
-  /* 2) ⭐ 付款单位匹配（走门店配置 paymentUnits，默认第一家） */
-  const byUnit = resolveStoreByPaymentUnit(r.paymentUnit || '');
-  if (byUnit) return byUnit;
+  /* 2) 有付款公司名称 → 直接按付款公司找门店 */
+  const pu = r.paymentUnit || extractPaymentUnitFromForm(r.formValues || {});
+  if (pu && String(pu).trim()) {
+    const byUnit = resolveStoreByPaymentUnit(pu);
+    if (byUnit) return { storeName: byUnit, company: String(pu).trim() };
+  }
 
   /* 3) 后端非兜底 _storeName */
   const autoRaw = (r as any)._storeName as string | null | undefined;
   const assignReason = (r as any)._assignReason as string | undefined;
-  if (autoRaw && assignReason !== '未指定兜底') {
-    return normalizeStoreName(autoRaw) || autoRaw;
+  if (autoRaw && assignReason && assignReason !== '未指定兜底') {
+    return {
+      storeName: normalizeStoreName(autoRaw) || autoRaw,
+      company: (r as any)._company || null,
+    };
   }
 
   /* 4) getStoreFromPaymentUnit 兜底 */
-  const fallbackName = getStoreFromPaymentUnit(r.paymentUnit || '');
-  if (fallbackName) return normalizeStoreName(fallbackName) || fallbackName;
+  const byPayment = getStoreFromPaymentUnit(r.paymentUnit || '');
+  if (byPayment) {
+    const storeName = normalizeStoreName(byPayment) || byPayment;
+    const info = resolveCompanyInStore(storeName, atDate);
+    return { storeName, company: info?.company || null };
+  }
 
   /* 5) 富贵园兜底 */
-  return DEFAULT_STORE;
+  return { storeName: DEFAULT_STORE, company: null };
 }
 
 const DingTalkReportPage: React.FC = () => {
@@ -292,6 +302,7 @@ const DingTalkReportPage: React.FC = () => {
   const { visibleColumns, toggleColumn, resetColumns, isColVisible } =
     useReportColumns();
 
+  /* ⭐ 门店列表 & 手动归属本地覆盖 */
   const [storeOptions, setStoreOptions] = useState<string[]>([]);
   const [manualOverrides, setManualOverrides] = useState<
     Record<string, { storeName: string | null; isManual: boolean }>
@@ -439,7 +450,7 @@ const DingTalkReportPage: React.FC = () => {
       const typeName = category;
       const unitName = r.paymentUnit || '未指定';
 
-      const storeName = resolveStoreNameForItem(r, manualOverrides);
+      const { storeName } = resolveStoreAndCompanyForItem(r, manualOverrides);
 
       const amount = Number(
         extractAmount(r.templateName || '', r.formValues || {}) || 0
@@ -528,7 +539,8 @@ const DingTalkReportPage: React.FC = () => {
 
     for (const g of finalGrouped) {
       for (const u of g.units) {
-        const storeName = normalizeStoreName(u.storeName || '') || DEFAULT_STORE;
+        const storeName =
+          normalizeStoreName(u.storeName || '') || DEFAULT_STORE;
         if (!map.has(storeName)) {
           map.set(storeName, {
             storeName,
@@ -631,7 +643,10 @@ const DingTalkReportPage: React.FC = () => {
     let exportResults = categorizedResults;
     if (selectedStore) {
       exportResults = exportResults.filter((c) => {
-        const storeName = resolveStoreNameForItem(c.item, manualOverrides);
+        const { storeName } = resolveStoreAndCompanyForItem(
+          c.item,
+          manualOverrides
+        );
         return storeName === selectedStore;
       });
     }
@@ -645,17 +660,26 @@ const DingTalkReportPage: React.FC = () => {
     }
 
     const rows: any[][] = [
-      ['流程类型', '门店', '付款单位', '标题', '事项', '金额', '收款账户', '状态', '创建时间', '完成时间'],
+      ['流程类型', '门店', '付款公司', '付款单位', '标题', '事项', '金额', '收款账户', '状态', '创建时间', '完成时间'],
     ];
     exportResults.forEach(({ item: r, category, overridden }) => {
-      const storeName = resolveStoreNameForItem(r, manualOverrides);
+      const { storeName, company } = resolveStoreAndCompanyForItem(
+        r,
+        manualOverrides
+      );
+
+      const paymentUnitFromForm = extractPaymentUnitFromForm(
+        r.formValues || {}
+      );
+      const paymentUnitDisplay = r.paymentUnit || paymentUnitFromForm || '';
 
       rows.push([
         overridden
           ? `${r.templateName || ''}（→${category}）`
           : (r.templateName || ''),
         storeName,
-        r.paymentUnit || '',
+        company || '',
+        paymentUnitDisplay,
         r.title || '',
         extractItems(r.templateName || '', r.formValues || {}),
         extractAmount(r.templateName || '', r.formValues || {}) || 0,
@@ -667,19 +691,19 @@ const DingTalkReportPage: React.FC = () => {
     });
     const ws1 = XLSX.utils.aoa_to_sheet(rows);
     ws1['!cols'] = [
-      { wch: 24 }, { wch: 10 }, { wch: 30 }, { wch: 40 }, { wch: 40 },
+      { wch: 24 }, { wch: 10 }, { wch: 32 }, { wch: 30 }, { wch: 40 }, { wch: 40 },
       { wch: 14 }, { wch: 20 }, { wch: 12 }, { wch: 20 }, { wch: 20 },
     ];
     XLSX.utils.book_append_sheet(wb, ws1, '明细');
 
-    const summaryRows: any[][] = [['流程类型', '门店', '付款单位', '笔数', '金额合计']];
+    const summaryRows: any[][] = [['流程类型', '门店', '付款公司', '笔数', '金额合计']];
     filteredGrouped.forEach((g) => {
       g.units.forEach((u) => {
         summaryRows.push([g.typeName, u.storeName, u.unitName, u.count, u.total]);
       });
     });
     const ws2 = XLSX.utils.aoa_to_sheet(summaryRows);
-    ws2['!cols'] = [{ wch: 18 }, { wch: 10 }, { wch: 30 }, { wch: 10 }, { wch: 16 }];
+    ws2['!cols'] = [{ wch: 18 }, { wch: 10 }, { wch: 32 }, { wch: 10 }, { wch: 16 }];
     XLSX.utils.book_append_sheet(wb, ws2, '汇总');
 
     const suffix = [
