@@ -192,3 +192,44 @@ export function matchStoreByItem(item: any): string {
 
   return matchStoreByText(parts.join(' '));
 }
+
+/* ============================================================
+ * ⭐ 付款单位 → 门店（按门店配置 paymentUnits 顺序匹配）
+ *   - 精确匹配
+ *   - 双向包含
+ *   - 门店名出现在付款单位里
+ * ============================================================ */
+export function resolveStoreByPaymentUnit(
+  paymentUnit: string | null | undefined
+): string {
+  const raw = paymentUnit == null ? '' : String(paymentUnit).trim();
+  if (!raw) return '';
+  const stores = getStores();
+
+  /* 1) 精确匹配 */
+  for (const s of stores) {
+    for (const u of s.paymentUnits) {
+      if (raw === u) return normalizeStoreName(s.name) || s.name;
+    }
+  }
+
+  /* 2) 双向包含 */
+  for (const s of stores) {
+    for (const u of s.paymentUnits) {
+      if (raw.includes(u) || u.includes(raw)) {
+        return normalizeStoreName(s.name) || s.name;
+      }
+    }
+  }
+
+  /* 3) 门店名 / shortName 出现在付款单位里 */
+  for (const s of stores) {
+    const name = normalizeStoreName(s.name) || s.name;
+    const short = normalizeStoreName(s.shortName || s.name) || s.shortName;
+    if (raw.includes(name) || (short && raw.includes(short))) {
+      return name;
+    }
+  }
+
+  return '';
+}

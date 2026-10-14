@@ -9,7 +9,10 @@ import { useStore } from '../../contexts/StoreContext';
 import { useAuth } from '../../contexts/AuthContext';
 
 import { getDefaultMonth } from './utils/date';
-import { getStoreFromPaymentUnit } from './utils/constants';
+import {
+  getStoreFromPaymentUnit,
+  normalizeStoreName,
+} from './utils/constants';
 import { extractAmount, extractItems, extractPayeeAccount } from './utils/extract';
 import { getStatusLabel } from './utils/statusLabel';
 
@@ -21,7 +24,7 @@ import { usePersistedMonth } from '../../hooks/usePersistedMonth';
 
 import type { DingTalkReportItem } from '../../api/dingtalk';
 
-import { fetchStores } from '../../utils/storeConfig';
+import { fetchStores, resolveStoreByPaymentUnit } from '../../utils/storeConfig';
 import type { StoreInfo } from '../../constants/stores';
 
 import DingTalkHeader from './components/DingTalkHeader';
@@ -29,6 +32,9 @@ import DingTalkSyncPanel from './components/DingTalkSyncPanel';
 import DingTalkFilterBar from './components/DingTalkFilterBar';
 import GroupedResults from './components/GroupedResults';
 import TypePieChart, { getPieColor } from './components/TypePieChart';
+
+/* ⭐ 未指定门店 → 默认归到「富贵园」 */
+const DEFAULT_STORE = '富贵园';
 
 /* ⭐ 判断收款账户是否被排除 */
 function isPayeeExcluded(
@@ -44,15 +50,12 @@ function isPayeeExcluded(
 }
 
 /* ============================================================
- * ⭐ 类别覆盖规则 1：收款账户 → 类别
+ * ⭐ 类别覆盖规则
  * ============================================================ */
 const PAYEE_CATEGORY_OVERRIDES: Array<{ payee: string; category: string }> = [
   { payee: '山东云优人力资源服务有限公司', category: '薪酬佣金' },
 ];
 
-/* ============================================================
- * ⭐ 类别覆盖规则 2：明细关键字 → 类别
- * ============================================================ */
 interface KeywordCategoryRule {
   category: string;
   keywords: string[];
@@ -166,7 +169,7 @@ function resolvePayeeCategory(
   return null;
 }
 
-/* ⭐ 分组类型，明确包含 total / count / totalCount */
+/* ⭐ 内部类型 */
 interface UnitGroupInternal {
   storeName: string;
   unitName: string;
@@ -181,6 +184,36 @@ interface TypeGroupInternal {
   count: number;
   totalCount: number;
   units: UnitGroupInternal[];
+}
+
+/* ⭐ 统一：拿到一条记录的最终门店名
+ *   手动归属 > 付款单位匹配 > 后端非兜底 _storeName > 富贵园兜底
+ */
+function resolveStoreNameForItem(
+  r: DingTalkReportItem,
+  manualOverrides: Record<string, { storeName: string | null; isManual: boolean }>
+): string {
+  /* 1) 手动归属（本地覆盖） */
+  const manualRaw = manualOverrides[r.processInstanceId || '']?.storeName;
+  if (manualRaw) return normalizeStoreName(manualRaw) || manualRaw;
+
+  /* 2) ⭐ 付款单位匹配（走门店配置 paymentUnits，默认第一家） */
+  const byUnit = resolveStoreByPaymentUnit(r.paymentUnit || '');
+  if (byUnit) return byUnit;
+
+  /* 3) 后端非兜底 _storeName */
+  const autoRaw = (r as any)._storeName as string | null | undefined;
+  const assignReason = (r as any)._assignReason as string | undefined;
+  if (autoRaw && assignReason !== '未指定兜底') {
+    return normalizeStoreName(autoRaw) || autoRaw;
+  }
+
+  /* 4) getStoreFromPaymentUnit 兜底 */
+  const fallbackName = getStoreFromPaymentUnit(r.paymentUnit || '');
+  if (fallbackName) return normalizeStoreName(fallbackName) || fallbackName;
+
+  /* 5) 富贵园兜底 */
+  return DEFAULT_STORE;
 }
 
 const DingTalkReportPage: React.FC = () => {
@@ -259,7 +292,6 @@ const DingTalkReportPage: React.FC = () => {
   const { visibleColumns, toggleColumn, resetColumns, isColVisible } =
     useReportColumns();
 
-  /* ⭐ 门店列表 & 手动归属本地覆盖 */
   const [storeOptions, setStoreOptions] = useState<string[]>([]);
   const [manualOverrides, setManualOverrides] = useState<
     Record<string, { storeName: string | null; isManual: boolean }>
@@ -267,7 +299,9 @@ const DingTalkReportPage: React.FC = () => {
 
   useEffect(() => {
     fetchStores().then((list: StoreInfo[]) => {
-      setStoreOptions(list.map((s) => s.name));
+      setStoreOptions(
+        list.map((s) => normalizeStoreName(s.name) || s.name)
+      );
     });
   }, []);
 
@@ -364,11 +398,16 @@ const DingTalkReportPage: React.FC = () => {
   );
 
   const finalGrouped = useMemo<TypeGroupInternal[]>(() => {
-    if (excludedPayeeIds.size === 0 && !hasAnyOverride) {
-      /* ⭐ 兜底：把 grouped 转成 TypeGroupInternal（补 total / count） */
+    const needRebuild =
+      excludedPayeeIds.size > 0 ||
+      hasAnyOverride ||
+      Object.keys(manualOverrides).length > 0;
+
+    if (!needRebuild) {
       return grouped.map((g) => {
-        const units = g.units.map((u) => ({
-          storeName: u.storeName,
+        const units: UnitGroupInternal[] = g.units.map((u) => ({
+          storeName:
+            normalizeStoreName(u.storeName || '') || DEFAULT_STORE,
           unitName: u.unitName,
           total: u.total,
           count: u.count,
@@ -400,13 +439,7 @@ const DingTalkReportPage: React.FC = () => {
       const typeName = category;
       const unitName = r.paymentUnit || '未指定';
 
-      /* ⭐ getStoreFromPaymentUnit 参数兜底成 string */
-      const manual = manualOverrides[r.processInstanceId || ''];
-      const storeName: string =
-        manual?.storeName ??
-        ((r as any)._storeName as string | null | undefined) ??
-        getStoreFromPaymentUnit(unitName || '') ??
-        '未归属门店';
+      const storeName = resolveStoreNameForItem(r, manualOverrides);
 
       const amount = Number(
         extractAmount(r.templateName || '', r.formValues || {}) || 0
@@ -451,15 +484,24 @@ const DingTalkReportPage: React.FC = () => {
         units: Array.from(g.units.values()),
       }))
       .filter((g) => g.units.length > 0);
-  }, [grouped, categorizedResults, excludedPayeeIds, hasAnyOverride, manualOverrides]);
+  }, [
+    grouped,
+    categorizedResults,
+    excludedPayeeIds,
+    hasAnyOverride,
+    manualOverrides,
+  ]);
 
   const storeCharts = useMemo(() => {
-    const needRebuild = excludedPayeeIds.size > 0 || hasAnyOverride;
+    const needRebuild =
+      excludedPayeeIds.size > 0 ||
+      hasAnyOverride ||
+      Object.keys(manualOverrides).length > 0;
 
     if (!needRebuild) {
       return groupedByStore
         .map((s) => ({
-          storeName: s.storeName,
+          storeName: normalizeStoreName(s.storeName || '') || DEFAULT_STORE,
           totalCount: s.count,
           totalAmount: s.total,
           slices: s.types
@@ -486,15 +528,16 @@ const DingTalkReportPage: React.FC = () => {
 
     for (const g of finalGrouped) {
       for (const u of g.units) {
-        if (!map.has(u.storeName)) {
-          map.set(u.storeName, {
-            storeName: u.storeName,
+        const storeName = normalizeStoreName(u.storeName || '') || DEFAULT_STORE;
+        if (!map.has(storeName)) {
+          map.set(storeName, {
+            storeName,
             totalCount: 0,
             totalAmount: 0,
             types: new Map(),
           });
         }
-        const s = map.get(u.storeName)!;
+        const s = map.get(storeName)!;
         s.totalCount += u.count;
         s.totalAmount += u.total;
 
@@ -522,7 +565,13 @@ const DingTalkReportPage: React.FC = () => {
           })),
       }))
       .filter((c) => c.slices.length > 0);
-  }, [groupedByStore, finalGrouped, excludedPayeeIds, hasAnyOverride]);
+  }, [
+    groupedByStore,
+    finalGrouped,
+    excludedPayeeIds,
+    hasAnyOverride,
+    manualOverrides,
+  ]);
 
   const onSearch = () => {
     setSelectedType(null);
@@ -582,12 +631,7 @@ const DingTalkReportPage: React.FC = () => {
     let exportResults = categorizedResults;
     if (selectedStore) {
       exportResults = exportResults.filter((c) => {
-        const manual = manualOverrides[c.item.processInstanceId || ''];
-        const storeName: string =
-          manual?.storeName ??
-          ((c.item as any)._storeName as string | null | undefined) ??
-          getStoreFromPaymentUnit(c.item.paymentUnit || '') ??
-          '';
+        const storeName = resolveStoreNameForItem(c.item, manualOverrides);
         return storeName === selectedStore;
       });
     }
@@ -604,12 +648,7 @@ const DingTalkReportPage: React.FC = () => {
       ['流程类型', '门店', '付款单位', '标题', '事项', '金额', '收款账户', '状态', '创建时间', '完成时间'],
     ];
     exportResults.forEach(({ item: r, category, overridden }) => {
-      const manual = manualOverrides[r.processInstanceId || ''];
-      const storeName: string =
-        manual?.storeName ??
-        ((r as any)._storeName as string | null | undefined) ??
-        getStoreFromPaymentUnit(r.paymentUnit || '') ??
-        '';
+      const storeName = resolveStoreNameForItem(r, manualOverrides);
 
       rows.push([
         overridden
@@ -852,7 +891,10 @@ const DingTalkReportPage: React.FC = () => {
               onManualStoreChanged={(pid, next, isManual) => {
                 setManualOverrides((prev) => ({
                   ...prev,
-                  [pid]: { storeName: next, isManual },
+                  [pid]: {
+                    storeName: next ? normalizeStoreName(next) || next : null,
+                    isManual,
+                  },
                 }));
               }}
             />

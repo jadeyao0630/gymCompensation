@@ -3,10 +3,10 @@
  *   - 门店名统一归一化：去掉结尾的「店」
  * ============================================================ */
 import {
-  matchStoreByPaymentUnit,
   matchStoreByText,
   matchStoreByItem,
   normalizeStoreName,
+  resolveStoreByPaymentUnit,
 } from '../../../utils/storeConfig';
 
 export { normalizeStoreName };
@@ -27,8 +27,7 @@ export const PAYMENT_UNITS = Object.keys(PAYMENT_UNIT_TO_STORE);
 export function getStoreFromPaymentUnit(
   paymentUnit: string | null | undefined
 ): string {
-  const name = matchStoreByPaymentUnit(paymentUnit);
-  return name ? normalizeStoreName(name) || name : '';
+  return resolveStoreByPaymentUnit(paymentUnit);
 }
 
 /** ⭐ 文本 → 门店（走运行时配置 + 归一化） */

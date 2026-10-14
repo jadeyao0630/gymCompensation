@@ -6,9 +6,16 @@ import {
   type DingTalkReportItem,
   type DingTalkSyncResult,
 } from '../../../api/dingtalk';
-import { matchStoreByItem } from '../../../utils/storeConfig';
+import {
+  matchStoreByItem,
+  normalizeStoreName,
+  resolveStoreByPaymentUnit,
+} from '../../../utils/storeConfig';
 import { inferRefundPaymentUnit } from '../utils/constants';
 import { extractAmount } from '../utils/extract';
+
+/* ⭐ 未指定门店 → 默认归到「富贵园」 */
+const DEFAULT_STORE = '富贵园';
 
 interface SearchParams {
   start: string;
@@ -84,6 +91,114 @@ function filterByTemplateTypes(
   return list.filter((d) => templateTypes.includes(d.templateName || ''));
 }
 
+/* ⭐ 文本关键字 */
+const STORE_KEYWORDS: Record<string, string[]> = {
+  '哈德门': ['哈德门', '哈德', '崇文门', '国瑞'],
+  '富贵园': ['富贵园', '富贵', '东花市'],
+};
+
+function collectItemText(r: DingTalkReportItem): string {
+  const parts: string[] = [];
+
+  if (Array.isArray(r.items)) {
+    r.items.forEach((it: any) => {
+      if (it?.content) parts.push(String(it.content));
+    });
+  }
+
+  const fv = r.formValues || {};
+
+  const rawDetail = fv['明细列表'];
+  if (typeof rawDetail === 'string' && rawDetail && rawDetail !== 'null') {
+    try {
+      const parsed = JSON.parse(rawDetail);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((row: any) => {
+          (row?.rowValue || []).forEach((f: any) => {
+            if (f?.value != null && f.value !== 'null') {
+              parts.push(String(f.value));
+            }
+          });
+        });
+      }
+    } catch {
+      parts.push(String(rawDetail));
+    }
+  }
+
+  [
+    '事项',
+    '事项/明细',
+    '报销事由',
+    '费用类型',
+    '明细',
+    '备注',
+    '事由',
+    '用途',
+    '摘要',
+    '说明',
+    '付款内容提要',
+    '付款事由',
+    '付款用途',
+    '借款提要',
+  ].forEach((k) => {
+    const v = fv[k];
+    if (v == null || v === 'null' || v === '') return;
+    if (typeof v === 'object') {
+      try { parts.push(JSON.stringify(v)); } catch {}
+    } else {
+      parts.push(String(v));
+    }
+  });
+
+  if (r.title) parts.push(String(r.title));
+
+  return parts.join(' ');
+}
+
+function inferStoreFromText(r: DingTalkReportItem): string {
+  const text = collectItemText(r);
+  if (!text) return '';
+  for (const [storeName, kws] of Object.entries(STORE_KEYWORDS)) {
+    if (kws.some((k) => k && text.includes(k))) return storeName;
+  }
+  return '';
+}
+
+/* ⭐ 统一：拿到一条记录的最终门店名
+ *   优先级：手动归属 > 付款单位匹配 > 后端非兜底 _storeName > 文本推断 > 富贵园兜底
+ */
+function resolveStoreName(r: DingTalkReportItem): string {
+  /* 1) 手动归属 */
+  const manualRaw =
+    (r as any)._manualStore === true
+      ? ((r as any)._storeName as string | null | undefined)
+      : undefined;
+  if (manualRaw) return normalizeStoreName(manualRaw) || manualRaw;
+
+  /* 2) ⭐ 付款单位匹配（走门店配置 paymentUnits） */
+  const byUnit = resolveStoreByPaymentUnit(r.paymentUnit || '');
+  if (byUnit) return byUnit;
+
+  /* 3) 后端返回的 _storeName（非兜底） */
+  const assignReason = (r as any)._assignReason as string | undefined;
+  const autoRaw = (r as any)._storeName as string | null | undefined;
+  if (autoRaw && assignReason !== '未指定兜底') {
+    return normalizeStoreName(autoRaw) || autoRaw;
+  }
+
+  /* 4) 前端 matchStoreByItem */
+  const byItem = matchStoreByItem(r);
+  if (byItem) return normalizeStoreName(byItem) || byItem;
+
+  /* 5) 文本推断 */
+  const inferred = inferStoreFromText(r);
+  if (inferred) return inferred;
+
+  /* 6) 富贵园兜底 */
+  return DEFAULT_STORE;
+}
+
 export function useDingTalkReport() {
   const [rawResults, setRawResults] = useState<DingTalkReportItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -135,16 +250,40 @@ export function useDingTalkReport() {
 
       let allResults: DingTalkReportItem[] = data.results || [];
 
-      /* ⭐ 逐条补全 paymentUnit */
+      /* ⭐ 逐条补全 paymentUnit + 归一化门店 */
       allResults = allResults.map((r) => {
-        if (r.paymentUnit && String(r.paymentUnit).trim()) return r;
-        if (r.templateName === '会员退费') {
-          const inferred = inferRefundPaymentUnit(r);
-          if (inferred) return { ...r, paymentUnit: inferred };
+        let next: DingTalkReportItem = r;
+
+        if (!next.paymentUnit || !String(next.paymentUnit).trim()) {
+          if (next.templateName === '会员退费') {
+            const inferred = inferRefundPaymentUnit(next);
+            if (inferred) next = { ...next, paymentUnit: inferred };
+          }
+          if (!next.paymentUnit) {
+            const storeName = matchStoreByItem(next);
+            if (storeName) next = { ...next, paymentUnit: storeName };
+          }
         }
-        const storeName = matchStoreByItem(r);
-        if (storeName) return { ...r, paymentUnit: storeName };
-        return r;
+
+        const autoRaw = (next as any)._storeName as string | null | undefined;
+        const manualRaw =
+          (next as any)._manualStore === true
+            ? ((next as any)._storeName as string | null | undefined)
+            : undefined;
+
+        if (manualRaw) {
+          next = {
+            ...next,
+            _storeName: normalizeStoreName(manualRaw) || manualRaw,
+          };
+        } else if (autoRaw) {
+          next = {
+            ...next,
+            _storeName: normalizeStoreName(autoRaw) || autoRaw,
+          };
+        }
+
+        return next;
       });
 
       /* ⭐ 拉取手动归属覆盖 */
@@ -157,8 +296,9 @@ export function useDingTalkReport() {
           const manualMap = await fetchManualStoreMap(ids);
           allResults = allResults.map((r) => {
             const pid = r.processInstanceId || '';
-            const manual = pid ? manualMap[pid] : undefined;
-            if (manual) {
+            const manualRaw = pid ? manualMap[pid] : undefined;
+            if (manualRaw) {
+              const manual = normalizeStoreName(manualRaw) || manualRaw;
               return {
                 ...r,
                 _manualStore: true,
@@ -190,22 +330,33 @@ export function useDingTalkReport() {
     }
   }, []);
 
-  /* ⭐ 手动归属：保存到后端 + 更新本地 state */
   const updateManualStore = useCallback(
     async (processInstanceId: string, storeName: string | null) => {
-      await saveManualStore(processInstanceId, storeName);
+      await saveManualStore(
+        processInstanceId,
+        storeName ? normalizeStoreName(storeName) || storeName : null
+      );
       setRawResults((prev) =>
-        prev.map((r) =>
-          r.processInstanceId === processInstanceId
-            ? {
-                ...r,
-                _manualStore: !!storeName,
-                _storeName: storeName || null,
-                _assignReason: storeName ? '手动归属' : '',
-                paymentUnit: r.paymentUnit,
-              }
-            : r
-        )
+        prev.map((r) => {
+          if (r.processInstanceId !== processInstanceId) return r;
+          if (storeName) {
+            const clean = normalizeStoreName(storeName) || storeName;
+            return {
+              ...r,
+              _manualStore: true,
+              _storeName: clean,
+              _assignReason: '手动归属',
+              paymentUnit: r.paymentUnit,
+            };
+          }
+          return {
+            ...r,
+            _manualStore: false,
+            _storeName: null,
+            _assignReason: '',
+            paymentUnit: r.paymentUnit,
+          };
+        })
       );
     },
     []
@@ -237,10 +388,11 @@ export function useDingTalkReport() {
       ),
       units: Array.from(unitMap.entries()).map(([unitName, list]) => ({
         unitName,
-        storeName: matchStoreByItem(list[0]) || '',
+        storeName: resolveStoreName(list[0]),
         count: list.length,
         total: list.reduce(
-          (s, r) => s + (extractAmount(r.templateName || '', r.formValues || {}) || 0),
+          (s, r) =>
+            s + (extractAmount(r.templateName || '', r.formValues || {}) || 0),
           0
         ),
         items: list,
@@ -260,8 +412,7 @@ export function useDingTalkReport() {
     >();
 
     results.forEach((r) => {
-      const manual = (r as any)._storeName as string | null | undefined;
-      const storeName = manual || matchStoreByItem(r) || '未归属门店';
+      const storeName = resolveStoreName(r);
       const typeName = r.templateName || '未知类型';
       const amount =
         extractAmount(r.templateName || '', r.formValues || {}) || 0;
@@ -286,7 +437,7 @@ export function useDingTalkReport() {
       t.total += amount;
     });
 
-    const order = ['富贵园', '哈德门', '未归属门店'];
+    const order = ['富贵园', '哈德门'];
     const list: StoreSummary[] = [];
     order.forEach((sName) => {
       const s = storeMap.get(sName);
