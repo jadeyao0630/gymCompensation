@@ -1,39 +1,54 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Store, Loader2, Check, X } from 'lucide-react';
 import { setManualStore, removeManualStore } from '../../../api/dingtalk';
+import { normalizeStoreName } from '../utils/constants';
 
 interface Props {
-  /** ⭐ 必填，避免 string | undefined */
+  /** ⭐ 必填 string，调用方用 || '' 兜底 */
   processInstanceId: string;
-  storeName: string;
-  assignReason?: string;
+  /** ⭐ 统一用 string | null */
+  storeName: string | null;
+  /** 是否来自手动归属 */
   isManual?: boolean;
+  /** 分配原因（用于 title） */
+  assignReason?: string;
+  /** 可选门店列表 */
   storeOptions: string[];
-  onChanged?: (next: string, isManual: boolean) => void;
+  /** 变更回调 */
+  onChanged?: (next: string | null, isManual: boolean) => void;
 }
 
 const StoreAssignCell: React.FC<Props> = ({
   processInstanceId,
   storeName,
-  assignReason,
   isManual,
+  assignReason,
   storeOptions,
   onChanged,
 }) => {
   const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState<string>(storeName || '');
+  const [value, setValue] = useState<string>(storeName ?? '');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string>('');
 
+  /* ⭐ 外部 storeName 变化时同步（查询刷新后） */
+  useEffect(() => {
+    setValue(storeName ?? '');
+  }, [storeName]);
+
   const handleSave = async () => {
     const next = value.trim();
-    if (!next) return;
+    if (!next) {
+      setErr('请选择门店');
+      return;
+    }
     setSaving(true);
     setErr('');
     try {
-      await setManualStore(processInstanceId, next);
+      const clean = normalizeStoreName(next) || next;
+      await setManualStore(processInstanceId, clean);
       setEditing(false);
-      onChanged?.(next, true);
+      onChanged?.(clean, true);
     } catch (e: any) {
       setErr(e?.message || '保存失败');
     } finally {
@@ -47,7 +62,8 @@ const StoreAssignCell: React.FC<Props> = ({
     try {
       await removeManualStore(processInstanceId);
       setEditing(false);
-      onChanged?.(storeName || '', false);
+      /* ⭐ 用 null，不用 undefined */
+      onChanged?.(null, false);
     } catch (e: any) {
       setErr(e?.message || '重置失败');
     } finally {
@@ -56,6 +72,7 @@ const StoreAssignCell: React.FC<Props> = ({
   };
 
   if (!editing) {
+    const display = storeName ?? '未指定';
     return (
       <div className="flex items-center gap-1.5 text-xs">
         <span
@@ -64,10 +81,10 @@ const StoreAssignCell: React.FC<Props> = ({
               ? 'bg-amber-50 text-amber-700 border-amber-200'
               : 'bg-emerald-50 text-emerald-700 border-emerald-100'
           }`}
-          title={assignReason || ''}
+          title={assignReason ?? ''}
         >
           <Store className="w-3 h-3" />
-          {storeName || '未指定'}
+          {display}
         </span>
         {isManual && (
           <span className="text-[10px] text-amber-600 font-medium">手动</span>

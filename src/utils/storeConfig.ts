@@ -1,16 +1,20 @@
 /* ============================================================
  * ⭐ 门店配置（前端）：从后端 API 读取 + 内存缓存
- *    - fetchStores()：从后端拉取，更新内存缓存（异步）
- *    - saveStores()：保存到后端（异步）
- *    - getStores()：读内存缓存（同步，用于匹配函数）
- *    - matchStoreBy*：同步匹配，基于内存缓存
+ *   - 门店名统一归一化：去掉结尾的「店」
  * ============================================================ */
 import type { StoreInfo } from '../constants/stores';
+
+/* ⭐ 门店名归一化：富贵园店 → 富贵园 */
+export function normalizeStoreName(name: string | null | undefined): string {
+  const raw = name == null ? '' : String(name).trim();
+  if (!raw) return '';
+  return raw.replace(/店$/, '').trim();
+}
 
 /* ---------- 内存缓存 ---------- */
 let CACHE: StoreInfo[] | null = null;
 
-/* ---------- 默认数据（首次加载前的兜底） ---------- */
+/* ---------- 默认数据 ---------- */
 const FALLBACK_STORES: StoreInfo[] = [
   {
     id: '12279',
@@ -35,19 +39,28 @@ const FALLBACK_STORES: StoreInfo[] = [
   },
 ];
 
+function cloneFallback(): StoreInfo[] {
+  return FALLBACK_STORES.map((s) => ({ ...s }));
+}
+
 /* ---------- ⭐ 从后端拉取 ---------- */
 export async function fetchStores(): Promise<StoreInfo[]> {
   try {
     const res = await fetch('/api/dingtalk/store-config');
     const json = await res.json();
     if (json.errorcode === 0 && Array.isArray(json.data?.stores)) {
-      CACHE = json.data.stores as StoreInfo[];
-      return CACHE;
+      const list: StoreInfo[] = json.data.stores.map((s: StoreInfo) => ({
+        ...s,
+        name: normalizeStoreName(s.name) || s.name,
+        shortName: normalizeStoreName(s.shortName || s.name) || s.shortName,
+      }));
+      CACHE = list;
+      return list;
     }
   } catch (e) {
     console.warn('[storeConfig] fetchStores 失败', e);
   }
-  if (!CACHE) CACHE = FALLBACK_STORES.map((s) => ({ ...s }));
+  if (!CACHE) CACHE = cloneFallback();
   return CACHE;
 }
 
@@ -56,17 +69,30 @@ export async function saveStores(list: StoreInfo[]): Promise<StoreInfo[]> {
   const res = await fetch('/api/dingtalk/store-config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ stores: list }),
+    body: JSON.stringify({
+      stores: list.map((s) => ({
+        ...s,
+        name: normalizeStoreName(s.name) || s.name,
+        shortName: normalizeStoreName(s.shortName || s.name) || s.shortName,
+      })),
+    }),
   });
   const json = await res.json();
   if (json.errorcode !== 0) throw new Error(json.errormsg || '保存失败');
-  CACHE = (json.data?.stores || list) as StoreInfo[];
-  return CACHE;
+
+  const raw = Array.isArray(json.data?.stores) ? json.data.stores : list;
+  const next: StoreInfo[] = raw.map((s: StoreInfo) => ({
+    ...s,
+    name: normalizeStoreName(s.name) || s.name,
+    shortName: normalizeStoreName(s.shortName || s.name) || s.shortName,
+  }));
+  CACHE = next;
+  return next;
 }
 
 /* ---------- 读内存缓存（同步） ---------- */
 export function getStores(): StoreInfo[] {
-  if (!CACHE) return FALLBACK_STORES.map((s) => ({ ...s }));
+  if (!CACHE) return cloneFallback();
   return CACHE;
 }
 
@@ -78,19 +104,16 @@ export function matchStoreByPaymentUnit(
   if (!raw) return '';
   const stores = getStores();
 
-  /* 1) 精确匹配 */
   for (const s of stores) {
     for (const u of s.paymentUnits) {
       if (raw === u) return s.name;
     }
   }
-  /* 2) 双向包含 */
   for (const s of stores) {
     for (const u of s.paymentUnits) {
       if (raw.includes(u) || u.includes(raw)) return s.name;
     }
   }
-  /* 3) 门店名出现在付款单位里 */
   for (const s of stores) {
     if (raw.includes(s.name) || raw.includes(s.shortName)) return s.name;
   }

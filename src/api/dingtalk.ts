@@ -1,8 +1,5 @@
 /* ============================================================
  * DingTalk API 客户端
- *   - 报告查询 / 模板管理 / 同步
- *   - ⭐ 手动归属门店（读写 MySQL）
- *   - ⭐ 月综合报告
  * ============================================================ */
 
 /* ============================================================
@@ -28,6 +25,9 @@ export interface DingTalkApprover {
   userName: string;
 }
 
+/** ⭐ 兼容别名 */
+export type DingTalkPendingApprover = DingTalkApprover;
+
 export interface DingTalkReportItem {
   templateName?: string;
   processCode?: string;
@@ -47,13 +47,10 @@ export interface DingTalkReportItem {
   pendingApprovers?: DingTalkApprover[];
   error?: string;
 
-  /* ⭐ 归属信息（后端返回） */
   _autoAssigned?: boolean;
   _storeName?: string | null;
   _assignReason?: string;
   _manualStore?: boolean;
-
-  /* 兼容缓存标记 */
   _fromCache?: boolean;
 }
 
@@ -71,6 +68,7 @@ export interface DingTalkReportMeta {
   totalCount?: number;
   autoAssignedCount?: number;
   manualAssignedCount?: number;
+  fallbackToDefaultCount?: number;
   costMs?: number;
   syncResult?: DingTalkSyncResult;
 }
@@ -96,7 +94,6 @@ export interface DingTalkReportParams {
   sync?: 0 | 1;
 }
 
-/* ⭐ 月综合报告（直接返回 data，不含 errorcode） */
 export interface DingTalkMonthlySummaryData {
   month: string;
   store?: string | null;
@@ -115,8 +112,7 @@ export interface DingTalkMonthlySummaryData {
 
 async function getJSON<T = any>(url: string): Promise<T> {
   const res = await fetch(url);
-  const json = (await res.json()) as T;
-  return json;
+  return (await res.json()) as T;
 }
 
 async function postJSON<T = any>(url: string, body: any): Promise<T> {
@@ -125,17 +121,14 @@ async function postJSON<T = any>(url: string, body: any): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  const json = (await res.json()) as T;
-  return json;
+  return (await res.json()) as T;
 }
 
 async function deleteJSON<T = any>(url: string): Promise<T> {
   const res = await fetch(url, { method: 'DELETE' });
-  const json = (await res.json()) as T;
-  return json;
+  return (await res.json()) as T;
 }
 
-/* ⭐ 显式分流，避免 string | boolean 收窄失败 */
 function buildQuery(params: Record<string, any>): string {
   const sp = new URLSearchParams();
   Object.keys(params).forEach((k) => {
@@ -184,19 +177,10 @@ export async function fetchDingTalkReport(
   const json = await getJSON<DingTalkReportResponse>(
     `/api/dingtalk/report${query}`
   );
-  if (json.errorcode !== 0) {
-    throw new Error(json.errormsg || '查询失败');
-  }
-  return (
-    json.data || {
-      results: [],
-      totalTemplates: 0,
-      costMs: 0,
-    }
-  );
+  if (json.errorcode !== 0) throw new Error(json.errormsg || '查询失败');
+  return json.data || { results: [], totalTemplates: 0, costMs: 0 };
 }
 
-/** ⭐ 兼容别名 */
 export const fetchReport = fetchDingTalkReport;
 
 /* ============================================================
@@ -218,7 +202,6 @@ export async function refreshDingTalkTemplates(): Promise<{
   return postJSON(`/api/dingtalk/templates/refresh`, {});
 }
 
-/** ⭐ 兼容别名 */
 export const fetchTemplates = fetchDingTalkTemplates;
 export const refreshTemplates = refreshDingTalkTemplates;
 
@@ -249,16 +232,13 @@ export async function fetchProcessInstanceIds(params: {
 }
 
 /* ============================================================
- * 4) ⭐ 月综合报告（直接返回 DingTalkMonthlySummaryData）
+ * 4) 月综合报告
  * ============================================================ */
 export async function fetchMonthlySummary(params: {
   month: string;
   store?: string;
 }): Promise<DingTalkMonthlySummaryData> {
-  const query = buildQuery({
-    month: params.month,
-    store: params.store,
-  });
+  const query = buildQuery({ month: params.month, store: params.store });
   const json = await getJSON<{
     errorcode: number;
     errormsg: string;
@@ -284,11 +264,10 @@ export async function fetchMonthlySummary(params: {
   );
 }
 
-/** ⭐ 兼容别名：你代码里 import 的 fetchDingTalkMonthlySummary */
 export const fetchDingTalkMonthlySummary = fetchMonthlySummary;
 
 /* ============================================================
- * 5) 门店配置（读 / 写）
+ * 5) 门店配置
  * ============================================================ */
 export async function fetchStoreConfig(): Promise<{
   errorcode: number;
@@ -307,7 +286,7 @@ export async function saveStoreConfig(stores: any[]): Promise<{
 }
 
 /* ============================================================
- * 6) ⭐ 手动归属门店
+ * 6) 手动归属门店
  * ============================================================ */
 
 export async function setManualStore(
@@ -324,20 +303,15 @@ export async function setManualStore(
     storeName,
     updatedBy,
   });
-  if (json.errorcode !== 0) {
-    throw new Error(json.errormsg || '保存手动归属失败');
-  }
+  if (json.errorcode !== 0) throw new Error(json.errormsg || '保存手动归属失败');
 }
 
-/** ⭐ 兼容别名：storeName 传 null 时 = 删除（恢复自动归属） */
 export async function saveManualStore(
   processInstanceId: string,
   storeName: string | null,
   updatedBy?: string
 ): Promise<void> {
-  if (!storeName) {
-    return removeManualStore(processInstanceId);
-  }
+  if (!storeName) return removeManualStore(processInstanceId);
   return setManualStore(processInstanceId, storeName, updatedBy);
 }
 
@@ -348,9 +322,7 @@ export async function removeManualStore(
   const json = await deleteJSON<{ errorcode: number; errormsg: string }>(
     `/api/dingtalk/manual-store${query}`
   );
-  if (json.errorcode !== 0) {
-    throw new Error(json.errormsg || '重置手动归属失败');
-  }
+  if (json.errorcode !== 0) throw new Error(json.errormsg || '重置手动归属失败');
 }
 
 export async function getManualStore(
@@ -362,16 +334,10 @@ export async function getManualStore(
     errormsg: string;
     data?: { storeName: string | null };
   }>(`/api/dingtalk/manual-store${query}`);
-  if (json.errorcode !== 0) {
-    throw new Error(json.errormsg || '获取手动归属失败');
-  }
+  if (json.errorcode !== 0) throw new Error(json.errormsg || '获取手动归属失败');
   return json.data?.storeName ?? null;
 }
 
-/**
- * ⭐ 批量查询手动归属
- *   返回 { [processInstanceId]: storeName }
- */
 export async function fetchManualStoreMap(
   processInstanceIds: string[]
 ): Promise<Record<string, string>> {
@@ -388,7 +354,6 @@ export async function fetchManualStoreMap(
   const data = json.data;
   if (!data || typeof data !== 'object') return {};
 
-  /* 单条返回格式 { storeName } */
   if ('storeName' in data) {
     const only = (data as { storeName: string | null }).storeName;
     if (!only) return {};
@@ -401,5 +366,4 @@ export async function fetchManualStoreMap(
   return data as Record<string, string>;
 }
 
-/** ⭐ 兼容别名 */
 export const getManualStoreMap = fetchManualStoreMap;

@@ -1,11 +1,15 @@
 /* ============================================================
  * ⭐ 门店配置相关（运行时从 storeConfig 读取）
+ *   - 门店名统一归一化：去掉结尾的「店」
  * ============================================================ */
 import {
   matchStoreByPaymentUnit,
   matchStoreByText,
   matchStoreByItem,
+  normalizeStoreName,
 } from '../../../utils/storeConfig';
+
+export { normalizeStoreName };
 
 /* ============================================================
  * 付款单位 → 门店（保留常量，供静态展示用）
@@ -19,21 +23,24 @@ export const PAYMENT_UNIT_TO_STORE: Record<string, string> = {
 
 export const PAYMENT_UNITS = Object.keys(PAYMENT_UNIT_TO_STORE);
 
-/** ⭐ 付款单位 → 门店（走运行时配置） */
+/** ⭐ 付款单位 → 门店（走运行时配置 + 归一化） */
 export function getStoreFromPaymentUnit(
   paymentUnit: string | null | undefined
 ): string {
-  return matchStoreByPaymentUnit(paymentUnit);
+  const name = matchStoreByPaymentUnit(paymentUnit);
+  return name ? normalizeStoreName(name) || name : '';
 }
 
-/** ⭐ 文本 → 门店（走运行时配置） */
+/** ⭐ 文本 → 门店（走运行时配置 + 归一化） */
 export function inferStoreFromText(text: string | null | undefined): string {
-  return matchStoreByText(text);
+  const name = matchStoreByText(text);
+  return name ? normalizeStoreName(name) || name : '';
 }
 
-/** ⭐ 综合推断一条钉钉记录的门店 */
+/** ⭐ 综合推断一条钉钉记录的门店（+ 归一化） */
 export function getStoreFromItem(item: any): string {
-  return matchStoreByItem(item);
+  const name = matchStoreByItem(item);
+  return name ? normalizeStoreName(name) || name : '';
 }
 
 /* ============================================================
@@ -136,7 +143,7 @@ export function getTemplateCategory(templateName: string): TemplateCategory {
 }
 
 /* ============================================================
- * ⭐ 列定义（已补齐 GroupedResults 用到的所有 key）
+ * ⭐ 列定义
  * ============================================================ */
 export type ColumnKey =
   | 'title'
@@ -183,7 +190,6 @@ export const FU_GUI_YUAN_UNIT = '北京林朗韵动体育管理有限公司';
 export const HA_DE_MEN_UNIT = '北京林朗悦动体育管理有限公司';
 export const REFUND_KEYWORDS = ['富贵园', '装修'];
 
-/** 只采集「事项 / 明细」类的文本，用于判断门店 */
 function collectRefundItemText(item: DingTalkReportItem): string {
   const parts: string[] = [];
 
@@ -249,9 +255,6 @@ function collectRefundItemText(item: DingTalkReportItem): string {
   return parts.join(' ');
 }
 
-/**
- * 会员退费 → 推断付款单位
- */
 export function inferRefundPaymentUnit(
   item: DingTalkReportItem
 ): string | null {

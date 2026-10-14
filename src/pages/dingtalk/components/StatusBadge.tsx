@@ -7,7 +7,7 @@ import {
 } from '../utils/operationLabel';
 import type {
   DingTalkOperationRecord,
-  DingTalkPendingApprover,
+  DingTalkApprover,
 } from '../../../api/dingtalk';
 
 interface Props {
@@ -15,7 +15,7 @@ interface Props {
   result: string | undefined | null;
   operationRecords?: DingTalkOperationRecord[];
   originatorName?: string;
-  pendingApprovers?: DingTalkPendingApprover[];
+  pendingApprovers?: DingTalkApprover[];
 }
 
 export const StatusBadge: React.FC<Props> = ({
