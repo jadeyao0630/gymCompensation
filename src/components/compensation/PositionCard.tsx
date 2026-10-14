@@ -70,6 +70,9 @@ const PositionCard: React.FC<PositionCardProps> = ({
   const isSwimCoach =
     position.title.includes('泳教') && !position.title.includes('经理');
 
+  const isPersonalTrainer =
+    position.title.includes('私教') && !position.title.includes('经理');
+
   const isSwimOrPersonal =
     position.title.includes('泳教') || position.title.includes('私教');
 
@@ -254,6 +257,7 @@ const PositionCard: React.FC<PositionCardProps> = ({
         showClassCommission={showClassCommission}
         defaultClassMode={defaultClassMode}
         isSwimCoach={isSwimCoach}
+        isPersonalTrainer={isPersonalTrainer}
         onAddCommission={addCommissionTier}
         onUpdateCommission={updateCommissionTier}
         onRemoveCommission={removeCommissionTier}

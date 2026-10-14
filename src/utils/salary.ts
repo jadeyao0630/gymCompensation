@@ -58,9 +58,12 @@ export function calcTotalBaseSalary(
   allPositions: PositionConfig[],
   overridePerformance?: number
 ): number {
-  const isSwimCoach =
-    position.title.includes('泳教') && !position.title.includes('经理');
-  if (isSwimCoach)
+  // 泳教 + 私教（均排除经理）走男女底薪阶梯
+  const isGenderTierPosition =
+    (position.title.includes('泳教') || position.title.includes('私教')) &&
+    !position.title.includes('经理');
+
+  if (isGenderTierPosition)
     return calcGenderBaseSalary(position, allPositions, overridePerformance);
   return calcBaseSalary(position, allPositions, overridePerformance);
 }

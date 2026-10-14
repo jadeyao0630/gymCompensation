@@ -15,6 +15,7 @@ interface Props {
   showClassCommission: boolean;
   defaultClassMode: ClassCommissionMode;
   isSwimCoach: boolean;
+  isPersonalTrainer: boolean;
   onAddCommission: () => void;
   onUpdateCommission: (id: string, u: Partial<CommissionTier>) => void;
   onRemoveCommission: (id: string) => void;
@@ -30,6 +31,7 @@ export const PositionTiersSection: React.FC<Props> = ({
   showClassCommission,
   defaultClassMode,
   isSwimCoach,
+  isPersonalTrainer,
   onAddCommission,
   onUpdateCommission,
   onRemoveCommission,
@@ -51,7 +53,7 @@ export const PositionTiersSection: React.FC<Props> = ({
         defaultClassMode={defaultClassMode}
       />
 
-      {isSwimCoach ? (
+      {isSwimCoach || isPersonalTrainer ? (
         <GenderTierEditor
           tiers={position.genderSalaryTiers || []}
           readOnly={readOnly}

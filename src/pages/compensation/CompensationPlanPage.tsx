@@ -436,6 +436,10 @@ const CompensationPlanPage: React.FC = () => {
     if (!canEditPlan) return alert('无权限：设置方案');
     if (!canAddPosition) return alert('无权限：新增职位');
     if (!currentPlan) return;
+
+    const useGenderTiers =
+      activeTab === 'personalTraining' || activeTab === 'swim';
+
     updatePlan(
       {
         positions: [
@@ -450,6 +454,7 @@ const CompensationPlanPage: React.FC = () => {
             totalBaseSalary: 0,
             commissionTiers: [],
             baseSalaryTiers: [],
+            genderSalaryTiers: useGenderTiers ? [] : undefined,
           },
         ],
       },
