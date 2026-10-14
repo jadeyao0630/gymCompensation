@@ -37,6 +37,12 @@ import { PayrollEmptyState } from './components/PayrollEmptyState';
 import { PayrollNoPlanState } from './components/PayrollNoPlanState';
 import { SavingTempOverlay } from './components/SavingTempOverlay';
 
+import {
+  submitSettlement,
+  fetchSettlement,
+  checkSettlement,
+} from '../../api/payrollSettlement';
+
 type ViewMode = 'all' | 'department';
 
 const PayrollPage: React.FC = () => {
@@ -46,6 +52,7 @@ const PayrollPage: React.FC = () => {
   const { data: appData, update: updateAppData } = useAppData();
 
   const opsViewEnabled = hasPermission('ops:view', storeId);
+  const canSettle = hasPermission('payroll:settle', storeId);
 
   const {
     fullStore,
@@ -58,7 +65,6 @@ const PayrollPage: React.FC = () => {
     persistPlanToServer,
   } = usePayrollStorage();
 
-  /* ⭐ 页面级月份持久化 */
   const { month: selectedMonth, setMonth: setSelectedMonth } = usePersistedMonth(
     'payroll',
     storeId
@@ -69,7 +75,11 @@ const PayrollPage: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('department');
   const [hideExcluded, setHideExcluded] = useState<boolean>(true);
 
-  /* ⭐ 从全局 store 取结果 */
+  /* ⭐ 结算相关 state */
+  const [hasSettlement, setHasSettlement] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [planOutdated, setPlanOutdated] = useState(false);
+
   const resultsByStore = appData.payrollResultsByStore;
   const performancesByStore = appData.performancesByStore;
 
@@ -90,6 +100,12 @@ const PayrollPage: React.FC = () => {
     [updateAppData]
   );
 
+  /* ⭐ 用 ref 保存 setter，避免 useEffect 依赖不稳定导致死循环 */
+  const setResultsByStoreRef = useRef(setResultsByStore);
+  useEffect(() => {
+    setResultsByStoreRef.current = setResultsByStore;
+  }, [setResultsByStore]);
+
   const [expanded, setExpanded] = useState<Record<Department, boolean>>({
     会籍: true, 私教: true, 泳教: true, 运营: true,
   });
@@ -99,7 +115,6 @@ const PayrollPage: React.FC = () => {
 
   const initializedRef = useRef(false);
 
-  /* ⭐ 当前门店的 store（month → plan），传给 usePayrollMonths */
   const store: CompensationStore = fullStore[storeId] || {};
   const allResults: PayrollResult[] = resultsByStore[storeId] || [];
   const excludedSet: Set<string> = excludedByStore[storeId] || new Set();
@@ -113,7 +128,6 @@ const PayrollPage: React.FC = () => {
     setRewardsCatalog(loadRewardsCatalog());
   }, [storeId]);
 
-  /* ⭐ 可用月份 + 方案加载（传单门店 store） */
   const { availableMonths, monthsLoading, invalidate } = usePayrollMonths({
     storeId,
     selectedMonth,
@@ -121,14 +135,17 @@ const PayrollPage: React.FC = () => {
     savePlanToStorage,
   });
 
-  /* ⭐ 薪酬计算 Hook */
   const {
     updateAttendance,
     handleUpdateMemberCommission,
+    handleUpdateSalesCommission,
+    handleSetSalesDetail,
+    loadDetailsFromServer,
     toggleNewbie: calcToggleNewbie,
     handleSavePosition: calcSavePosition,
   } = usePayrollCalculation({
     storeId,
+    selectedMonth,
     currentPlan,
     newbieSet,
     performancesByStore,
@@ -139,7 +156,6 @@ const PayrollPage: React.FC = () => {
   const password = import.meta.env.VITE_TEST_PASSWORD || '';
   const { run, loading, error } = usePayroll({ username, password, busId: storeId });
 
-  /* ⭐ 员工状态 */
   const { toggleExclude, toggleNewbie } = usePayrollStaffStatus({
     storeId,
     selectedMonth,
@@ -160,6 +176,30 @@ const PayrollPage: React.FC = () => {
     if (months.length > 0) setSelectedMonth(months[months.length - 1]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId]);
+
+  /* ⭐ 切月份/门店时：检测后台是否有结算
+   *    依赖只保留 storeId / selectedMonth，setter 用 ref，避免死循环 */
+  useEffect(() => {
+    if (!storeId || !selectedMonth) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const info = await checkSettlement(storeId, selectedMonth);
+        if (cancelled) return;
+        setHasSettlement(info.hasSettlement);
+        setIsLoaded(false);
+        setPlanOutdated(false);
+        setResultsByStoreRef.current?.((prev) => ({
+          ...prev,
+          [storeId]: [],
+        }));
+      } catch (e) {
+        console.warn('[checkSettlement] 失败', e);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeId, selectedMonth]);
 
   const positionOptions = useMemo(() => {
     const set = new Set<string>();
@@ -221,25 +261,93 @@ const PayrollPage: React.FC = () => {
         setMissing(res.missingPositions);
         setMissingDialogOpen(true);
       }
+
+      /* ⭐ 先写入结果 + 标记未结算，再异步加载草稿明细
+       *    这样即使 loadDetailsFromServer 抛错，也不会卡在「重新计算」态 */
       setResultsByStore((prev) => ({ ...prev, [storeId]: filteredResults }));
       setPerformancesByStore((prev) => ({ ...prev, [storeId]: res.performances }));
+      setIsLoaded(false);
+
+      try {
+        await loadDetailsFromServer();
+      } catch (e) {
+        console.warn('[runAndUpdate] loadDetailsFromServer 失败', e);
+      }
     },
     [
       run, selectedMonth, overrides, opsViewEnabled, newbieSet,
       storeId, setResultsByStore, setPerformancesByStore,
+      loadDetailsFromServer,
     ]
   );
 
+  /* ⭐ 开始/重新计算 */
   const handleRun = async () => {
     if (!currentPlan || !selectedMonth) {
       alert('请先选择月份，并确保该月已有配置');
       return;
     }
+    if (isLoaded) {
+      if (!confirm('重新计算会覆盖当前已加载的结算数据（需要重新提交结算），是否继续？')) return;
+    }
     try { await runAndUpdate(currentPlan); }
     catch (e) { console.error('[handleRun] 失败:', e); }
   };
 
-  /* ⭐ 临时奖罚 */
+  /* ⭐ 获取结算数据 */
+  const handleFetchSettlement = async () => {
+    if (!storeId || !selectedMonth) return;
+    try {
+      const data = await fetchSettlement(storeId, selectedMonth);
+      if (!data) {
+        alert('后台未找到该月结算数据');
+        setHasSettlement(false);
+        return;
+      }
+      setResultsByStore((prev) => ({ ...prev, [storeId]: data.results }));
+      setIsLoaded(true);
+    } catch (e) {
+      console.error('[handleFetchSettlement] 失败', e);
+      alert('获取结算数据失败');
+    }
+  };
+
+  /* ⭐ 重新获取 */
+  const handleRefetchSettlement = async () => {
+    if (!confirm('将丢弃本地修改，重新从后台获取结算数据，是否继续？')) return;
+    await handleFetchSettlement();
+  };
+
+  /* ⭐ 结算提交 */
+  const handleSettle = async () => {
+    if (!currentPlan || !selectedMonth) return;
+    if (!canSettle) {
+      alert('无权限：薪酬结算');
+      return;
+    }
+    if (allResults.length === 0) {
+      alert('请先点击「开始计算」');
+      return;
+    }
+    if (!confirm(`确定提交 ${selectedMonth} 的薪酬结算？提交后可在其他设备查看。`)) return;
+
+    try {
+      await submitSettlement(
+        storeId,
+        selectedMonth,
+        allResults,
+        summary,
+        currentPlan
+      );
+      setHasSettlement(true);
+      setIsLoaded(true);
+      alert('结算成功！');
+    } catch (e: any) {
+      console.error('[handleSettle] 失败', e);
+      alert('结算失败：' + (e?.response?.data?.errormsg || e?.message || ''));
+    }
+  };
+
   const { savingTemp, handleSaveTempRewards } = usePayrollTempRewards({
     storeId,
     selectedMonth,
@@ -251,7 +359,7 @@ const PayrollPage: React.FC = () => {
 
   const handleExportTable = () => {
     if (allResults.length === 0) {
-      alert('暂无可导出的数据，请先点击「开始计算」');
+      alert('暂无可导出的数据');
       return;
     }
     exportPayrollTableToExcel({
@@ -288,7 +396,9 @@ const PayrollPage: React.FC = () => {
 
   const payrollActions = useMemo(() => ({
     updateMemberCommission: handleUpdateMemberCommission,
-  }), [handleUpdateMemberCommission]);
+    updateSalesCommission: handleUpdateSalesCommission,
+    setSalesDetail: handleSetSalesDetail,
+  }), [handleUpdateMemberCommission, handleUpdateSalesCommission, handleSetSalesDetail]);
 
   return (
     <PayrollActionsProvider value={payrollActions}>
@@ -302,7 +412,15 @@ const PayrollPage: React.FC = () => {
             hasPlan={!!currentPlan}
             canExport={allResults.length > 0}
             canExportPayroll={hasPermission('export:payroll', storeId)}
+            hasSettlement={hasSettlement}
+            isLoaded={isLoaded}
+            hasLocalResult={allResults.length > 0 && !isLoaded}
+            canSettle={canSettle}
+            planOutdated={planOutdated}
             onRun={handleRun}
+            onFetch={handleFetchSettlement}
+            onRefetch={handleRefetchSettlement}
+            onSettle={handleSettle}
             onExport={handleExportTable}
           />
 
@@ -385,7 +503,10 @@ const PayrollPage: React.FC = () => {
           )}
 
           {allResults.length === 0 && currentPlan && (
-            <PayrollEmptyState loading={loading} onRun={handleRun} />
+            <PayrollEmptyState
+              loading={loading}
+              onRun={hasSettlement ? handleFetchSettlement : handleRun}
+            />
           )}
 
           {!currentPlan && (

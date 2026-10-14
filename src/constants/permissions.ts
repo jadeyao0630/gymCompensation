@@ -24,6 +24,7 @@ export type PermissionKey =
   | 'simulation:course'
   /* 薪酬佣金计算 */
   | 'payroll:calc'
+  | 'payroll:settle'
   | 'ops:view'
   | 'export:payroll'
   | 'export:personal'
@@ -226,6 +227,13 @@ export const PERMISSION_LIST: PermissionMeta[] = [
     label: '计算工资佣金',
     desc: '进入薪酬计算页并计算工资佣金',
     group: '薪酬佣金计算',
+  },
+  {
+    key: 'payroll:settle',
+    label: '薪酬结算',
+    desc: '提交并保存薪酬计算结果到后台',
+    group: '薪酬佣金计算',
+    requires: ['payroll:calc'],
   },
   {
     key: 'ops:view',

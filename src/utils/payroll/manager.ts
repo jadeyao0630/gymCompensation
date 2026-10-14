@@ -20,6 +20,17 @@ export function applyManagerPerformance(
     运营: 0,
   };
 
+  /* ⭐ 按部门收集"非经理员工"的 id + 姓名 + 职位 */
+  const deptMembers: Record<
+    DepartmentKey,
+    Array<{ id: string; name: string; positionTitle: string }>
+  > = {
+    会籍: [],
+    私教: [],
+    泳教: [],
+    运营: [],
+  };
+
   const posByTitle = new Map<string, PositionConfig>();
   positions?.forEach((p) => posByTitle.set(p.title, p));
 
@@ -40,10 +51,20 @@ export function applyManagerPerformance(
     if (isMgr) {
       if (pos?.managerAggregateByDept) continue;
       deptSales[dept] += perf.salesAmount;
+      deptMembers[dept].push({
+        id: perf.staffId,
+        name: perf.staffName,
+        positionTitle: title,
+      });
       continue;
     }
 
     deptSales[dept] += perf.salesAmount;
+    deptMembers[dept].push({
+      id: perf.staffId,
+      name: perf.staffName,
+      positionTitle: title,
+    });
   }
 
   const grandSales = included.reduce((s, d) => s + deptSales[d], 0);
@@ -53,7 +74,21 @@ export function applyManagerPerformance(
 
     if (title.includes('店长')) {
       const selfSales = includeSelf ? perf.salesAmount : 0;
-      return { ...perf, salesAmount: grandSales + selfSales };
+      const sources: Array<{ id: string; name: string; positionTitle: string }> =
+        [];
+      included.forEach((d) => sources.push(...deptMembers[d]));
+      if (includeSelf) {
+        sources.push({
+          id: perf.staffId,
+          name: perf.staffName,
+          positionTitle: title,
+        });
+      }
+      return {
+        ...perf,
+        salesAmount: grandSales + selfSales,
+        salesSourceStaffIds: sources,
+      };
     }
 
     if (isManagerTitle(title)) {
@@ -62,12 +97,34 @@ export function applyManagerPerformance(
 
       if (pos?.managerAggregateByDept && dept !== '运营') {
         const selfSales = pos.managerIncludeSelf ? perf.salesAmount : 0;
-        return { ...perf, salesAmount: deptSales[dept] + selfSales };
+        const sources = [...deptMembers[dept]];
+        if (pos.managerIncludeSelf) {
+          sources.push({
+            id: perf.staffId,
+            name: perf.staffName,
+            positionTitle: title,
+          });
+        }
+        return {
+          ...perf,
+          salesAmount: deptSales[dept] + selfSales,
+          salesSourceStaffIds: sources,
+        };
       }
 
-      return perf;
+      return {
+        ...perf,
+        salesSourceStaffIds: [
+          { id: perf.staffId, name: perf.staffName, positionTitle: title },
+        ],
+      };
     }
 
-    return perf;
+    return {
+      ...perf,
+      salesSourceStaffIds: [
+        { id: perf.staffId, name: perf.staffName, positionTitle: title },
+      ],
+    };
   });
 }

@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx-js-style';
-import type { PayrollResult } from './payroll';
+import type { PayrollResult, SalesMemberDetail } from './payroll';
 import type { MonthlyCompensationPlan } from '../types/compensation';
 import { getDepartmentOf, needsSaleIdPrefix } from './payroll';
 import { getCardOrderList } from '../api/stats';
@@ -52,6 +52,89 @@ const TRIGGER_LABEL: Record<string, string> = {
 };
 
 const RED_FONT = { font: { color: { rgb: 'C00000' } } };
+
+/**
+ * ⭐ 从后台实时拉取销售明细（当 result.salesDetail 为空时回退）
+ * - 经理聚合：按 salesSourceStaffIds 逐个拉
+ * - 普通员工：只拉自己
+ */
+async function fetchSalesDetailFallback(
+  result: PayrollResult,
+  storeId: string,
+  month: string
+): Promise<SalesMemberDetail[]> {
+  const { begin_date, end_date } = getMonthRange(month);
+  const sourceList =
+    result.salesSourceStaffIds && result.salesSourceStaffIds.length > 0
+      ? result.salesSourceStaffIds
+      : [
+          {
+            id: result.staffId,
+            name: result.staffName,
+            positionTitle: result.positionTitle,
+          },
+        ];
+
+  const isAggregated = sourceList.length > 1;
+
+  const tasks = sourceList.map(async (src) => {
+    const saleId = needsSaleIdPrefix(src.positionTitle)
+      ? `c${src.id}`
+      : src.id;
+    try {
+      const res = await getCardOrderList({
+        bus_id: storeId,
+        sale_id: saleId,
+        begin_date,
+        end_date,
+        page_no: 1,
+        page_size: 1000,
+      });
+      return { sid: src.id, owner: src.name, list: res.list };
+    } catch {
+      return { sid: src.id, owner: src.name, list: [] };
+    }
+  });
+
+  const settled = await Promise.all(tasks);
+  const merged: SalesMemberDetail[] = [];
+
+  settled.forEach(({ sid, owner, list }) => {
+    list.forEach((item) => {
+      const marketers = item.marketers_detail || [];
+      const hit = marketers.find(
+        (m) => (m.name || '').trim() === (owner || '').trim()
+      );
+      const myAmount = hit?.amount ? Number(hit.amount) : 0;
+
+      if (isAggregated) {
+        if (myAmount <= 0 && !hit) return;
+      } else {
+        if (!hit) return;
+      }
+
+      merged.push({
+        orderId: String(item.id),
+        memberName: item.username || '—',
+        cardName: item.card_name || '—',
+        amount: myAmount,
+        cardAmount: Number(item.amount || 0),
+        dealTime: item.deal_time || '',
+        sourceStaffId: sid,
+        sourceStaffName: owner,
+        marketers: marketers.map((m) => ({
+          name: m.name,
+          role: m.role,
+          percent: m.percent,
+          amount: m.amount,
+        })),
+        payDetail: item.pay_detail,
+      });
+    });
+  });
+
+  return merged;
+}
 
 export async function exportEmployeePayrollToExcel(
   result: PayrollResult,
@@ -195,7 +278,7 @@ export async function exportEmployeePayrollToExcel(
     XLSX.utils.book_append_sheet(wb, wsReward, '奖金明细');
   }
 
-  /* ============== Sheet 3：消课明细 ============== */
+  /* ============== Sheet 3：消课明细（课提） ============== */
   const details = result.classMemberDetail || [];
   if (details.length > 0) {
     const rates = result.courseCommissionRates || {};
@@ -309,44 +392,42 @@ export async function exportEmployeePayrollToExcel(
 
   /* ============== Sheet 4：销售明细 ============== */
   try {
-    const { begin_date, end_date } = getMonthRange(month);
-    const saleId = needsSaleIdPrefix(result.positionTitle)
-      ? `c${result.staffId}`
-      : result.staffId;
+    /* ⭐ 优先用 result.salesDetail；为空时回退实时拉取 */
+    let salesList: SalesMemberDetail[] = result.salesDetail || [];
+    if (salesList.length === 0) {
+      salesList = await fetchSalesDetailFallback(result, storeId, month);
+    }
 
-    const { list } = await getCardOrderList({
-      bus_id: storeId,
-      sale_id: saleId,
-      begin_date,
-      end_date,
-      page_no: 1,
-      page_size: 1000,
-    });
+    if (salesList.length > 0) {
+      const isAggregated = salesList.some(
+        (d) => d.sourceStaffId && d.sourceStaffId !== result.staffId
+      );
 
-    if (list.length > 0) {
-      const myName = (result.staffName || '').trim();
+      const rows: any[][] = [];
 
-      const rows: any[][] = [
-        ['会员名', '卡种', '收款方式', '业绩归属', '卡金额', '本人业绩', '日期'],
-      ];
+      /* 表头 */
+      const header = isAggregated
+        ? ['来源员工', '会员名', '卡种', '收款方式', '业绩归属', '卡金额', '本人业绩', '提点方式', '销提金额', '是否自定义', '日期']
+        : ['会员名', '卡种', '收款方式', '业绩归属', '卡金额', '本人业绩', '提点方式', '销提金额', '是否自定义', '日期'];
+      rows.push(header);
 
-      let totalAmount = 0;
       let totalCardAmount = 0;
+      let totalPerformance = 0;
+      let totalCommission = 0;
 
-      const paySummary = new Map<
-        string,
-        { pay_type: string; amount: number }
-      >();
+      const paySummary = new Map<string, { pay_type: string; amount: number }>();
 
-      list.forEach((item) => {
-        const hit = item.marketers_detail?.find(
-          (m) => (m.name || '').trim() === myName
-        );
-        const performanceAmount = hit?.amount ? Number(hit.amount) : 0;
-        totalAmount += performanceAmount;
-        totalCardAmount += Number(item.amount || 0);
+      salesList.forEach((d) => {
+        const custom = d.mode != null && d.value != null;
+        const mode = d.mode ?? 'percent';
+        const value = d.value ?? result.hitCommissionRate ?? 0;
+        const fee = mode === 'percent' ? d.amount * value : value;
 
-        (item.pay_detail || []).forEach((p) => {
+        totalCardAmount += d.cardAmount;
+        totalPerformance += d.amount;
+        totalCommission += fee;
+
+        (d.payDetail || []).forEach((p) => {
           const key = String(p.pay_type_id || p.pay_type);
           const cur = paySummary.get(key);
           const amt = Number(p.amount) || 0;
@@ -354,37 +435,57 @@ export async function exportEmployeePayrollToExcel(
           else paySummary.set(key, { pay_type: p.pay_type, amount: amt });
         });
 
-        rows.push([
-          item.username || '',
-          item.card_name || '',
-          formatPayDetail(item.pay_detail),
-          formatMarketers(item.marketers_detail),
-          Number(item.amount || 0),
-          performanceAmount,
-          item.deal_time || '',
-        ]);
+        const rateStr =
+          mode === 'percent'
+            ? `${(value * 100).toFixed(2)}%`
+            : `${value.toFixed(2)} 元`;
+
+        const baseRow = [
+          d.memberName || '',
+          d.cardName || '',
+          formatPayDetail(d.payDetail),
+          formatMarketers(d.marketers),
+          Number(d.cardAmount.toFixed(2)),
+          Number(d.amount.toFixed(2)),
+          rateStr,
+          Number(fee.toFixed(2)),
+          custom ? '是' : '否',
+          d.dealTime || '',
+        ];
+
+        if (isAggregated) {
+          rows.push([d.sourceStaffName || d.sourceStaffId || '', ...baseRow]);
+        } else {
+          rows.push(baseRow);
+        }
       });
 
-      rows.push([
-        '合计', '', '', '',
-        Number(totalCardAmount.toFixed(2)),
-        Number(totalAmount.toFixed(2)),
-        '',
-      ]);
+      /* 合计行 */
+      const totalRow = isAggregated
+        ? ['合计', '', '', '', '', Number(totalCardAmount.toFixed(2)), Number(totalPerformance.toFixed(2)), '', Number(totalCommission.toFixed(2)), '', '']
+        : ['合计', '', '', '', Number(totalCardAmount.toFixed(2)), Number(totalPerformance.toFixed(2)), '', Number(totalCommission.toFixed(2)), '', ''];
+      rows.push(totalRow);
 
+      /* 收款方式汇总 */
       rows.push([]);
-      rows.push(['收款方式汇总', '', '', '', '', '', '']);
+      rows.push(['收款方式汇总']);
       paySummary.forEach((v) => {
-        rows.push([v.pay_type, '', '', '', '', Number(v.amount.toFixed(2)), '']);
+        rows.push([v.pay_type, Number(v.amount.toFixed(2))]);
       });
 
       const wsSales = XLSX.utils.aoa_to_sheet(rows);
-      wsSales['!cols'] = [
-        { wch: 14 }, { wch: 20 }, { wch: 28 }, { wch: 40 },
-        { wch: 12 }, { wch: 12 }, { wch: 18 },
-      ];
+      wsSales['!cols'] = isAggregated
+        ? [
+            { wch: 12 }, { wch: 14 }, { wch: 20 }, { wch: 28 }, { wch: 40 },
+            { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 18 },
+          ]
+        : [
+            { wch: 14 }, { wch: 20 }, { wch: 28 }, { wch: 40 },
+            { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 18 },
+          ];
 
-      const wrapCols = ['C', 'D'];
+      /* ⭐ 自动换行 */
+      const wrapCols = isAggregated ? ['C', 'D', 'E'] : ['B', 'C', 'D'];
       const range = XLSX.utils.decode_range(wsSales['!ref'] || 'A1');
       for (let R = range.s.r; R <= range.e.r; R++) {
         wrapCols.forEach((col) => {
@@ -448,7 +549,6 @@ export async function exportEmployeePayrollToExcel(
       cfgRows.push(['老课费用', `${pos.oldClassFee} 元/节`]);
     }
 
-    /* 职位奖金 */
     if (pos.rewards && pos.rewards.length > 0) {
       cfgRows.push(['职位奖金 / 扣款', '']);
       pos.rewards.forEach((ref) => {
@@ -456,7 +556,6 @@ export async function exportEmployeePayrollToExcel(
       });
     }
 
-    /* 部门奖金 */
     if (plan.departmentRewards) {
       const deptKey = dept as '会籍' | '私教' | '泳教' | '运营';
       const list = plan.departmentRewards[deptKey];
@@ -468,7 +567,6 @@ export async function exportEmployeePayrollToExcel(
       }
     }
 
-    /* ⭐ 临时奖金（替代原 staffRewards） */
     const tempRewards =
       plan.tempRewards?.[String(result.staffId)] || [];
     if (tempRewards.length > 0) {

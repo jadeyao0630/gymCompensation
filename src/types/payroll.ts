@@ -30,6 +30,40 @@ export interface ClassMemberDetail {
 }
 
 /* ============================================================
+ * ⭐ 销售明细（每笔订单）
+ * 对齐 ClassMemberDetail，支持每笔独立提点
+ * ============================================================ */
+export interface SalesMemberDetail {
+  /** 订单 id */
+  orderId: string;
+  /** 会员名 */
+  memberName: string;
+  /** 卡种 */
+  cardName: string;
+  /** 这笔订单中"本人归属"的业绩金额 */
+  amount: number;
+  /** 卡金额（订单总额） */
+  cardAmount: number;
+  /** 日期 */
+  dealTime: string;
+  /** ⭐ 经理汇总时：该笔来自哪个员工 */
+  sourceStaffId?: string;
+  sourceStaffName?: string;
+  /** ⭐ 每笔独立提点（对齐 ClassMemberDetail） */
+  mode?: 'percent' | 'fixed';
+  value?: number;
+  /** 收款方式明细 */
+  payDetail?: PayDetailItem[];
+  /** 业绩归属明细（用于展示） */
+  marketers?: Array<{
+    name: string;
+    role: string;
+    percent: string;
+    amount: string;
+  }>;
+}
+
+/* ============================================================
  * 提成比例
  * ============================================================ */
 export interface CourseCommissionRate {
@@ -51,6 +85,14 @@ export interface EmployeePerformance {
   classAmount: number;
   classByCourse?: Record<string, { count: number; amount: number }>;
   classMemberDetail?: ClassMemberDetail[];
+  /** ⭐ 销售明细（测算/懒加载后回填） */
+  salesDetail?: SalesMemberDetail[];
+  /** ⭐ 销售明细应拉取的员工 id 列表（经理聚合时用） */
+  salesSourceStaffIds?: Array<{
+    id: string;
+    name: string;
+    positionTitle: string;
+  }>;
   managerSalesBase?: number;
   fullAttendance?: boolean;
   absentDays?: number;
@@ -62,13 +104,11 @@ export interface EmployeePerformance {
  * ============================================================ */
 export interface RewardHit {
   rewardId: string;
-  name: string;                        // ⭐ 显示用
-  amount: number;                      // 生效金额
-  source: 'position' | 'staff' | 'department';      // 职位级 / 个人级
-  trigger: 'auto' | 'manual';          // 自动命中 / 手动勾选
+  name: string;
+  amount: number;
+  source: 'position' | 'staff' | 'department';
+  trigger: 'auto' | 'manual';
   note?: string;
-
-  /** ⭐ 类型：奖励 / 扣款 */
   type?: 'reward' | 'deduction';
 }
 
@@ -100,13 +140,20 @@ export interface PayrollResult {
 
   classMemberDetail?: ClassMemberDetail[];
 
+  /** ⭐ 销售明细（每笔订单，支持独立提点） */
+  salesDetail?: SalesMemberDetail[];
+  /** ⭐ 销售明细应拉取的员工 id 列表（经理聚合时用） */
+  salesSourceStaffIds?: Array<{
+    id: string;
+    name: string;
+    positionTitle: string;
+  }>;
+
   fullAttendance: boolean;
   absentDays: number;
   absentDeduction: number;
 
-  /** ⭐ 奖金明细 */
   rewards?: RewardHit[];
-  /** ⭐ 奖金合计 */
   rewardsTotal?: number;
 
   total: number;
@@ -154,7 +201,6 @@ export interface DepartmentStats {
   baseSalary: number;
   salesCommission: number;
   classCommission: number;
-  /** ⭐ 奖金合计 */
   rewardsTotal: number;
   total: number;
   configuredHeadcount: number;

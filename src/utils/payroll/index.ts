@@ -3,6 +3,7 @@ export type {
   PayDetailItem,
   Gender,
   ClassMemberDetail,
+  SalesMemberDetail,        // ← 新增
   CourseCommissionRate,
   EmployeePerformance,
   PayrollResult,

@@ -12,6 +12,7 @@ import type {
   PayrollResult,
   Gender,
   CourseCommissionRate,
+  SalesMemberDetail,
 } from '../../types/payroll';
 import { sortByThreshold, findHitTier } from './tier';
 import { applyRewards } from './rewards';
@@ -32,6 +33,31 @@ export interface CalcEmployeeOptions {
   rewardsCatalog?: RewardsCatalog;
   departmentRewards?: DepartmentRewards;
   tempRewards?: TempReward[];
+}
+
+/**
+ * ⭐ 按销售明细逐笔计算销提
+ * - 每笔可独立 mode/value
+ * - 未设置时回退到命中档位（默认 percent）
+ * - 返回 { commission, detail } —— detail 记录每笔的最终 mode/value，便于回写
+ */
+function calcSalesCommissionByDetail(
+  details: SalesMemberDetail[],
+  defaultRate: number,
+  defaultMode: 'percent' | 'fixed' = 'percent'
+): {
+  commission: number;
+  resolved: SalesMemberDetail[];
+} {
+  let total = 0;
+  const resolved = details.map((d) => {
+    const mode = d.mode ?? defaultMode;
+    const value = d.value ?? defaultRate;
+    const fee = mode === 'percent' ? d.amount * value : value;
+    total += fee;
+    return { ...d, mode, value };
+  });
+  return { commission: total, resolved };
 }
 
 export function calcEmployeePayroll(
@@ -94,6 +120,10 @@ export function calcEmployeePayroll(
       courseCommissionRates: undefined,
       classCommission: 0,
       classMemberDetail: [],
+      salesDetail: perf.salesDetail ?? [],
+      salesSourceStaffIds: perf.salesSourceStaffIds ?? [
+        { id: perf.staffId, name: perf.staffName, positionTitle: position.title },
+      ],
       fullAttendance,
       absentDays,
       absentDeduction,
@@ -138,9 +168,28 @@ export function calcEmployeePayroll(
   const baseSalary = hitBaseSalary;
 
   const hitCommissionRate = hitCommissionTier?.rate ?? 0;
-  const salesCommission = flags.includeSalesCommission
-    ? perf.salesAmount * hitCommissionRate
-    : 0;
+  const hitCommissionMode = hitCommissionTier?.salesMode ?? 'percent';
+
+  /* ⭐ 销提：优先按明细逐笔算，无明细回退到原算法 */
+  let salesCommission = 0;
+  let resolvedSalesDetail: SalesMemberDetail[] | undefined = undefined;
+
+  if (flags.includeSalesCommission) {
+    if (perf.salesDetail && perf.salesDetail.length > 0) {
+      const { commission, resolved } = calcSalesCommissionByDetail(
+        perf.salesDetail,
+        hitCommissionRate,
+        hitCommissionMode
+      );
+      salesCommission = commission;
+      resolvedSalesDetail = resolved;
+    } else {
+      salesCommission =
+        hitCommissionMode === 'fixed'
+          ? hitCommissionRate
+          : perf.salesAmount * hitCommissionRate;
+    }
+  }
 
   let classCommission = 0;
   const classCommissionDetail: Record<string, number> = {};
@@ -272,6 +321,10 @@ export function calcEmployeePayroll(
     courseCommissionRates,
     classCommission,
     classMemberDetail: perf.classMemberDetail ?? [],
+    salesDetail: resolvedSalesDetail ?? perf.salesDetail ?? [],
+    salesSourceStaffIds: perf.salesSourceStaffIds ?? [
+      { id: perf.staffId, name: perf.staffName, positionTitle: position.title },
+    ],
     fullAttendance,
     absentDays,
     absentDeduction,

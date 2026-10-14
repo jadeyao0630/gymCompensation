@@ -22,6 +22,12 @@ api.interceptors.request.use((config) => {
     config.headers = config.headers || {};
     (config.headers as any).Authorization = `Bearer ${token}`;
   }
+
+  /* ⭐ GET 请求加时间戳，避免浏览器 304 缓存导致响应体为空 */
+  if (config.method?.toLowerCase() === 'get') {
+    config.params = { ...(config.params || {}), _t: Date.now() };
+  }
+
   console.log('[api request]', config.method?.toUpperCase(), config.url, config.data);
   return config;
 });
