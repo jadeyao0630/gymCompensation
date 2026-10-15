@@ -354,7 +354,7 @@ const PayrollPage: React.FC = () => {
     currentPlan,
     allResults,
     persistPlanToServer,
-    runAndUpdate,
+    setResultsByStore,
   });
 
   const handleExportTable = () => {
@@ -505,6 +505,7 @@ const PayrollPage: React.FC = () => {
           {allResults.length === 0 && currentPlan && (
             <PayrollEmptyState
               loading={loading}
+              hasSettlement={hasSettlement}
               onRun={hasSettlement ? handleFetchSettlement : handleRun}
             />
           )}

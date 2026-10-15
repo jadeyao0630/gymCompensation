@@ -146,6 +146,7 @@ export const TempRewardPopover: React.FC<Props> = ({
         rewardId: def.id,
         name: def.name,
         amount: signedAmount,
+        type: isDeduction ? 'deduction' : 'reward',
         note: def.note,
       },
     ]);
@@ -177,6 +178,13 @@ export const TempRewardPopover: React.FC<Props> = ({
       list.filter((r) => {
         if (r.rewardId) return true;
         return !!r.name.trim();
+      }).map((r) => {
+        const type = r.type === 'deduction' || (!r.type && r.amount < 0)
+          ? 'deduction'
+          : 'reward';
+        return { ...r, type, amount: type === 'deduction'
+          ? -Math.abs(r.amount)
+          : Math.abs(r.amount) };
       })
     );
     onClose();
@@ -188,7 +196,7 @@ export const TempRewardPopover: React.FC<Props> = ({
         ? catalog.find((c) => c.id === r.rewardId)
         : undefined;
       const isCatalog = !!r.rewardId;
-      const isDeduction = r.amount < 0;
+      const isDeduction = r.type === 'deduction' || (!r.type && r.amount < 0);
       return { r, catalogDef, isCatalog, isDeduction };
     });
   }, [list, catalog]);
@@ -418,7 +426,7 @@ export const TempRewardPopover: React.FC<Props> = ({
           onClick={handleSave}
           className="inline-flex items-center gap-1 px-3 py-1 text-xs rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium"
         >
-          <Check className="w-3 h-3" /> 保存并重算
+          <Check className="w-3 h-3" /> 保存并更新薪酬
         </button>
       </div>
     </div>

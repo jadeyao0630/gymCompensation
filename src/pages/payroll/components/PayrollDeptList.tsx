@@ -514,7 +514,15 @@ export const PayrollDeptList: React.FC<Props> = ({
                                     <TempRewardPopover
                                       staffId={r.staffId}
                                       staffName={r.staffName}
-                                      current={tempRewardsByStaff?.[String(r.staffId)] || []}
+                                      current={
+                                        (
+                                          plan?.tempRewards as
+                                            | Record<string, TempReward[]>
+                                            | undefined
+                                        )?.[String(r.staffId).trim()] ??
+                                        tempRewardsByStaff?.[String(r.staffId).trim()] ??
+                                        []
+                                      }
                                       catalog={rewardsCatalog || []}
                                       anchorEl={tempRewardAnchor}
                                       onSave={(next) => {
