@@ -41,7 +41,10 @@ import {
   submitSettlement,
   fetchSettlement,
   checkSettlement,
+  deleteSettlement,
 } from '../../api/payrollSettlement';
+
+import { fetchPayrollDraft, savePayrollDraft, deletePayrollDraft } from '../../api/payrollDraft';
 
 type ViewMode = 'all' | 'department';
 
@@ -53,6 +56,8 @@ const PayrollPage: React.FC = () => {
 
   const opsViewEnabled = hasPermission('ops:view', storeId);
   const canSettle = hasPermission('payroll:settle', storeId);
+  const canReverse = hasPermission('payroll:reverse', storeId);
+  const canRestore = hasPermission('payroll:restore', storeId);
 
   const {
     fullStore,
@@ -114,6 +119,39 @@ const PayrollPage: React.FC = () => {
   const [rewardsCatalog, setRewardsCatalog] = useState<RewardsCatalog>([]);
 
   const initializedRef = useRef(false);
+  const recalculatingRef = useRef(false);
+  const [recalculating, setRecalculating] = useState(false);
+  const [draftStatus, setDraftStatus] = useState<'loading' | 'saved' | 'saving' | 'error' | 'idle'>('loading');
+  const draftReadyRef = useRef<string | null>(null);
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftGenerationRef = useRef(0);
+  const draftLatestRef = useRef<{ key: string; results: PayrollResult[]; overrides: Record<string, string> } | null>(null);
+  const draftInFlightRef = useRef<Promise<void> | null>(null);
+  const draftSavedSnapshotRef = useRef<{ key: string; json: string } | null>(null);
+  const draftQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const draftHydratingRef = useRef(false);
+  const draftSavingDisabledRef = useRef(false);
+
+  // 每个保存请求排队执行，防止较早的请求覆盖较新的草稿。
+  const persistDraft = (key: string, results: PayrollResult[], values: Record<string, string>) => {
+    const json = JSON.stringify({ results, overrides: values });
+    if (draftSavedSnapshotRef.current?.key === key && draftSavedSnapshotRef.current.json === json) {
+      return Promise.resolve();
+    }
+    const [draftStoreId, draftMonth] = key.split(':');
+    const task = draftQueueRef.current.catch(() => {}).then(async () => {
+      if (draftSavedSnapshotRef.current?.key === key && draftSavedSnapshotRef.current.json === json) return;
+      await savePayrollDraft(draftStoreId, draftMonth, results, values);
+      draftSavedSnapshotRef.current = { key, json };
+    });
+    draftQueueRef.current = task.catch(() => {});
+    draftInFlightRef.current = task;
+    void task.finally(() => {
+      if (draftInFlightRef.current === task) draftInFlightRef.current = null;
+    }).catch(() => {});
+    return task;
+  };
+  const [draftRevision, setDraftRevision] = useState(0);
 
   const store: CompensationStore = fullStore[storeId] || {};
   const allResults: PayrollResult[] = resultsByStore[storeId] || [];
@@ -177,29 +215,104 @@ const PayrollPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId]);
 
-  /* ⭐ 切月份/门店时：检测后台是否有结算
-   *    依赖只保留 storeId / selectedMonth，setter 用 ref，避免死循环 */
+  /* 切换月份：先判断正式结算，再恢复未结算草稿 */
   useEffect(() => {
     if (!storeId || !selectedMonth) return;
+    const key = `${storeId}:${selectedMonth}`;
     let cancelled = false;
+    draftGenerationRef.current += 1;
+    draftReadyRef.current = null;
+    draftLatestRef.current = null;
+    draftSavedSnapshotRef.current = null;
+    draftHydratingRef.current = true;
+    draftSavingDisabledRef.current = false;
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    setDraftStatus('loading');
+    setResultsByStoreRef.current((prev) => ({ ...prev, [storeId]: [] }));
+    setIsLoaded(false);
+    setHasSettlement(false);
+    setPlanOutdated(false);
     (async () => {
       try {
         const info = await checkSettlement(storeId, selectedMonth);
         if (cancelled) return;
         setHasSettlement(info.hasSettlement);
-        setIsLoaded(false);
-        setPlanOutdated(false);
-        setResultsByStoreRef.current?.((prev) => ({
-          ...prev,
-          [storeId]: [],
-        }));
+        if (!info.hasSettlement && canSettle) {
+          const draft = await fetchPayrollDraft(storeId, selectedMonth);
+          if (cancelled) return;
+          if (draft) {
+            // 后台恢复属于初始化，不是用户修改；先记录快照以免立刻回写。
+            draftSavedSnapshotRef.current = {
+              key,
+              json: JSON.stringify({ results: draft.results, overrides: draft.overrides || {} }),
+            };
+            setResultsByStoreRef.current((prev) => ({ ...prev, [storeId]: draft.results }));
+            {
+              setOverridesByStore((prev) => {
+                const next = { ...prev, [storeId]: draft.overrides };
+                localStorage.setItem('gym_position_overrides_v1', JSON.stringify(next));
+                return next;
+              });
+            }
+          }
+        }
+        draftReadyRef.current = key;
+        draftHydratingRef.current = false;
+        setDraftStatus('idle');
       } catch (e) {
-        console.warn('[checkSettlement] 失败', e);
+        if (!cancelled) {
+          console.error('[payroll.draft.load]', e);
+          draftHydratingRef.current = false;
+          draftSavingDisabledRef.current = true;
+          setDraftStatus('error');
+          // 读取失败时禁止自动保存，以免空结果覆盖远端草稿
+        }
       }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeId, selectedMonth]);
+  }, [storeId, selectedMonth, canSettle]);
+
+  /* 自动保存：只有数据内容真正改变时才写入 MySQL。 */
+  useEffect(() => {
+    const key = `${storeId}:${selectedMonth || ''}`;
+    if (!selectedMonth || !canSettle || isLoaded || hasSettlement ||
+        draftHydratingRef.current || draftSavingDisabledRef.current ||
+        draftReadyRef.current !== key || allResults.length === 0) return;
+
+    const json = JSON.stringify({ results: allResults, overrides });
+    if (draftSavedSnapshotRef.current?.key === key && draftSavedSnapshotRef.current.json === json) return;
+
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    const generation = draftGenerationRef.current;
+    draftLatestRef.current = { key, results: allResults, overrides };
+    setDraftStatus('saving');
+    draftTimerRef.current = setTimeout(() => {
+      draftTimerRef.current = null;
+      const data = draftLatestRef.current;
+      if (!data || data.key !== key || draftGenerationRef.current !== generation) return;
+      void persistDraft(key, data.results, data.overrides).then(() => {
+        if (draftGenerationRef.current === generation) setDraftStatus('saved');
+      }).catch((e) => {
+        console.error('[payroll.draft.save]', e);
+        if (draftGenerationRef.current === generation) setDraftStatus('error');
+      });
+    }, 800);
+    return () => {
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    };
+  }, [storeId, selectedMonth, canSettle, isLoaded, hasSettlement, allResults, overrides, draftRevision]);
+
+  /* 提交结算前，确保最后一次草稿保存完成。 */
+  const flushDraft = async () => {
+    if (!selectedMonth || !canSettle || isLoaded || hasSettlement || !allResults.length) return;
+    if (draftTimerRef.current) {
+      clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = null;
+    }
+    await persistDraft(`${storeId}:${selectedMonth}`, allResults, overrides);
+    setDraftStatus('saved');
+  };
 
   const positionOptions = useMemo(() => {
     const set = new Set<string>();
@@ -281,22 +394,82 @@ const PayrollPage: React.FC = () => {
     ]
   );
 
-  /* ⭐ 开始/重新计算 */
+  /* 开始计算：绝不删除已存在的正式结算 */
   const handleRun = async () => {
+    if (recalculatingRef.current || loading) return;
     if (!currentPlan || !selectedMonth) {
       alert('请先选择月份，并确保该月已有配置');
       return;
     }
-    if (isLoaded) {
-      if (!confirm('重新计算会覆盖当前已加载的结算数据（需要重新提交结算），是否继续？')) return;
+    recalculatingRef.current = true;
+    setRecalculating(true);
+    try {
+      const state = await checkSettlement(storeId, selectedMonth);
+      if (state.hasSettlement) {
+        setHasSettlement(true);
+        alert('本月已有正式结算，请先使用“反结算”功能。');
+        return;
+      }
+      await runAndUpdate(currentPlan);
+      setDraftRevision((v) => v + 1);
+    } catch (e: any) {
+      console.error('[handleRun]', e);
+      alert('计算失败：' + (e?.response?.data?.errormsg || e?.message || '未知错误'));
+    } finally {
+      recalculatingRef.current = false;
+      setRecalculating(false);
     }
-    try { await runAndUpdate(currentPlan); }
-    catch (e) { console.error('[handleRun] 失败:', e); }
   };
 
-  /* ⭐ 获取结算数据 */
+  /* 反结算：仅撤销正式结算，不重新拉取或重新计算 */
+  const handleReverseSettlement = async () => {
+    if (!selectedMonth || !canReverse || recalculatingRef.current || loading) return;
+    if (!window.confirm(
+      `确定反结算 ${selectedMonth} 吗？\\n\\n` +
+      '将删除当前门店、当前月份在 MySQL 中的正式结算记录。' +
+      '薪酬方案及临时奖扣不会删除，且不会自动重新计算。'
+    )) return;
+    recalculatingRef.current = true;
+    setRecalculating(true);
+    try {
+      // 如果当前尚未加载正式结算，先读取快照，以便撤销后保留可编辑结果。
+      let preserved = allResults;
+      if (!isLoaded || preserved.length === 0) {
+        const existing = await fetchSettlement(storeId, selectedMonth);
+        if (existing?.results?.length) preserved = existing.results;
+      }
+      await deleteSettlement(storeId, selectedMonth);
+      setResultsByStore((prev) => ({ ...prev, [storeId]: preserved }));
+      setHasSettlement(false);
+      setIsLoaded(false);
+      setPlanOutdated(false);
+      // 反结算后主动建立草稿，防止刷新页面丢失当前结果。
+      // 草稿接口仍由 payroll:settle 控制；无草稿权限时仅保留本地结果。
+      if (preserved.length && canSettle) {
+        try {
+          await persistDraft(`${storeId}:${selectedMonth}`, preserved, overrides);
+          setDraftStatus('saved');
+        } catch (draftError) {
+          console.error('[reverse.saveDraft]', draftError);
+          setDraftStatus('error');
+          alert('反结算成功，但草稿保存失败，请勿关闭页面。');
+          return;
+        }
+      }
+      setDraftRevision((v) => v + 1);
+      alert('反结算成功，正式结算已撤销，当前数据处于未结算状态。');
+    } catch (e: any) {
+      console.error('[handleReverseSettlement]', e);
+      alert('反结算失败：' + (e?.response?.data?.errormsg || e?.message || '未知错误'));
+    } finally {
+      recalculatingRef.current = false;
+      setRecalculating(false);
+    }
+  };
+
+  /* 获取 / 恢复正式结算 */
   const handleFetchSettlement = async () => {
-    if (!storeId || !selectedMonth) return;
+    if (!storeId || !selectedMonth || !canRestore) return;
     try {
       const data = await fetchSettlement(storeId, selectedMonth);
       if (!data) {
@@ -305,16 +478,17 @@ const PayrollPage: React.FC = () => {
         return;
       }
       setResultsByStore((prev) => ({ ...prev, [storeId]: data.results }));
+      setHasSettlement(true);
       setIsLoaded(true);
     } catch (e) {
-      console.error('[handleFetchSettlement] 失败', e);
-      alert('获取结算数据失败');
+      console.error('[handleFetchSettlement]', e);
+      alert('恢复现有结算失败');
     }
   };
 
-  /* ⭐ 重新获取 */
   const handleRefetchSettlement = async () => {
-    if (!confirm('将丢弃本地修改，重新从后台获取结算数据，是否继续？')) return;
+    if (!canRestore) return;
+    if (!window.confirm('将丢弃当前本地修改，从 MySQL 恢复现有正式结算，是否继续？')) return;
     await handleFetchSettlement();
   };
 
@@ -332,6 +506,7 @@ const PayrollPage: React.FC = () => {
     if (!confirm(`确定提交 ${selectedMonth} 的薪酬结算？提交后可在其他设备查看。`)) return;
 
     try {
+      await flushDraft();
       await submitSettlement(
         storeId,
         selectedMonth,
@@ -341,6 +516,8 @@ const PayrollPage: React.FC = () => {
       );
       setHasSettlement(true);
       setIsLoaded(true);
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+      await deletePayrollDraft(storeId, selectedMonth).catch((e) => console.warn('[draft.cleanup]', e));
       alert('结算成功！');
     } catch (e: any) {
       console.error('[handleSettle] 失败', e);
@@ -408,7 +585,7 @@ const PayrollPage: React.FC = () => {
             storeName={storeName}
             month={selectedMonth}
             excludedCount={excludedCount}
-            loading={loading}
+            loading={loading || recalculating}
             hasPlan={!!currentPlan}
             canExport={allResults.length > 0}
             canExportPayroll={hasPermission('export:payroll', storeId)}
@@ -416,6 +593,10 @@ const PayrollPage: React.FC = () => {
             isLoaded={isLoaded}
             hasLocalResult={allResults.length > 0 && !isLoaded}
             canSettle={canSettle}
+            canReverse={canReverse}
+            canRestore={canRestore}
+            reversingSettlement={recalculating}
+            onReverse={handleReverseSettlement}
             planOutdated={planOutdated}
             onRun={handleRun}
             onFetch={handleFetchSettlement}
@@ -427,6 +608,12 @@ const PayrollPage: React.FC = () => {
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <StoreSwitcher />
             <StoreStatusBadge dbOnline saveStatus="idle" lastSavedAt={null} />
+            {canSettle && !isLoaded && !hasSettlement && (
+              <span className="text-xs text-slate-500" role="status">
+                草稿：{draftStatus === 'loading' ? '读取中' : draftStatus === 'saving' ? '保存中' :
+                  draftStatus === 'saved' ? '已保存至后台' : draftStatus === 'error' ? '保存/读取失败，请勿关闭页面' : '待修改'}
+              </span>
+            )}
             <div className="flex-1" />
           </div>
 
@@ -504,7 +691,7 @@ const PayrollPage: React.FC = () => {
 
           {allResults.length === 0 && currentPlan && (
             <PayrollEmptyState
-              loading={loading}
+              loading={loading || recalculating}
               hasSettlement={hasSettlement}
               onRun={hasSettlement ? handleFetchSettlement : handleRun}
             />

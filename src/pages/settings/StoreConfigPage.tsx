@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 
 import PageHeader from '../../components/layout/PageHeader';
+import { useAuth } from '../../contexts/AuthContext';
 import type { StoreInfo, PaymentUnitEntry } from '../../constants/stores';
 import { fetchStores, saveStores } from '../../utils/storeConfig';
 
@@ -13,6 +14,8 @@ function genId(): string {
 }
 
 export const StoreConfigPage: React.FC = () => {
+  const { hasPermission } = useAuth();
+  const canEditStore = hasPermission('store:edit');
   const [stores, setStores] = useState<StoreInfo[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [saved, setSaved] = useState(false);
@@ -37,11 +40,13 @@ export const StoreConfigPage: React.FC = () => {
   useEffect(() => { load(); }, []);
 
   const updateStore = (id: string, patch: Partial<StoreInfo>) => {
+    if (!canEditStore) return;
     setStores((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
     setSaved(false);
   };
 
   const handleAdd = () => {
+    if (!canEditStore) return;
     const newStore: StoreInfo = {
       id: genId(),
       name: '新门店',
@@ -55,12 +60,14 @@ export const StoreConfigPage: React.FC = () => {
   };
 
   const handleRemove = (id: string) => {
+    if (!canEditStore) return;
     if (!confirm('确定删除该门店配置？此操作不可撤销。')) return;
     setStores((prev) => prev.filter((s) => s.id !== id));
     setSaved(false);
   };
 
   const handleSave = async () => {
+    if (!canEditStore) return;
     setError('');
     for (const s of stores) {
       if (!s.id.trim()) { setError('门店 ID 不能为空'); return; }
@@ -80,6 +87,7 @@ export const StoreConfigPage: React.FC = () => {
   };
 
   const handleReset = async () => {
+    if (!canEditStore) return;
     if (!confirm('重置为默认门店配置？当前修改将丢失。')) return;
     const defaults: StoreInfo[] = [
       {
@@ -124,6 +132,7 @@ export const StoreConfigPage: React.FC = () => {
 
   /* ⭐ 付款公司列表：增 / 改 / 删 */
   const handleAddPaymentUnit = (storeId: string) => {
+    if (!canEditStore) return;
     setStores((prev) =>
       prev.map((s) =>
         s.id === storeId
@@ -145,6 +154,7 @@ export const StoreConfigPage: React.FC = () => {
     idx: number,
     patch: Partial<PaymentUnitEntry>
   ) => {
+    if (!canEditStore) return;
     setStores((prev) =>
       prev.map((s) =>
         s.id === storeId
@@ -161,6 +171,7 @@ export const StoreConfigPage: React.FC = () => {
   };
 
   const handleRemovePaymentUnit = (storeId: string, idx: number) => {
+    if (!canEditStore) return;
     setStores((prev) =>
       prev.map((s) =>
         s.id === storeId
@@ -172,6 +183,7 @@ export const StoreConfigPage: React.FC = () => {
   };
 
   const handleKeywordsChange = (id: string, text: string) => {
+    if (!canEditStore) return;
     const arr = text.split(/[\n,，]/).map((s) => s.trim()).filter(Boolean);
     updateStore(id, { keywords: arr });
   };
@@ -187,6 +199,7 @@ export const StoreConfigPage: React.FC = () => {
           navActive="stores"
           actions={
             <>
+              {canEditStore && (<>
               <button
                 onClick={handleReset}
                 disabled={saving || loading}
@@ -214,10 +227,16 @@ export const StoreConfigPage: React.FC = () => {
                   <><Save className="w-4 h-4" /> 保存配置</>
                 )}
               </button>
+              </>)}
             </>
           }
         />
 
+        {!canEditStore && (
+          <div className="mb-4 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            当前为只读模式：没有“修改门店资料设置”权限。
+          </div>
+        )}
         {error && (
           <div className="mb-4 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 flex items-center gap-2">
             <AlertCircle className="w-3.5 h-3.5" />
@@ -237,7 +256,7 @@ export const StoreConfigPage: React.FC = () => {
             正在读取门店配置…
           </div>
         ) : (
-          <div className="space-y-4">
+          <fieldset disabled={!canEditStore} className="space-y-4">
             {stores.map((s) => {
               const isExpanded = expanded.has(s.id);
               return (
@@ -389,7 +408,7 @@ export const StoreConfigPage: React.FC = () => {
                 </div>
               );
             })}
-          </div>
+          </fieldset>
         )}
 
         <div className="mt-8 text-xs text-gray-500 bg-blue-50/50 border border-blue-100 rounded-lg p-4 leading-relaxed">

@@ -19,59 +19,94 @@ interface Props {
   storeName?: string;
   month?: string;
   excludedCount: number;
+
   loading?: boolean;
   fetchingSettlement?: boolean;
+  reversingSettlement?: boolean;
+
   hasPlan?: boolean;
   canExport?: boolean;
   canExportPayroll?: boolean;
 
-  // 结算相关
+  // 结算状态
   hasSettlement?: boolean;
   isLoaded?: boolean;
   hasLocalResult?: boolean;
   canSettle?: boolean;
   planOutdated?: boolean;
 
+  // 独立权限
+  canReverse?: boolean;
+  canRestore?: boolean;
+
   dbOnline?: boolean;
   saveStatus?: any;
   lastSavedAt?: Date | null;
 
+  // 未结算时开始计算
   onRun: () => void;
+
+  // 反结算：只撤销正式结算，不重新计算
+  onReverse?: () => void;
+
+  // 首次获取结算
   onFetch?: () => void;
+
+  // 恢复现有结算
   onRefetch?: () => void;
+
+  // 提交结算
   onSettle?: () => void;
+
   onExport: () => void;
 }
 
 export const PayrollHeader: React.FC<Props> = ({
   month,
   excludedCount,
+
   loading = false,
   fetchingSettlement = false,
+  reversingSettlement = false,
+
   hasPlan = false,
   canExport = false,
   canExportPayroll = true,
+
   hasSettlement = false,
   isLoaded = false,
   hasLocalResult = false,
   canSettle = false,
   planOutdated = false,
+
+  canReverse = false,
+  canRestore = false,
+
   onRun,
+  onReverse,
   onFetch,
   onRefetch,
   onSettle,
   onExport,
 }) => {
-  const isLoading = loading || fetchingSettlement;
+  const isLoading =
+    loading ||
+    fetchingSettlement ||
+    reversingSettlement;
 
-  // 主按钮配置
-  let mainBtn: {
+  type MainButtonConfig = {
     label: string;
     icon: React.ReactNode;
     onClick: () => void;
     disabled: boolean;
     title: string;
   };
+
+  let mainBtn: MainButtonConfig | null = null;
+
+  /* =====================================================
+   * 主按钮状态
+   * ===================================================== */
 
   if (!hasPlan) {
     mainBtn = {
@@ -82,36 +117,29 @@ export const PayrollHeader: React.FC<Props> = ({
       title: '该月份暂无薪酬配置',
     };
   } else if (hasLocalResult && !isLoaded) {
-    // 本地计算完成，尚未提交结算
-    mainBtn = {
-      label: '结算提交',
-      icon: <Save className="w-4 h-4" />,
-      onClick: onSettle || (() => {}),
-      disabled: isLoading || !canSettle || !onSettle,
-      title: !canSettle
-        ? '无权限：薪酬结算'
-        : '将当前计算结果提交并保存到后台',
-    };
+    // 未结算，有计算结果
+    mainBtn = canSettle
+      ? {
+          label: '结算提交',
+          icon: <Save className="w-4 h-4" />,
+          onClick: onSettle || (() => {}),
+          disabled: isLoading || !onSettle,
+          title: '将当前薪酬结果提交到后台正式结算',
+        }
+      : null;
   } else if (hasSettlement && !isLoaded) {
-    // 后台已有结算，尚未获取
-    mainBtn = {
-      label: '获取结算结果',
-      icon: <Download className="w-4 h-4" />,
-      onClick: onFetch || (() => {}),
-      disabled: isLoading || !onFetch,
-      title: '从后台获取本月已保存的薪酬结算结果',
-    };
-  } else if (isLoaded) {
-    // 已加载结算，允许重新计算
-    mainBtn = {
-      label: '重新计算',
-      icon: <RotateCcw className="w-4 h-4" />,
-      onClick: onRun,
-      disabled: isLoading,
-      title: '重新拉取数据计算薪酬，需重新提交结算',
-    };
-  } else {
-    // 后台没有结算，本地也没有结果
+    // 后台已有结算，但尚未加载
+    mainBtn = canRestore
+      ? {
+          label: '获取结算结果',
+          icon: <Download className="w-4 h-4" />,
+          onClick: onFetch || (() => {}),
+          disabled: isLoading || !onFetch,
+          title: '从 MySQL 获取本月正式结算结果',
+        }
+      : null;
+  } else if (!isLoaded) {
+    // 尚无结算和计算结果
     mainBtn = {
       label: '开始计算',
       icon: <Calculator className="w-4 h-4" />,
@@ -120,6 +148,9 @@ export const PayrollHeader: React.FC<Props> = ({
       title: '根据本月薪酬方案开始计算',
     };
   }
+
+  // 已加载结算时不再将“重新计算”作为主按钮
+  // 反结算和恢复现有结算显示为两个独立操作按钮
 
   return (
     <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-600 shadow-2xl shadow-emerald-500/20 p-8 sm:p-10 mb-8 text-white">
@@ -156,7 +187,7 @@ export const PayrollHeader: React.FC<Props> = ({
               </div>
             )}
 
-            {/* 后台结算状态提示 */}
+            {/* 后台存在正式结算，但尚未加载 */}
             {hasSettlement && !isLoaded && !hasLocalResult && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <div className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-xl px-3 py-1.5 border border-white/25">
@@ -168,7 +199,7 @@ export const PayrollHeader: React.FC<Props> = ({
               </div>
             )}
 
-            {/* 已加载结算状态 */}
+            {/* 已加载正式结算 */}
             {isLoaded && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <div className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-sm rounded-xl px-3 py-1.5 border border-white/25">
@@ -189,7 +220,7 @@ export const PayrollHeader: React.FC<Props> = ({
               </div>
             )}
 
-            {/* 本地计算未结算 */}
+            {/* 未结算的计算结果 */}
             {hasLocalResult && !isLoaded && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <div className="inline-flex items-center gap-2 bg-amber-400/20 backdrop-blur-sm rounded-xl px-3 py-1.5 border border-amber-300/30">
@@ -208,49 +239,78 @@ export const PayrollHeader: React.FC<Props> = ({
 
             <div className="flex items-center gap-2 flex-wrap justify-end">
               {/* 主按钮 */}
-              <button
-                type="button"
-                onClick={mainBtn.onClick}
-                disabled={mainBtn.disabled}
-                title={mainBtn.title}
-                className="inline-flex items-center gap-2 bg-white text-emerald-700 hover:bg-white/90 rounded-2xl px-5 py-2.5 shadow-lg transition disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-sm whitespace-nowrap"
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    {fetchingSettlement
-                      ? '获取中…'
-                      : '计算中…'}
-                  </>
-                ) : (
-                  <>
-                    {mainBtn.icon}
-                    {mainBtn.label}
-                  </>
-                )}
-              </button>
-
-              {/* 已加载结算时：刷新后台结算结果 */}
-              {isLoaded && onRefetch && (
+              {mainBtn && (
                 <button
                   type="button"
-                  onClick={onRefetch}
-                  disabled={isLoading}
-                  title="丢弃本地修改，重新从后台加载已保存的结算结果"
-                  className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-2.5 border border-white/25 shadow-lg hover:bg-white/25 transition disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                  onClick={mainBtn.onClick}
+                  disabled={mainBtn.disabled}
+                  title={mainBtn.title}
+                  className="inline-flex items-center gap-2 bg-white text-emerald-700 hover:bg-white/90 rounded-2xl px-5 py-2.5 shadow-lg transition disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-sm whitespace-nowrap"
                 >
-                  {fetchingSettlement ? (
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      {fetchingSettlement
+                        ? '获取中…'
+                        : '处理中…'}
+                    </>
+                  ) : (
+                    <>
+                      {mainBtn.icon}
+                      {mainBtn.label}
+                    </>
+                  )}
+                </button>
+              )}
+
+              {/* 反结算：独立权限 payroll:reverse */}
+              {hasSettlement && canReverse && onReverse && (
+                <button
+                  type="button"
+                  onClick={onReverse}
+                  disabled={isLoading}
+                  title="撤销当前月份的正式结算，保留薪酬方案和人工调整"
+                  className="inline-flex items-center gap-2 bg-white text-emerald-700 hover:bg-white/90 rounded-2xl px-5 py-2.5 shadow-lg transition disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-sm whitespace-nowrap"
+                >
+                  {reversingSettlement ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
-                    <RefreshCw className="w-4 h-4" />
+                    <RotateCcw className="w-4 h-4" />
                   )}
-                  <span className="text-sm font-medium">
-                    {fetchingSettlement
-                      ? '刷新中…'
-                      : '刷新结算结果'}
+
+                  <span className="text-sm font-semibold">
+                    {reversingSettlement
+                      ? '反结算中…'
+                      : '反结算'}
                   </span>
                 </button>
               )}
+
+              {/* 恢复现有结算：独立权限 payroll:restore */}
+              {hasSettlement &&
+                isLoaded &&
+                canRestore &&
+                onRefetch && (
+                  <button
+                    type="button"
+                    onClick={onRefetch}
+                    disabled={isLoading}
+                    title="丢弃本地修改，从 MySQL 恢复现有正式结算结果"
+                    className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-2.5 border border-white/25 shadow-lg hover:bg-white/25 transition disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                  >
+                    {fetchingSettlement ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}
+
+                    <span className="text-sm font-medium">
+                      {fetchingSettlement
+                        ? '恢复中…'
+                        : '恢复现有结算'}
+                    </span>
+                  </button>
+                )}
 
               {/* 导出整表 */}
               {canExportPayroll && (

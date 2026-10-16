@@ -3,14 +3,14 @@ export type PermissionKey =
   | 'plan:view'
   | 'plan:edit'
   | 'target:edit'
-  | 'position:add'
-  | 'position:delete'
-  | 'position:rename'
-  | 'headcount:edit'
   | 'month:add'
   | 'month:delete'
   | 'plan:import'
   | 'plan:export'
+  | 'position:add'
+  | 'position:delete'
+  | 'position:rename'
+  | 'headcount:edit'
   /* 薪酬佣金测算 */
   | 'simulation:access'
   | 'simulation:cost:property'
@@ -25,6 +25,8 @@ export type PermissionKey =
   /* 薪酬佣金计算 */
   | 'payroll:calc'
   | 'payroll:settle'
+  | 'payroll:reverse'
+  | 'payroll:restore'
   | 'ops:view'
   | 'export:payroll'
   | 'export:personal'
@@ -32,7 +34,7 @@ export type PermissionKey =
   | 'report:marketing:view'
   /* 月综合报告 */
   | 'report:monthly:view'
-  /* ⭐ 钉钉流程报告 */
+  /* 钉钉流程报告 */
   | 'report:dingtalk:view'
   /* 综合设置 */
   | 'user:add'
@@ -44,7 +46,7 @@ export type PermissionGroup =
   | '薪酬佣金计算'
   | '营销收入报告'
   | '月综合报告'
-  | '钉钉流程报告'      // ⭐ 独立分组
+  | '钉钉流程报告'
   | '综合设置';
 
 export interface PermissionMeta {
@@ -57,9 +59,7 @@ export interface PermissionMeta {
 }
 
 export const PERMISSION_LIST: PermissionMeta[] = [
-  /* ============================================================
-   * 1、薪酬佣金设置
-   * ============================================================ */
+  /* 薪酬佣金设置 */
   {
     key: 'plan:view',
     label: '查看方案',
@@ -145,10 +145,7 @@ export const PERMISSION_LIST: PermissionMeta[] = [
     subGroup: '职位控制',
     requires: ['plan:edit'],
   },
-
-  /* ============================================================
-   * 2、薪酬佣金测算
-   * ============================================================ */
+  /* 薪酬佣金测算 */
   {
     key: 'simulation:access',
     label: '测算（总入口）',
@@ -218,10 +215,7 @@ export const PERMISSION_LIST: PermissionMeta[] = [
     group: '薪酬佣金测算',
     requires: ['simulation:access'],
   },
-
-  /* ============================================================
-   * 3、薪酬佣金计算
-   * ============================================================ */
+  /* 薪酬佣金计算 */
   {
     key: 'payroll:calc',
     label: '计算工资佣金',
@@ -232,6 +226,20 @@ export const PERMISSION_LIST: PermissionMeta[] = [
     key: 'payroll:settle',
     label: '薪酬结算',
     desc: '提交并保存薪酬计算结果到后台',
+    group: '薪酬佣金计算',
+    requires: ['payroll:calc'],
+  },
+  {
+    key: 'payroll:reverse',
+    label: '反结算',
+    desc: '撤销正式薪酬结算，不自动重新计算',
+    group: '薪酬佣金计算',
+    requires: ['payroll:calc'],
+  },
+  {
+    key: 'payroll:restore',
+    label: '恢复现有结算',
+    desc: '从后台读取已保存的正式薪酬结算结果',
     group: '薪酬佣金计算',
     requires: ['payroll:calc'],
   },
@@ -256,40 +264,28 @@ export const PERMISSION_LIST: PermissionMeta[] = [
     group: '薪酬佣金计算',
     requires: ['payroll:calc'],
   },
-
-  /* ============================================================
-   * 4、营销收入报告
-   * ============================================================ */
+  /* 营销收入报告 */
   {
     key: 'report:marketing:view',
     label: '营销收入报告',
     desc: '查看营销收入汇总与销售明细',
     group: '营销收入报告',
   },
-
-  /* ============================================================
-   * 5、月综合报告
-   * ============================================================ */
+  /* 月综合报告 */
   {
     key: 'report:monthly:view',
     label: '月综合报告',
     desc: '查看月度经营综合分析（薪酬+营销+成本）',
     group: '月综合报告',
   },
-
-  /* ============================================================
-   * 6、⭐ 钉钉流程报告
-   * ============================================================ */
+  /* 钉钉流程报告 */
   {
     key: 'report:dingtalk:view',
     label: '钉钉流程报告',
     desc: '查看钉钉审批流程数据（报销、付款、借款等）',
     group: '钉钉流程报告',
   },
-
-  /* ============================================================
-   * 7、综合设置
-   * ============================================================ */
+  /* 综合设置 */
   {
     key: 'user:add',
     label: '用户添加',
@@ -304,9 +300,7 @@ export const PERMISSION_LIST: PermissionMeta[] = [
   },
 ];
 
-export const ALL_PERMISSION_KEYS: PermissionKey[] = PERMISSION_LIST.map(
-  (p) => p.key
-);
+export const ALL_PERMISSION_KEYS: PermissionKey[] = PERMISSION_LIST.map((p) => p.key);
 
 export const PERMISSION_GROUPS: PermissionGroup[] = [
   '薪酬佣金设置',
