@@ -77,6 +77,7 @@ export const StoreConfigPage: React.FC = () => {
     try {
       const list = await saveStores(stores);
       setStores(list);
+      window.dispatchEvent(new Event('stores-updated'));
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e: any) {
@@ -116,6 +117,7 @@ export const StoreConfigPage: React.FC = () => {
       const list = await saveStores(defaults);
       setStores(list);
       setExpanded(new Set(list.map((s) => s.id)));
+      window.dispatchEvent(new Event('stores-updated'));
     } catch (e: any) {
       setError(e?.message || '重置失败');
     }

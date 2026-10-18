@@ -37,6 +37,8 @@ export type PermissionKey =
   /* 钉钉流程报告 */
   | 'report:dingtalk:view'
   /* 综合设置 */
+  | 'store:view'
+  | 'store:edit'
   | 'user:add'
   | 'user:resetPwd';
 
@@ -286,6 +288,19 @@ export const PERMISSION_LIST: PermissionMeta[] = [
     group: '钉钉流程报告',
   },
   /* 综合设置 */
+  {
+    key: 'store:view',
+    label: '访问门店设置',
+    desc: '允许进入门店设置页面并查看门店资料',
+    group: '综合设置',
+  },
+  {
+    key: 'store:edit',
+    label: '修改门店资料设置',
+    desc: '允许修改门店基础资料、付款公司、有效期和匹配关键字',
+    group: '综合设置',
+    requires: ['store:view'],
+  },
   {
     key: 'user:add',
     label: '用户添加',

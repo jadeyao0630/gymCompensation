@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -11,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useStore } from '../../contexts/StoreContext';
+import type { PermissionKey } from '../../constants/permissions';
 
 type ActiveKey =
   | 'config'
@@ -26,7 +28,21 @@ interface NavButtonsProps {
   month?: string;
 }
 
-export const NavButtons: React.FC<NavButtonsProps> = ({ active, month }) => {
+interface NavItem {
+  key: ActiveKey;
+  label: string;
+  path: string;
+  permission: PermissionKey;
+  icon: React.ReactNode;
+  gradient: string;
+  shadow: string;
+  ring: string;
+}
+
+export const NavButtons: React.FC<NavButtonsProps> = ({
+  active,
+  month,
+}) => {
   const navigate = useNavigate();
   const { storeId } = useStore();
   const { hasPermission } = useAuth();
@@ -39,117 +55,112 @@ export const NavButtons: React.FC<NavButtonsProps> = ({ active, month }) => {
     }
   };
 
+  const items: NavItem[] = [
+    {
+      key: 'config',
+      label: '薪酬配置',
+      path: '/compensation',
+      permission: 'plan:view',
+      icon: <LayoutGrid className="w-4 h-4" />,
+      gradient: 'from-blue-600 to-indigo-600',
+      shadow: 'shadow-blue-500/20',
+      ring: 'ring-blue-300',
+    },
+    {
+      key: 'simulation',
+      label: '去测算',
+      path: '/simulation',
+      permission: 'simulation:access',
+      icon: <Sliders className="w-4 h-4" />,
+      gradient: 'from-indigo-600 to-purple-600',
+      shadow: 'shadow-indigo-500/20',
+      ring: 'ring-indigo-300',
+    },
+    {
+      key: 'payroll',
+      label: '去计算薪酬',
+      path: '/payroll',
+      permission: 'payroll:calc',
+      icon: <Calculator className="w-4 h-4" />,
+      gradient: 'from-emerald-600 to-teal-600',
+      shadow: 'shadow-emerald-500/20',
+      ring: 'ring-emerald-300',
+    },
+    {
+      key: 'marketing',
+      label: '营销收入',
+      path: '/marketing-report',
+      permission: 'report:marketing:view',
+      icon: <BarChart3 className="w-4 h-4" />,
+      gradient: 'from-fuchsia-600 to-pink-600',
+      shadow: 'shadow-fuchsia-500/20',
+      ring: 'ring-fuchsia-300',
+    },
+    {
+      key: 'monthly',
+      label: '月综合报告',
+      path: '/monthly-report',
+      permission: 'report:monthly:view',
+      icon: <TrendingUp className="w-4 h-4" />,
+      gradient: 'from-rose-600 to-orange-600',
+      shadow: 'shadow-rose-500/20',
+      ring: 'ring-rose-300',
+    },
+    {
+      key: 'dingtalk',
+      label: '钉钉流程',
+      path: '/dingtalk-report',
+      permission: 'report:dingtalk:view',
+      icon: <GitBranch className="w-4 h-4" />,
+      gradient: 'from-sky-600 to-blue-600',
+      shadow: 'shadow-sky-500/20',
+      ring: 'ring-sky-300',
+    },
+    {
+      key: 'stores',
+      label: '门店配置',
+      path: '/settings/stores',
+      permission: 'store:view',
+      icon: <Settings className="w-4 h-4" />,
+      gradient: 'from-slate-600 to-gray-700',
+      shadow: 'shadow-slate-500/20',
+      ring: 'ring-slate-300',
+    },
+  ];
+
   const baseCls =
-    'inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md ' +
-    'transition-all duration-200 transform';
-  const activeCls = 'ring-2 ring-offset-2 cursor-default';
-  const clickCls = 'active:scale-[0.97]';
-  const hoverCls = 'nav-btn-hover';
+    'inline-flex items-center gap-2 px-5 py-2.5 rounded-xl ' +
+    'text-sm font-semibold shadow-md transition-all duration-200 transform';
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {/* 薪酬配置 */}
-      {hasPermission('plan:view', storeId) && (
-        <button
-          onClick={() => active !== 'config' && go('/compensation')}
-          disabled={active === 'config'}
-          className={`${baseCls} ${
-            active === 'config'
-              ? `bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-blue-500/30 ${activeCls} ring-blue-300`
-              : `bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-blue-500/20 ${hoverCls} ${clickCls}`
-          }`}
-        >
-          <LayoutGrid className="w-4 h-4" /> 薪酬配置
-        </button>
-      )}
+      {items
+        .filter((item) => hasPermission(item.permission, storeId))
+        .map((item) => {
+          const isActive = active === item.key;
 
-      {/* 去测算 */}
-      {hasPermission('simulation:access', storeId) && (
-        <button
-          onClick={() => active !== 'simulation' && go('/simulation')}
-          disabled={active === 'simulation'}
-          className={`${baseCls} ${
-            active === 'simulation'
-              ? `bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-indigo-500/30 ${activeCls} ring-indigo-300`
-              : `bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-indigo-500/20 ${hoverCls} ${clickCls}`
-          }`}
-        >
-          <Sliders className="w-4 h-4" /> 去测算
-        </button>
-      )}
-
-      {/* 去计算薪酬 */}
-      {hasPermission('payroll:calc', storeId) && (
-        <button
-          onClick={() => active !== 'payroll' && go('/payroll')}
-          disabled={active === 'payroll'}
-          className={`${baseCls} ${
-            active === 'payroll'
-              ? `bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-emerald-500/30 ${activeCls} ring-emerald-300`
-              : `bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-emerald-500/20 ${hoverCls} ${clickCls}`
-          }`}
-        >
-          <Calculator className="w-4 h-4" /> 去计算薪酬
-        </button>
-      )}
-
-      {/* 营销收入 */}
-      {hasPermission('report:marketing:view', storeId) && (
-        <button
-          onClick={() => active !== 'marketing' && go('/marketing-report')}
-          disabled={active === 'marketing'}
-          className={`${baseCls} ${
-            active === 'marketing'
-              ? `bg-gradient-to-r from-fuchsia-600 to-pink-600 text-white shadow-fuchsia-500/30 ${activeCls} ring-fuchsia-300`
-              : `bg-gradient-to-r from-fuchsia-600 to-pink-600 text-white shadow-fuchsia-500/20 ${hoverCls} ${clickCls}`
-          }`}
-        >
-          <BarChart3 className="w-4 h-4" /> 营销收入
-        </button>
-      )}
-
-      {/* 月综合报告 */}
-      {hasPermission('report:monthly:view', storeId) && (
-        <button
-          onClick={() => active !== 'monthly' && go('/monthly-report')}
-          disabled={active === 'monthly'}
-          className={`${baseCls} ${
-            active === 'monthly'
-              ? `bg-gradient-to-r from-rose-600 to-orange-600 text-white shadow-rose-500/30 ${activeCls} ring-rose-300`
-              : `bg-gradient-to-r from-rose-600 to-orange-600 text-white shadow-rose-500/20 ${hoverCls} ${clickCls}`
-          }`}
-        >
-          <TrendingUp className="w-4 h-4" /> 月综合报告
-        </button>
-      )}
-
-      {/* 钉钉流程 */}
-      {hasPermission('report:dingtalk:view', storeId) && (
-        <button
-          onClick={() => active !== 'dingtalk' && go('/dingtalk-report')}
-          disabled={active === 'dingtalk'}
-          className={`${baseCls} ${
-            active === 'dingtalk'
-              ? `bg-gradient-to-r from-sky-600 to-blue-600 text-white shadow-sky-500/30 ${activeCls} ring-sky-300`
-              : `bg-gradient-to-r from-sky-600 to-blue-600 text-white shadow-sky-500/20 ${hoverCls} ${clickCls}`
-          }`}
-        >
-          <GitBranch className="w-4 h-4" /> 钉钉流程
-        </button>
-      )}
-
-      {/* ⭐ 门店配置 */}
-      <button
-        onClick={() => active !== 'stores' && go('/settings/stores')}
-        disabled={active === 'stores'}
-        className={`${baseCls} ${
-          active === 'stores'
-            ? `bg-gradient-to-r from-slate-600 to-gray-700 text-white shadow-slate-500/30 ${activeCls} ring-slate-300`
-            : `bg-gradient-to-r from-slate-600 to-gray-700 text-white shadow-slate-500/20 ${hoverCls} ${clickCls}`
-        }`}
-      >
-        <Settings className="w-4 h-4" /> 门店配置
-      </button>
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => !isActive && go(item.path)}
+              disabled={isActive}
+              className={[
+                baseCls,
+                'bg-gradient-to-r',
+                item.gradient,
+                'text-white',
+                item.shadow,
+                isActive
+                  ? `ring-2 ring-offset-2 cursor-default ${item.ring}`
+                  : 'nav-btn-hover active:scale-[0.97]',
+              ].join(' ')}
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          );
+        })}
     </div>
   );
 };

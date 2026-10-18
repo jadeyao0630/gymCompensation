@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import RouteGuard from './components/common/RouteGuard';
@@ -26,6 +27,7 @@ const App: React.FC = () => (
           </RouteGuard>
         }
       />
+
       <Route
         path="/compensation"
         element={
@@ -34,6 +36,7 @@ const App: React.FC = () => (
           </RouteGuard>
         }
       />
+
       <Route
         path="/payroll"
         element={
@@ -42,6 +45,7 @@ const App: React.FC = () => (
           </RouteGuard>
         }
       />
+
       <Route
         path="/simulation"
         element={
@@ -50,6 +54,7 @@ const App: React.FC = () => (
           </RouteGuard>
         }
       />
+
       <Route
         path="/marketing-report"
         element={
@@ -58,6 +63,7 @@ const App: React.FC = () => (
           </RouteGuard>
         }
       />
+
       <Route
         path="/monthly-report"
         element={
@@ -66,6 +72,7 @@ const App: React.FC = () => (
           </RouteGuard>
         }
       />
+
       <Route
         path="/dingtalk-report"
         element={
@@ -75,11 +82,10 @@ const App: React.FC = () => (
         }
       />
 
-      {/* ⭐ 门店配置 */}
       <Route
         path="/settings/stores"
         element={
-          <RouteGuard>
+          <RouteGuard permission="store:view">
             <StoreConfigPage />
           </RouteGuard>
         }
