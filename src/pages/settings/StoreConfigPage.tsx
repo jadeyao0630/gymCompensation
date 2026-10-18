@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 
 import PageHeader from '../../components/layout/PageHeader';
+import AIConfigPanel from '../../components/settings/AIConfigPanel';
 import { useAuth } from '../../contexts/AuthContext';
 import type { StoreInfo, PaymentUnitEntry } from '../../constants/stores';
 import { fetchStores, saveStores } from '../../utils/storeConfig';
@@ -412,6 +413,8 @@ export const StoreConfigPage: React.FC = () => {
             })}
           </fieldset>
         )}
+
+        <AIConfigPanel stores={stores} canEdit={canEditStore} />
 
         <div className="mt-8 text-xs text-gray-500 bg-blue-50/50 border border-blue-100 rounded-lg p-4 leading-relaxed">
           <p className="font-semibold text-blue-800 mb-1.5">归属决策链：</p>
