@@ -14,8 +14,9 @@ import {
   normalizeStoreName,
   extractPaymentUnitFromForm,
 } from './utils/constants';
-import { extractAmount, extractItems, extractPayeeAccount } from './utils/extract';
+import { extractItems, extractPayeeAccount } from './utils/extract';
 import { getStatusLabel } from './utils/statusLabel';
+import { monthlyPieces, monthlyAmount } from '../../features/dingtalk/accounting';
 
 import { useDingTalkTemplates } from './hooks/useDingTalkTemplates';
 import { useReportColumns } from './hooks/useReportColumns';
@@ -54,118 +55,6 @@ function isPayeeExcluded(
   return false;
 }
 
-/* ============================================================
- * ⭐ 类别覆盖规则 1：收款账户 → 类别
- * ============================================================ */
-const PAYEE_CATEGORY_OVERRIDES: Array<{ payee: string; category: string }> = [
-  { payee: '山东云优人力资源服务有限公司', category: '薪酬佣金' },
-];
-
-/* ============================================================
- * ⭐ 类别覆盖规则 2：明细关键字 → 类别
- * ============================================================ */
-interface KeywordCategoryRule {
-  category: string;
-  keywords: string[];
-  applyTemplates?: string[];
-}
-
-const KEYWORD_CATEGORY_RULES: KeywordCategoryRule[] = [
-  {
-    category: '固定费用',
-    keywords: ['水费', '电费', '物业费'],
-    applyTemplates: ['员工费用报销', '付款申请单'],
-  },
-];
-
-function collectItemText(item: DingTalkReportItem): string {
-  const parts: string[] = [];
-
-  if (Array.isArray(item.items)) {
-    item.items.forEach((it: any) => {
-      if (it?.content) parts.push(String(it.content));
-    });
-  }
-
-  const fv = item.formValues || {};
-
-  const rawDetail = fv['明细列表'];
-  if (rawDetail != null && rawDetail !== 'null' && rawDetail !== '') {
-    if (typeof rawDetail === 'string') {
-      try {
-        const parsed = JSON.parse(rawDetail);
-        if (Array.isArray(parsed)) {
-          parsed.forEach((row: any) => {
-            (row?.rowValue || []).forEach((f: any) => {
-              const label = String(f?.label || '');
-              if (
-                label.includes('事项') ||
-                label.includes('内容') ||
-                label.includes('名称')
-              ) {
-                if (f?.value != null && f.value !== 'null' && f.value !== '') {
-                  parts.push(String(f.value));
-                }
-              }
-            });
-          });
-        }
-      } catch {
-        parts.push(String(rawDetail));
-      }
-    } else if (typeof rawDetail === 'object') {
-      try { parts.push(JSON.stringify(rawDetail)); } catch {}
-    }
-  }
-
-  if (item.title) parts.push(String(item.title));
-
-  [
-    '事项', '事项/明细', '报销事由', '费用类型', '明细', '备注',
-    '事由', '用途', '摘要', '说明', '付款内容提要', '付款事由', '付款用途',
-  ].forEach((k) => {
-    const v = fv[k];
-    if (v == null || v === 'null' || v === '') return;
-    if (typeof v === 'object') {
-      try { parts.push(JSON.stringify(v)); } catch {}
-    } else {
-      parts.push(String(v));
-    }
-  });
-
-  return parts.join(' ');
-}
-
-function resolveKeywordCategory(item: DingTalkReportItem): string | null {
-  const text = collectItemText(item);
-  if (!text) return null;
-
-  for (const rule of KEYWORD_CATEGORY_RULES) {
-    if (
-      rule.applyTemplates &&
-      rule.applyTemplates.length > 0 &&
-      !rule.applyTemplates.includes(item.templateName || '')
-    ) {
-      continue;
-    }
-    if (rule.keywords.some((k) => k && text.includes(k))) {
-      return rule.category;
-    }
-  }
-  return null;
-}
-
-function resolvePayeeCategory(
-  payeeAccount: string | null | undefined
-): string | null {
-  const raw = payeeAccount == null ? '' : String(payeeAccount).trim();
-  if (!raw) return null;
-  for (const rule of PAYEE_CATEGORY_OVERRIDES) {
-    if (raw === rule.payee) return rule.category;
-  }
-  return null;
-}
-
 /* ⭐ 分组类型，明确包含 total / count / totalCount */
 interface UnitGroupInternal {
   storeName: string;
@@ -197,7 +86,13 @@ function resolveStoreAndCompanyForItem(
     return { storeName, company: (r as any)._company || null };
   }
 
-  /* 2) 有付款公司名称 → 直接按付款公司找门店 */
+  /* 2) 数据库已保存的人工归属：绝不能被付款公司覆盖 */
+  if ((r as any)._manualStore === true && (r as any)._storeName) {
+    const manual = String((r as any)._storeName);
+    return { storeName: normalizeStoreName(manual) || manual, company: (r as any)._company || r.paymentUnit || null };
+  }
+
+  /* 3) 有付款公司名称 → 直接按付款公司找门店 */
   const pu = r.paymentUnit || extractPaymentUnitFromForm(r.formValues || {});
   if (pu && String(pu).trim()) {
     const byUnit = resolveStoreByPaymentUnit(pu);
@@ -266,8 +161,8 @@ const DingTalkReportPage: React.FC = () => {
     setPaymentUnits: setPaymentUnitsInHook,
     setTemplateTypes: setTemplateTypesInHook,
     handleSearch,
-    grouped,
     groupedByStore,
+    updateManualCategories, categorySaving, categoryError,
   } = useDingTalkReport();
 
   useEffect(() => {
@@ -370,38 +265,12 @@ const DingTalkReportPage: React.FC = () => {
     );
   }, [results, excludedPayeeIds]);
 
-  const categorizedResults = useMemo(() => {
-    return filteredResults.map((r) => {
-      const payee = r.payeeAccount || extractPayeeAccount(r.formValues || {});
-
-      const payeeCategory = resolvePayeeCategory(payee);
-      if (payeeCategory) {
-        return {
-          item: r,
-          category: payeeCategory,
-          overridden: true,
-          overrideBy: 'payee' as const,
-        };
-      }
-
-      const kwCategory = resolveKeywordCategory(r);
-      if (kwCategory) {
-        return {
-          item: r,
-          category: kwCategory,
-          overridden: true,
-          overrideBy: 'keyword' as const,
-        };
-      }
-
-      return {
-        item: r,
-        category: r.templateName || '未知',
-        overridden: false,
-        overrideBy: null,
-      };
-    });
-  }, [filteredResults]);
+  const categorizedResults = useMemo(() => filteredResults.map(r => {
+    const pieces = monthlyPieces(r);
+    const manual = String((r as any)._manualCategory || '').trim();
+    const category = manual || (pieces.length === 1 ? pieces[0].category : '混合费用');
+    return {item:r, category, overridden: Boolean(manual), overrideBy: manual ? 'manual' as const : null};
+  }), [filteredResults]);
 
   const hasAnyOverride = useMemo(
     () => categorizedResults.some((c) => c.overridden),
@@ -409,31 +278,6 @@ const DingTalkReportPage: React.FC = () => {
   );
 
   const finalGrouped = useMemo<TypeGroupInternal[]>(() => {
-    const needRebuild =
-      excludedPayeeIds.size > 0 ||
-      hasAnyOverride ||
-      Object.keys(manualOverrides).length > 0;
-
-    if (!needRebuild) {
-      return grouped.map((g) => {
-        const units: UnitGroupInternal[] = g.units.map((u) => ({
-          storeName:
-            normalizeStoreName(u.storeName || '') || DEFAULT_STORE,
-          unitName: u.unitName,
-          total: u.total,
-          count: u.count,
-          items: u.items,
-        }));
-        return {
-          typeName: g.typeName,
-          total: units.reduce((s, u) => s + u.total, 0),
-          count: units.reduce((s, u) => s + u.count, 0),
-          totalCount: g.totalCount,
-          units,
-        };
-      });
-    }
-
     const map = new Map<
       string,
       {
@@ -453,7 +297,7 @@ const DingTalkReportPage: React.FC = () => {
       const { storeName } = resolveStoreAndCompanyForItem(r, manualOverrides);
 
       const amount = Number(
-        extractAmount(r.templateName || '', r.formValues || {}) || 0
+        monthlyAmount(r)
       );
 
       if (!map.has(typeName)) {
@@ -483,7 +327,15 @@ const DingTalkReportPage: React.FC = () => {
       const u = g.units.get(uKey)!;
       u.total += amount;
       u.count += 1;
-      u.items.push(r);
+      // 分组和明细必须共用本次解析出的最终门店，不再显示旧的 _storeName。
+      u.items.push({
+        ...r,
+        _storeName: storeName,
+        _manualStore: Boolean(manualOverrides[r.processInstanceId || '']?.isManual ?? (r as any)._manualStore),
+        _assignReason: manualOverrides[r.processInstanceId || '']?.isManual
+          ? '手动归属'
+          : (r as any)._assignReason || '',
+      });
     }
 
     return Array.from(map.values())
@@ -496,10 +348,7 @@ const DingTalkReportPage: React.FC = () => {
       }))
       .filter((g) => g.units.length > 0);
   }, [
-    grouped,
     categorizedResults,
-    excludedPayeeIds,
-    hasAnyOverride,
     manualOverrides,
   ]);
 
@@ -682,7 +531,7 @@ const DingTalkReportPage: React.FC = () => {
         paymentUnitDisplay,
         r.title || '',
         extractItems(r.templateName || '', r.formValues || {}),
-        extractAmount(r.templateName || '', r.formValues || {}) || 0,
+        monthlyAmount(r),
         extractPayeeAccount(r.formValues || {}) || '',
         getStatusLabel(r.status || '', r.result || ''),
         r.createTime || '',
@@ -912,6 +761,9 @@ const DingTalkReportPage: React.FC = () => {
               isColVisible={isColVisible}
               selectedType={null}
               storeOptions={storeOptions}
+              onManualCategoriesChanged={updateManualCategories}
+              categorySaving={categorySaving}
+              categoryError={categoryError}
               onManualStoreChanged={(pid, next, isManual) => {
                 setManualOverrides((prev) => ({
                   ...prev,

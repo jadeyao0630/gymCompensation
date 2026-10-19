@@ -1,9 +1,7 @@
 import type { DingTalkReportItem } from '../api/dingtalk';
-import { extractAmount, extractItems } from '../pages/dingtalk/utils/extract';
-import {
-  classifyDingtalkItems,
-  collectDingtalkText,
-} from '../pages/dingtalk/utils/classify';
+import { extractItems } from '../pages/dingtalk/utils/extract';
+import { collectDingtalkText } from '../pages/dingtalk/utils/classify';
+import { monthlyPieces, validMonthlyItems } from '../pages/monthly/utils/dingtalkAccounting';
 
 /* ============================================================
  * 类型
@@ -228,26 +226,6 @@ function aggregateByCategory(list: any[]): Record<string, { count: number; total
 /* ============================================================
  * 钉钉摘要（复用公共 classify）
  * ============================================================ */
-function pickDingtalkAmount(item: DingTalkReportItem): number {
-  const candidates = [
-    '补退金额（元）', '补退金额', '退款金额（元）', '退款金额',
-    '报销金额', '借款金额（元）', '借款金额',
-    '本次申请支付金额（元）', '本次申请支付金额',
-    '总价款（元）', '金额（元）', '金额',
-  ];
-  const fv = item.formValues || {};
-  for (const k of candidates) {
-    const v = fv[k];
-    if (v != null && v !== 'null' && v !== '') {
-      const n = Number(String(v).replace(/[^\d.-]/g, ''));
-      if (Number.isFinite(n) && n !== 0) return n;
-    }
-  }
-  const n0 = Number(item.amount);
-  if (Number.isFinite(n0) && n0 !== 0) return n0;
-  return 0;
-}
-
 function summarizeDingtalk(items: DingTalkReportItem[]) {
   const map = new Map<
     string,
@@ -255,6 +233,7 @@ function summarizeDingtalk(items: DingTalkReportItem[]) {
   >();
   let total = 0;
   let count = 0;
+  const seenByCategory = new Map<string, Set<string>>();
 
   const breakdown = {
     salary: { count: 0, total: 0 },
@@ -267,16 +246,20 @@ function summarizeDingtalk(items: DingTalkReportItem[]) {
     other: { count: 0, total: 0 },
   };
 
-  for (const r of items) {
-    if (r.error) continue;
-
-    const pieces = classifyDingtalkItems(r, pickDingtalkAmount);
+  for (const r of validMonthlyItems(items)) {
+    count += 1;
+    const id = r.processInstanceId || `__${count}`;
+    const pieces = monthlyPieces(r);
     for (const p of pieces) {
       if (!map.has(p.category)) {
         map.set(p.category, { category: p.category, count: 0, total: 0, samples: [] });
       }
       const g = map.get(p.category)!;
-      g.count += 1;
+      if (!seenByCategory.has(p.category)) seenByCategory.set(p.category, new Set());
+      if (!seenByCategory.get(p.category)!.has(id)) {
+        g.count += 1;
+        seenByCategory.get(p.category)!.add(id);
+      }
       g.total += p.amount;
 
       if (g.samples.length < 5) {
@@ -298,7 +281,6 @@ function summarizeDingtalk(items: DingTalkReportItem[]) {
       else { breakdown.other.count += 1; breakdown.other.total += p.amount; }
 
       total += p.amount;
-      count += 1;
     }
   }
 
@@ -480,8 +462,8 @@ export function buildPayload(params: BuildPayloadParams): MonthlyReportPayload {
 
   const totalIncome = sum(cardOrders) + sum(courseOrders);
 
-  /* 实际总支出 = 预估 + 钉钉新增 */
-  const actualTotalExpense = finalEstimatedExpense + finalActualExpense;
+  /* 实际口径使用钉钉全分类合计，不叠加预估成本。 */
+  const actualTotalExpense = finalDingtalkBreakdown.total;
 
   const estimatedProfit = totalIncome - finalEstimatedExpense;
   const actualProfit = totalIncome - actualTotalExpense;

@@ -1,3 +1,4 @@
+import { loadManualCategories, saveManualCategories } from '../../../services/manualDingtalkCategory';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchPlanByMonth, fetchSimulationSetting } from '../../../api/compensation';
 import { fetchStaffStatus } from '../../../api/payrollStatus';
@@ -11,13 +12,8 @@ import type { PayrollResult } from '../../../utils/payroll';
 import { loadRewardsCatalog } from '../../../utils/payrollStorage';
 import { useAppData } from '../../../contexts/AppDataContext';
 import { getStoreById } from '../../../constants/stores';
-import {
-  getStoreFromPaymentUnit,
-  inferRefundPaymentUnit,
-} from '../../dingtalk/utils/constants';
-import {
-  classifyDingtalkItems,
-} from '../../dingtalk/utils/classify';
+
+import { monthlyAmount, monthlyPieces, validMonthlyItems, monthlyCategorySummary } from '../utils/dingtalkAccounting';
 import {
   aggregateOrders,
   getIncomeAmount,
@@ -79,41 +75,26 @@ const EMPTY_BREAKDOWN: DingtalkBreakdown = {
   categories: [],
 };
 
-/* ⭐ 金额兜底 */
-function pickDingtalkAmount(item: DingTalkReportItem): number {
-  const candidates = [
-    '补退金额（元）', '补退金额', '退款金额（元）', '退款金额',
-    '报销金额', '借款金额（元）', '借款金额',
-    '本次申请支付金额（元）', '本次申请支付金额',
-    '总价款（元）', '金额（元）', '金额',
-  ];
-  const fv = item.formValues || {};
-  for (const k of candidates) {
-    const v = fv[k];
-    if (v != null && v !== 'null' && v !== '') {
-      const n = Number(String(v).replace(/[^\d.-]/g, ''));
-      if (Number.isFinite(n) && n !== 0) return n;
-    }
-  }
-  const n0 = Number(item.amount);
-  if (Number.isFinite(n0) && n0 !== 0) return n0;
-  return 0;
-}
-
 function calcDingtalkBreakdown(items: DingTalkReportItem[]): DingtalkBreakdown {
   const groups = new Map<string, { count: number; total: number }>();
   let total = 0;
 
   for (const r of items) {
     if (r.error) continue;
-    const pieces = classifyDingtalkItems(r, pickDingtalkAmount);
+    const pieces = monthlyPieces(r);
     for (const p of pieces) {
       if (!groups.has(p.category)) groups.set(p.category, { count: 0, total: 0 });
       const g = groups.get(p.category)!;
-      g.count += 1;
       g.total += p.amount;
       total += p.amount;
     }
+  }
+
+  // 分类笔数：同一流程在同一类别只计算一次
+  const accurateCategories = monthlyCategorySummary(items);
+  for (const c of accurateCategories) {
+    const group = groups.get(c.category);
+    if (group) group.count = c.count;
   }
 
   const get = (key: string) => groups.get(key) || { count: 0, total: 0 };
@@ -125,7 +106,10 @@ function calcDingtalkBreakdown(items: DingTalkReportItem[]): DingtalkBreakdown {
   const repair = get('修理');
   const daily = get('日常支出');
   const refund = get('退费');
-  const other = get('其它');
+  const other = { count: 0, total: 0 };
+  for (const [key, value] of groups) {
+    if (!['工资底薪佣金','物业费','电费','水费','修理','日常支出','退费'].includes(key)) { other.count += value.count; other.total += value.total; }
+  }
 
   const extraExpense =
     repair.total + daily.total + refund.total + other.total;
@@ -149,22 +133,10 @@ function calcDingtalkBreakdown(items: DingTalkReportItem[]): DingtalkBreakdown {
   };
 }
 
-function normalizeAndFilter(
-  items: DingTalkReportItem[],
-  storeName: string
-): DingTalkReportItem[] {
-  const withUnit = items.map((r) => {
-    if (r.templateName !== '会员退费') return r;
-    if (r.paymentUnit && String(r.paymentUnit).trim()) return r;
-    const inferred = inferRefundPaymentUnit(r);
-    return inferred ? { ...r, paymentUnit: inferred } : r;
-  });
-
-  if (!storeName) return withUnit;
-  return withUnit.filter((r) => {
-    const s = getStoreFromPaymentUnit(r.paymentUnit);
-    return s === storeName;
-  });
+function normalizeAndFilter(items: DingTalkReportItem[], storeName: string): DingTalkReportItem[] {
+  // 后端 /dingtalk/monthly-summary 已根据人工归属优先的 _storeName 过滤。
+  // 不再按 paymentUnit 过滤，否则人工改店流程会丢失。
+  return validMonthlyItems(items).filter((item) => !storeName || (item as any)._storeName === storeName);
 }
 
 export function useMonthlyReport(storeId: string, selectedMonth: string) {
@@ -235,6 +207,19 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     [updateAppData, cacheKey]
   );
 
+  const [categorySaving, setCategorySaving] = useState(false);
+  const updateManualCategories = useCallback(async (ids: string[], category: string | null) => {
+    const cleanIds = [...new Set(ids.filter(Boolean))];
+    if (!cleanIds.length) return;
+    setCategorySaving(true);
+    try {
+      await saveManualCategories(cleanIds, category);
+      const chosen = new Set(cleanIds);
+      setDingtalkItems(prev => prev.map(r => chosen.has(r.processInstanceId || '')
+        ? ({ ...r, _manualCategory: category } as DingTalkReportItem) : r));
+    } finally { setCategorySaving(false); }
+  }, [setDingtalkItems]);
+
   const username = import.meta.env.VITE_TEST_USERNAME || '';
   const password = import.meta.env.VITE_TEST_PASSWORD || '';
   const { run, loading: payrollLoading } = usePayroll({
@@ -302,9 +287,12 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
           });
           const raw = dtData.results || [];
           dtItems = normalizeAndFilter(raw, storeName);
+          const ids = dtItems.map(x => x.processInstanceId).filter((x): x is string => !!x);
+          const manualCategories = await loadManualCategories(ids);
+          dtItems = dtItems.map(x => ({ ...x, _manualCategory: manualCategories[x.processInstanceId || ''] || null } as DingTalkReportItem));
           setDingtalkSummary({
             count: dtItems.length,
-            total: dtItems.reduce((s, r) => s + Number(r.amount || 0), 0),
+            total: dtItems.reduce((s, r) => s + monthlyAmount(r), 0),
           });
           setDingtalkItems(dtItems);
           console.log(`[MonthlyReport] 钉钉流程 ${storeName}: ${raw.length} → ${dtItems.length}`);
@@ -424,12 +412,13 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     return b.refund.count + b.repair.count + b.daily.count + b.other.count;
   }, [dingtalkBreakdown]);
 
-  const hasDingtalkData = actualExpense > 0;
+  const hasDingtalkData = dingtalkItems.some((r) => !r.error);
 
-  /* ⭐ 实际总支出 = 预估 + 钉钉新增 */
+  /* 实际支出：钉钉其它费用 + 实发薪酬 + 钉钉实际物业/水/电。
+     不叠加预估薪酬、预估固定成本，避免重复扣减。 */
   const actualTotalExpense = useMemo(
-    () => estimatedExpense + actualExpense,
-    [estimatedExpense, actualExpense]
+    () => dingtalkBreakdown.total,
+    [dingtalkBreakdown.total]
   );
 
   /* 预估利润 */
@@ -463,6 +452,8 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     isEstimatedProfit,
     profit,
     isProfit,
+    updateManualCategories,
+    categorySaving,
     fetchAll,
     reset,
     dingtalkItems,
@@ -473,7 +464,7 @@ export function useMonthlyReport(storeId: string, selectedMonth: string) {
     actualExpense,
     actualExpenseCount,
     actualTotalExpense,
-    adjustedPayroll: payrollSummary.total,
-    adjustedFixedCost: fixedCost,
+    adjustedPayroll: dingtalkBreakdown.salary.total,
+    adjustedFixedCost: dingtalkBreakdown.property.total + dingtalkBreakdown.electric.total + dingtalkBreakdown.water.total,
   };
 }

@@ -1,3 +1,4 @@
+import { fetchStores } from '../../utils/storeConfig';
 import React, { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { Loader2, AlertCircle, Sparkles, ChevronDown } from 'lucide-react';
@@ -59,6 +60,8 @@ const MonthlyReportPage: React.FC = () => {
     fetchAll,
     /* 钉钉 */
     dingtalkItems,
+    updateManualCategories,
+    categorySaving,
     dingtalkSummary,
     dingtalkBreakdown,
     hasDingtalkData,
@@ -89,6 +92,21 @@ const MonthlyReportPage: React.FC = () => {
     }));
   };
 
+  const [storeOptions, setStoreOptions] = useState<string[]>([]);
+  React.useEffect(()=>{let active=true;fetchStores().then(list=>{if(active)setStoreOptions(list.map(s=>s.name));}).catch(console.error);return()=>{active=false;};},[]);
+  // StoreAssignCell 已完成数据库保存，此处只刷新报表，避免重复写入。
+  const handleManualStoreChange = async (_id:string,_store:string|null,_manual:boolean)=>{
+    const snapshot = await fetchAll(selectedMonth);
+    if (snapshot) {
+      setAiReport('');
+      setAiPayload(buildPayload({
+        storeId, storeName, month:selectedMonth,
+        orderList:snapshot.orders, payrollResults:snapshot.payrollResults,
+        fixedCostDetail:snapshot.fixedCostDetail,
+        dingtalkItems:snapshot.dingtalkItems,
+      } as any));
+    }
+  };
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const [aiExpanded, setAiExpanded] = useState(false);
@@ -107,13 +125,9 @@ const MonthlyReportPage: React.FC = () => {
       payrollResults: snapshot?.payrollResults ?? payrollResults,
       fixedCostDetail: snapshot?.fixedCostDetail ?? fixedCostDetail,
       dingtalkItems: snapshot?.dingtalkItems ?? dingtalkItems,
-      dingtalkBreakdown,
-      estimatedExpense,
-      actualExpense,
-      adjustedPayroll,
-      adjustedFixedCost,
+      // 首次获取的数据为最新快照；避免引用上一轮 render 的钉钉汇总。
     } as any);
-    setAiPayload(payload);
+    if (snapshot) { setAiPayload(payload); setAiReport(''); }
   };
 
   /* 生成 AI 报告 */
@@ -355,6 +369,10 @@ const MonthlyReportPage: React.FC = () => {
               fixedCost={fixedCost}
               fixedCostDetail={fixedCostDetail}
               dingtalkItems={dingtalkItems}
+              onManualCategoriesChange={updateManualCategories}
+              storeOptions={storeOptions}
+              onManualStoreChanged={handleManualStoreChange}
+              categorySaving={categorySaving}
               dingtalkSummary={dingtalkSummary}
               dingtalkBreakdown={dingtalkBreakdown}
               adjustedPayroll={adjustedPayroll}

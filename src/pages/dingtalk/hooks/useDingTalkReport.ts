@@ -17,6 +17,7 @@ import {
   extractPaymentUnitFromForm,
 } from '../utils/constants';
 import { extractAmount } from '../utils/extract';
+import { useManualCategories } from '../../../features/dingtalk/useManualCategories';
 
 /* ⭐ 未指定门店 → 默认归到「富贵园」 */
 const DEFAULT_STORE = '富贵园';
@@ -222,6 +223,7 @@ function resolveStoreName(r: DingTalkReportItem): string {
 
 export function useDingTalkReport() {
   const [rawResults, setRawResults] = useState<DingTalkReportItem[]>([]);
+  const manualCategories = useManualCategories();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [meta, setMeta] = useState<ReportMeta | null>(null);
@@ -337,6 +339,7 @@ export function useDingTalkReport() {
         }
       }
 
+      try { allResults = await manualCategories.hydrate(allResults); } catch(e) { console.warn("[DingTalk] 人工分类读取失败", e); }
       setRawResults(allResults);
       setMeta({
         totalCount: data.totalCount || allResults.length,
@@ -351,7 +354,13 @@ export function useDingTalkReport() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [manualCategories.hydrate]);
+
+  const updateManualCategories = useCallback(async (ids: string[], category: string | null) => {
+    await manualCategories.update(ids, category);
+    const selected = new Set(ids);
+    setRawResults(prev => prev.map(r => selected.has(r.processInstanceId || '') ? {...r, _manualCategory: category} : r));
+  }, [manualCategories.update]);
 
   const updateManualStore = useCallback(
     async (processInstanceId: string, storeName: string | null) => {
@@ -506,5 +515,8 @@ export function useDingTalkReport() {
     grouped,
     groupedByStore,
     updateManualStore,
+    updateManualCategories,
+    categorySaving: manualCategories.saving,
+    categoryError: manualCategories.error,
   };
 }

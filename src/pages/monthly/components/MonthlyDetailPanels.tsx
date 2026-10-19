@@ -1,3 +1,6 @@
+import DingTalkDataTable from '../../../features/dingtalk/components/DingTalkDataTable';
+import DingTalkBatchToolbar from '../../../features/dingtalk/components/DingTalkBatchToolbar';
+import { MANUAL_CATEGORIES } from '../../../services/manualDingtalkCategory';
 import React, { useMemo, useState } from 'react';
 import {
   BadgeDollarSign,
@@ -17,21 +20,11 @@ import type { FixedCostDetail } from '../hooks/useMonthlyReport';
 import type { OverallSummary } from '../../marketing/utils/aggregate';
 import type { DingTalkReportItem } from '../../../api/dingtalk';
 import { getStoreFromPaymentUnit } from '../../dingtalk/utils/constants';
-import { extractAmount, extractItems } from '../../dingtalk/utils/extract';
+import { monthlyAmount, monthlyPieces, validMonthlyItems } from '../utils/dingtalkAccounting';
+import { extractItems } from '../../dingtalk/utils/extract';
 import { classifyDingtalkItems } from '../../dingtalk/utils/classify';
 import { MonthlyDingTalkPie } from './MonthlyDingTalkPie';
 import { fmtMoney } from '../utils/date';
-
-/* 分类：复用公共函数 */
-function resolveCategory(item: DingTalkReportItem): string {
-  const pieces = classifyDingtalkItems(item, (r) => {
-    const n = Number(
-      extractAmount((r as any).templateName || '', (r as any).formValues || {}) || 0
-    );
-    return n;
-  });
-  return pieces[0]?.category || '其它';
-}
 
 const STATUS_LABEL: Record<string, string> = {
   RUNNING: '审批中',
@@ -131,6 +124,10 @@ interface Props {
   actualExpense?: number;
   estimatedExpense?: number;
   storeLabel?: string;
+  onManualCategoriesChange?: (ids: string[], category: string | null) => Promise<void>;
+  categorySaving?: boolean;
+  storeOptions?: string[];
+  onManualStoreChanged?: (id:string,store:string|null,manual:boolean)=>void|Promise<void>;
 }
 
 export const MonthlyDetailPanels: React.FC<Props> = ({
@@ -144,22 +141,33 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
   actualExpense,
   estimatedExpense,
   storeLabel,
+  onManualCategoriesChange,
+  categorySaving = false,
+  storeOptions = [],
+  onManualStoreChanged,
 }) => {
   const rewardsTotal = payrollSummary.rewardsTotal ?? 0;
   const hasRewards = Math.abs(rewardsTotal) > 0;
 
-  const storeFilteredItems = useMemo(() => dingtalkItems, [dingtalkItems]);
+  const storeFilteredItems = useMemo(() => validMonthlyItems(dingtalkItems), [dingtalkItems]);
   const dtCount = storeFilteredItems.length;
   const dtTotal = useMemo(
-    () =>
-      storeFilteredItems.reduce(
-        (s, r) =>
-          s + (extractAmount(r.templateName || '', r.formValues || {}) || 0),
-        0
-      ),
+    () => storeFilteredItems.reduce((sum, item) => sum + monthlyAmount(item), 0),
     [storeFilteredItems]
   );
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkCategory, setBulkCategory] = useState('修理');
+  const [categoryError, setCategoryError] = useState('');
+  const changeCategory = async (ids: string[], category: string | null) => {
+    if (!onManualCategoriesChange || !ids.length) return;
+    setCategoryError('');
+    try { await onManualCategoriesChange(ids, category); setSelectedIds(new Set()); }
+    catch (e: any) { setCategoryError(e?.message || '分类保存失败'); }
+  };
+  const toggleSelected = (id: string) => setSelectedIds(prev => {
+    const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next;
+  });
   const [detailOpen, setDetailOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleCollapsed = (cat: string) => {
@@ -176,21 +184,23 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
   const groups = useMemo(() => {
     const map = new Map<
       string,
-      { category: string; count: number; total: number; items: DingTalkReportItem[] }
+      { category: string; count: number; total: number; items: Array<{ item: DingTalkReportItem; pieceAmount: number }> }
     >();
     for (const r of storeFilteredItems) {
-      if (r.error) continue;
-      const category = resolveCategory(r);
-      const amount = Number(
-        extractAmount(r.templateName || '', r.formValues || {}) || 0
-      );
-      if (!map.has(category)) {
-        map.set(category, { category, count: 0, total: 0, items: [] });
+      const categoriesInFlow = new Set<string>();
+      for (const piece of monthlyPieces(r)) {
+        const category = piece.category;
+        if (!map.has(category)) {
+          map.set(category, { category, count: 0, total: 0, items: [] });
+        }
+        const group = map.get(category)!;
+        if (!categoriesInFlow.has(category)) {
+          group.count += 1;
+          categoriesInFlow.add(category);
+        }
+        group.total += piece.amount;
+        group.items.push({ item: r, pieceAmount: piece.amount });
       }
-      const g = map.get(category)!;
-      g.count += 1;
-      g.total += amount;
-      g.items.push(r);
     }
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   }, [storeFilteredItems]);
@@ -209,7 +219,7 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
   const finalEstimatedExpense =
     estimatedExpense ?? payrollSummary.total + fixedCost;
   const finalActualExpense = actualExpense ?? dtExtra;
-  const finalActualTotal = finalEstimatedExpense + finalActualExpense;
+  const finalActualTotal = dtTotalExpense;
 
   return (
     <>
@@ -405,7 +415,7 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
               <Calculator className="w-4 h-4" />
               支出构成一览
               <span className="text-[10px] font-normal text-gray-500">
-                （钉钉实际支出只算排除薪酬/物业/水电后的新增）
+                （实际支出 = 钉钉其它支出 + 实发薪酬 + 实际物业/水/电；不叠加预估）
               </span>
             </h3>
           </div>
@@ -430,7 +440,7 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
                     {dtSalary > 0 ? fmtMoney(dtSalary) : '—'}
                   </td>
                   <td className="px-4 py-2 text-gray-500">
-                    {dtSalary > 0 ? '与预估并列，不重复计入' : '无钉钉记录'}
+                    {dtSalary > 0 ? '计入实际支出，预估仅作对照' : '无钉钉记录'}
                   </td>
                 </tr>
                 <tr>
@@ -442,7 +452,7 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
                     {dtProperty > 0 ? fmtMoney(dtProperty) : '—'}
                   </td>
                   <td className="px-4 py-2 text-gray-500">
-                    {dtProperty > 0 ? '与预估并列，不重复计入' : '无钉钉记录'}
+                    {dtProperty > 0 ? '计入实际支出，预估仅作对照' : '无钉钉记录'}
                   </td>
                 </tr>
                 <tr>
@@ -454,7 +464,7 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
                     {dtElectric > 0 ? fmtMoney(dtElectric) : '—'}
                   </td>
                   <td className="px-4 py-2 text-gray-500">
-                    {dtElectric > 0 ? '与预估并列，不重复计入' : '无钉钉记录'}
+                    {dtElectric > 0 ? '计入实际支出，预估仅作对照' : '无钉钉记录'}
                   </td>
                 </tr>
                 <tr>
@@ -466,7 +476,7 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
                     {dtWater > 0 ? fmtMoney(dtWater) : '—'}
                   </td>
                   <td className="px-4 py-2 text-gray-500">
-                    {dtWater > 0 ? '与预估并列，不重复计入' : '无钉钉记录'}
+                    {dtWater > 0 ? '计入实际支出，预估仅作对照' : '无钉钉记录'}
                   </td>
                 </tr>
                 <tr>
@@ -482,7 +492,7 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
                   <td className="px-4 py-2 text-gray-500">fixedCost 预估</td>
                 </tr>
                 <tr>
-                  <td className="px-4 py-2 text-gray-700">钉钉新增支出</td>
+                  <td className="px-4 py-2 text-gray-700">钉钉其它实际支出</td>
                   <td className="px-4 py-2 text-right text-gray-400">—</td>
                   <td className="px-4 py-2 text-right tabular-nums text-amber-700">
                     {fmtMoney(dtExtra)}
@@ -497,7 +507,7 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
                     {fmtMoney(finalEstimatedExpense)}
                   </td>
                   <td className="px-4 py-2 text-right tabular-nums text-amber-700">
-                    {fmtMoney(dtExtra)}
+                    {fmtMoney(dtTotalExpense)}
                   </td>
                   <td className="px-4 py-2 text-gray-500">
                     实际总支出 ={' '}
@@ -520,7 +530,7 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
               <Receipt className="w-4 h-4" />
               钉钉实际支出明细
               <span className="text-[10px] font-normal text-gray-500">
-                （不含薪酬 / 物业 / 电费 / 水费，避免与预估重复）
+                （以下为其它实际支出；实发薪酬和实际固定成本已计入总支出）
               </span>
               <span className="ml-auto text-[11px] font-normal text-gray-500">
                 合计{' '}
@@ -561,7 +571,7 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
             )}
             <div className="pt-3 border-t border-gray-100">
               <Row
-                label="钉钉实际支出合计"
+                label="钉钉其它实际支出小计"
                 value={dtExtra}
                 color="text-rose-700"
                 bold
@@ -621,6 +631,7 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
 
           {detailOpen && (
             <div className="border-t border-gray-100">
+              <DingTalkBatchToolbar ids={storeFilteredItems.map(r=>r.processInstanceId||'')} selectedIds={selectedIds} onSelect={setSelectedIds} bulkCategory={bulkCategory} onBulkCategoryChange={setBulkCategory} onChange={changeCategory} saving={categorySaving} error={categoryError}/>
               {groups.length === 0 ? (
                 <div className="text-xs text-gray-400 text-center py-8">无明细</div>
               ) : (
@@ -657,99 +668,16 @@ export const MonthlyDetailPanels: React.FC<Props> = ({
                       </button>
 
                       {!isCollapsed && (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-xs">
-                            <thead className="bg-white text-gray-400">
-                              <tr>
-                                <th className="px-3 py-2 text-left font-medium">流程类型</th>
-                                <th className="px-3 py-2 text-left font-medium">门店</th>
-                                <th className="px-3 py-2 text-left font-medium">标题</th>
-                                <th className="px-3 py-2 text-left font-medium">事项 / 明细</th>
-                                <th className="px-3 py-2 text-right font-medium">金额</th>
-                                <th className="px-3 py-2 text-left font-medium">收款账户</th>
-                                <th className="px-3 py-2 text-left font-medium">状态</th>
-                                <th className="px-3 py-2 text-left font-medium">创建时间</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                              {g.items.map((r, idx) => {
-                                if (r.error) {
-                                  return (
-                                    <tr key={r.processInstanceId || `err-${idx}`}>
-                                      <td
-                                        colSpan={8}
-                                        className="px-3 py-2 text-rose-600 text-[11px]"
-                                      >
-                                        ⚠️ 实例拉取失败：{r.error}
-                                      </td>
-                                    </tr>
-                                  );
-                                }
-                                const amount = extractAmount(
-                                  r.templateName || '',
-                                  r.formValues || {}
-                                );
-                                const items = extractItems(
-                                  r.templateName || '',
-                                  r.formValues || {}
-                                );
-                                const storeName = getStoreFromPaymentUnit(r.paymentUnit);
-                                return (
-                                  <tr
-                                    key={r.processInstanceId || `row-${idx}`}
-                                    className="hover:bg-indigo-50/30"
-                                  >
-                                    <td className="px-3 py-2 text-gray-700 whitespace-nowrap">
-                                      {r.templateName || '—'}
-                                    </td>
-                                    <td className="px-3 py-2 whitespace-nowrap">
-                                      {storeName ? (
-                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100 font-medium">
-                                          <Store className="w-3 h-3" />
-                                          {storeName}
-                                        </span>
-                                      ) : (
-                                        <span className="text-gray-400">—</span>
-                                      )}
-                                    </td>
-                                    <td
-                                      className="px-3 py-2 text-gray-700 max-w-xs truncate"
-                                      title={r.title || ''}
-                                    >
-                                      {r.title || '—'}
-                                    </td>
-                                    <td
-                                      className="px-3 py-2 text-gray-600 max-w-md"
-                                      title={items}
-                                    >
-                                      <span className="line-clamp-2">{items || '—'}</span>
-                                    </td>
-                                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-emerald-700 whitespace-nowrap">
-                                      {amount != null
-                                        ? `¥${Number(amount).toLocaleString('zh-CN')}`
-                                        : '—'}
-                                    </td>
-                                    <td className="px-3 py-2 text-gray-600 max-w-[180px] truncate">
-                                      {r.payeeAccount || '—'}
-                                    </td>
-                                    <td className="px-3 py-2 whitespace-nowrap">
-                                      <span
-                                        className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${statusClass(
-                                          r
-                                        )}`}
-                                      >
-                                        {statusText(r)}
-                                      </span>
-                                    </td>
-                                    <td className="px-3 py-2 text-gray-500 tabular-nums whitespace-nowrap">
-                                      {r.createTime || '—'}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
+                        <DingTalkDataTable
+                          rows={g.items.filter(({item})=>!item.error).map(({item,pieceAmount},index)=>({item,amount:pieceAmount,automaticCategory:g.category,rowKey:`${item.processInstanceId||index}-${g.category}-${index}`}))}
+                          columns={['templateName','storeName','title','items','amount','payeeAccount','category','status','createTime']}
+                          selectedIds={selectedIds}
+                          onToggleSelected={toggleSelected}
+                          storeOptions={storeOptions}
+                          onManualStoreChanged={onManualStoreChanged}
+                          onManualCategoriesChanged={onManualCategoriesChange?changeCategory:undefined}
+                          categorySaving={categorySaving}
+                        />
                       )}
                     </div>
                   );
